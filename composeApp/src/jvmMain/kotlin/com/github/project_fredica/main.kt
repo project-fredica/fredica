@@ -47,44 +47,39 @@ fun main() {
 
     runBlocking(Dispatchers.IO) {
         try {
-            listOf(
-                async {
-                    logger.debug("start read properties")
-                    for (prop in System.getProperties() ?: mapOf()) {
-                        val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
-                            (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                        } else {
-                            prop.value
-                        }
-                        logger.debug("property : ${prop.key} -> $valueInfo")
+            listOf(async {
+                logger.debug("start read properties")
+                for (prop in System.getProperties() ?: mapOf()) {
+                    val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
+                        (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                    } else {
+                        prop.value
                     }
-                    logger.debug("finish read properties")
-                    logger.debug("start read env")
-                    for (env in System.getenv()) {
-                        val envInfo = if (env.key.lowercase() == "path") {
-                            env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                        } else {
-                            env.value
-                        }
-                        logger.debug("env : ${env.key} -> $envInfo")
-                    }
-                    logger.debug("finish read env")
-                },
-                async {
-                    AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
-                },
-                async {
-                    withContext(Dispatchers.IO) {
-                        AppUtil.GlobalVars.globalVertx.setTimer(500) {
-                            logger.debug("Vert.X init success")
-                        }
-                    }
-                },
-                async {
-                    val unsafe = AppUtil.GlobalVars.unsafe
-                    logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
+                    logger.debug("property : ${prop.key} -> $valueInfo")
                 }
-            ).awaitAll()
+                logger.debug("finish read properties")
+                logger.debug("start read env")
+                for (env in System.getenv()) {
+                    val envInfo = if (env.key.lowercase() == "path") {
+                        env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                    } else {
+                        env.value
+                    }
+                    logger.debug("env : ${env.key} -> $envInfo")
+                }
+                logger.debug("finish read env")
+            }, async {
+                AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
+            }, async {
+                withContext(Dispatchers.IO) {
+                    AppUtil.GlobalVars.globalVertx.setTimer(500) {
+                        logger.debug("Vert.X init success")
+                    }
+                }
+            }, async {
+                val unsafe = AppUtil.GlobalVars.unsafe
+                logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
+            }).awaitAll()
             val fredicaApiOption = FredicaApiJvmInitOption()
             FredicaApi.init(
                 options = fredicaApiOption
@@ -97,7 +92,7 @@ fun main() {
 
     val nativeAssetPath = JVMPlatform.getNativeAssetPath()
     logger.debug("nativeAssetPath is $nativeAssetPath")
-    val kcefBundleDir = nativeAssetPath.resolve("kcef-bundle").also { it.mkdirs() }
+    val kcefBundleDir = nativeAssetPath.resolve("lfs").resolve("kcef-bundle").also { it.mkdirs() }
     val kcefCacheDir = AppUtil.Paths.appDataCacheDir.resolve("kcef-cache").also { it.mkdirs() }
     val kcefLogPath = AppUtil.Paths.appDataLogDir.resolve("kcef").also { it.mkdirs() }.resolve("kcef.log")
 
