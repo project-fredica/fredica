@@ -1,20 +1,30 @@
 package com.github.project_fredica.appwebview
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material.icons.filled.ViewTimeline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.github.project_fredica.api.FredicaApi
+import com.github.project_fredica.apputil.Platform
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.getPlatform
+import com.github.project_fredica.appwebview.messages.AppWebViewMessages
 import com.github.project_fredica.components.BackHandler2
+import com.github.project_fredica.components.TextSm
+import com.github.project_fredica.components.TextXsGray
 import com.multiplatform.webview.jsbridge.IJsMessageHandler
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.jsbridge.rememberWebViewJsBridge
@@ -22,14 +32,16 @@ import com.multiplatform.webview.util.KLogSeverity
 import com.multiplatform.webview.web.LoadingState
 import com.multiplatform.webview.web.WebView
 import com.multiplatform.webview.web.WebViewNavigator
+import com.multiplatform.webview.web.WebViewState
 import com.multiplatform.webview.web.rememberWebViewNavigator
 import com.multiplatform.webview.web.rememberWebViewState
+import org.jetbrains.compose.ui.tooling.preview.Preview
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppWebView() {
-    val logger = createLogger()
-
+    val logger = createLogger { "AppWebView" }
     val appHosts = listOf(
         "http://localhost:${FredicaApi.DEFAULT_DEV_WEBUI_PORT}"
     )
@@ -37,10 +49,18 @@ internal fun AppWebView() {
     val jsBridge = rememberWebViewJsBridge()
 
     LaunchedEffect(jsBridge) {
-        jsBridge.register(GreetJsMessageHandler())
+        AppWebViewMessages.all.forEach {
+            logger.debug("register handler : $it -> event ${it.methodName()}")
+            jsBridge.register(it)
+        }
+
     }
 
-    val state = rememberWebViewState(url = appHosts[0])
+    val state = rememberWebViewState(
+        url =
+            if (Platform.getPlatform().isAndroid) appHosts[0]
+            else "${appHosts[0]}/app-desktop-home"
+    )
     LaunchedEffect(Unit) {
         state.webSettings.apply {
             logSeverity = KLogSeverity.Debug
@@ -51,10 +71,6 @@ internal fun AppWebView() {
     val navigator = rememberWebViewNavigator()
     var urlBarValue by remember(state.lastLoadedUrl) {
         mutableStateOf(state.lastLoadedUrl)
-    }
-
-    fun navigateBack() {
-        navigator.navigateBack()
     }
 
     fun isAppDomain(): Boolean {
@@ -68,69 +84,100 @@ internal fun AppWebView() {
         return false
     }
 
+    fun navigateBack() {
+        navigator.navigateBack()
+    }
+
     BackHandler2 {
         navigateBack()
     }
 
     Column {
-        if (navigator.canGoBack || !isAppDomain()) {
-            TopAppBar(
-                title = {
-                    state.pageTitle.let { pageTitle ->
-                        if (pageTitle != null) {
-                            if (!isAppDomain()) {
-                                Text(text = "您已进入非APP内网站 - $pageTitle")
-                            } else {
-                                Text(text = pageTitle)
+        AppWebViewTopBar(
+            state = state,
+            navigator = navigator,
+            refresh = { navigator.reload() },
+            isAppDomain = ::isAppDomain,
+            navigateBack = ::navigateBack,
+        )
+
+        WebView(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            navigator = navigator,
+            webViewJsBridge = jsBridge,
+            captureBackPresses = true,
+        )
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppWebViewTopBar(
+    state: WebViewState,
+    navigator: WebViewNavigator,
+    refresh: () -> Unit,
+    isAppDomain: () -> Boolean,
+    navigateBack: () -> Unit,
+    isPreview: Boolean = false,
+) {
+    Box {
+        val itemsHeight = 35.dp
+
+        TopAppBar(
+            expandedHeight = 46.dp,
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(itemsHeight),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SelectionContainer(modifier = Modifier.padding(start = 20.dp)) {
+                        if (isPreview) {
+                            TextSm("Fredica", maxLines = 1, fontWeight = FontWeight.Bold)
+                        } else {
+                            state.pageTitle.let { pageTitle ->
+                                if (pageTitle != null) {
+                                    TextSm(
+                                        text = "${
+                                            if (isAppDomain()) "" else "⚠ 非APP网站 - "
+                                        }$pageTitle",
+                                        maxLines = 1,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
                     }
-                },
-                navigationIcon = {
-                    if (navigator.canGoBack) {
-                        IconButton(onClick = { navigateBack() }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                            )
+                    state.lastLoadedUrl?.let {
+                        SelectionContainer(modifier = Modifier.padding(start = 10.dp)) {
+                            TextXsGray(it, maxLines = 1)
                         }
                     }
-                },
-            )
-        }
-
-        if (!isAppDomain()) {
-            Row {
-                Box(modifier = Modifier.weight(1f)) {
-                    if (state.errorsForCurrentRequest.isNotEmpty()) {
-                        Image(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Error",
-                            colorFilter = ColorFilter.tint(Color.Red),
-                            modifier = Modifier.align(Alignment.CenterEnd).padding(8.dp),
+                }
+            },
+            navigationIcon = {
+                Row(
+                    modifier = Modifier.height(itemsHeight),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { navigateBack() }, enabled = navigator.canGoBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
                         )
                     }
-
-                    OutlinedTextField(
-                        value = urlBarValue ?: "",
-                        onValueChange = { urlBarValue = it },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    IconButton(onClick = { refresh() }) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "Refresh",
+                        )
+                    }
                 }
-
-                Button(
-                    onClick = {
-                        urlBarValue?.let {
-                            logger.info("loadUrl : $it")
-                            navigator.loadUrl(it)
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.CenterVertically).padding(start = 10.dp),
-                ) {
-                    Text("Go")
-                }
-            }
-        }
+            },
+        )
 
         val loadingState = state.loadingState
         if (loadingState is LoadingState.Loading) {
@@ -141,28 +188,20 @@ internal fun AppWebView() {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-
-        WebView(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-            navigator = navigator,
-        )
     }
 }
 
-class GreetJsMessageHandler : IJsMessageHandler {
-    val logger = createLogger()
-
-    override fun methodName(): String {
-        return "Greet"
-    }
-
-    override fun handle(
-        message: JsMessage,
-        navigator: WebViewNavigator?,
-        callback: (String) -> Unit
-    ) {
-        logger.debug("Greet Handler Get Message: $message")
-        callback("Hello from : $message")
-    }
+@Preview
+@Composable
+private fun AppWebViewTopBarPreview() {
+    val initUrl = "https://baidu.com"
+    val state = rememberWebViewState(initUrl)
+    AppWebViewTopBar(
+        isPreview = true,
+        state = state,
+        navigator = rememberWebViewNavigator(),
+        refresh = {},
+        isAppDomain = { false },
+        navigateBack = {},
+    )
 }

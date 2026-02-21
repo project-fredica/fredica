@@ -29,7 +29,7 @@ const SideBarItem: React.FC<SidebarItemProps> = ({ uid, title, Icon, routeTo }) 
   if (routeTo && location.pathname == routeTo) {
     isActive = true
   }
-  const parentClassName = `flex flex-row items-center text-sm px-4 py-2 font-medium rounded-lg cursor-pointer ${isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`
+  const parentClassName = `flex flex-row items-center text-sm px-4 py-2 font-medium rounded-lg ${isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`
 
   const Content = () => (
     <div id={`sidebar-item-${uid}`} className={parentClassName}>
@@ -40,22 +40,18 @@ const SideBarItem: React.FC<SidebarItemProps> = ({ uid, title, Icon, routeTo }) 
   )
 
   return (
-    routeTo
-      ? <NavLink to={routeTo}> <Content />  </NavLink>
-      : <Content />
+    <div className='cursor-pointer'>
+      {routeTo
+        ? <NavLink to={routeTo}> <Content />  </NavLink>
+        : <Content />}
+    </div>
   )
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  // const sectionClass = "mb-6";
-
-  // const sectionTitleClass = "px-4 text-sm font-semibold text-gray-400 uppercase tracking-wider";
-  // const itemClass = (active = false) => `flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${active ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-  //   }`;
 
 
   const sectionTitleClass = "flex flex-row items-center text-sm px-4 py-2 font-semibold text-gray-400 uppercase tracking-wider"
-  // const itemClass = (active = false) => `flex flex-row items-center text-sm px-4 py-2 font-medium rounded-lg cursor-pointer ${active ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`
 
   return (
     <>
@@ -80,15 +76,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         {/* Scrollable Nav */}
         <div className="flex flex-col overflow-y-auto py-4 gap-4">
           <div className='striky'>
-            <SideBarItem uid='source-add' Icon={Plus} title='添加内容' />
-            <SideBarItem uid='source-search' Icon={Search} title='搜索' />
-            <SideBarItem uid='source-history' Icon={History} title='历史' routeTo='/source-history' />
+            <SideBarItem uid='add-resource' Icon={Plus} title='添加素材' routeTo='/add-resource' />
+            <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' />
+            <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' />
+            {/* <SideBarItem uid='source-search' Icon={Search} title='搜索' />
+            <SideBarItem uid='source-history' Icon={History} title='历史' routeTo='/source-history' /> */}
           </div>
 
           <div>
-            <h3 className={sectionTitleClass}>空间</h3>
-            <SideBarItem uid='create-zone' Icon={Plus} title='创造空间' />
-            <SideBarItem uid='zone-stm32' Icon={ChevronRight} title='嵌入式' />
+            {/* <h3 className={sectionTitleClass}>空间</h3> */}
+            {/* <SideBarItem uid='create-zone' Icon={Plus} title='创造空间' />
+            <SideBarItem uid='zone-stm32' Icon={ChevronRight} title='嵌入式' /> */}
             {/* <div className={itemClass()}>
               <Plus className="w-4 h-4 mr-3" />
               创造空间
@@ -145,12 +143,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
           <div >
             <h3 className={sectionTitleClass}>帮助与工具</h3>
-            <SideBarItem uid='model-config' Icon={Box} title='模型设置' routeTo='/model-config' />
+            {/** routeTo='/crud/model-config' */}
+            <SideBarItem uid='model-config' Icon={Box} title='模型设置' />
             <SideBarItem uid='feedback' Icon={HelpCircle} title='反馈意见' />
             <SideBarItem uid='quick-guide' Icon={BookOpen} title='快速指南' />
             <SideBarItem uid='home' Icon={Home} title='主页' routeTo='/' />
-
-
           </div>
         </div>
 

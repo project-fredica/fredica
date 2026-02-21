@@ -14,6 +14,8 @@ composeMultiplatform = "1.9.3"
 junit = "4.13.2"
 kotlin = "2.3.0"
 kotlinx-coroutines = "1.10.2"
+kotlinxSchemaAnnotations = "0.0.2"
+kotlinxSerializationJsonVersion = "1.9.0"
 ktor = "3.3.3"
 ktormCore = "4.1.1"
 logback = "1.5.22"
@@ -25,12 +27,14 @@ datastore = "1.2.0"
 mpfilepicker = "3.1.0"
 openaiClient = "4.0.1"
 oshiCore = "6.9.1"
+s3 = "1.5.112"
 slf4jApi = "2.0.17"
 sqlite = "2.6.1"
 sqliteJdbc = "3.51.1.0"
 sqlitenow = "0.2.0"
 vertx = "5.0.5"
 kotlinx-datetime = "0.7.1"
+yabapiCore = "0.11.2"
 
 [libraries]
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
@@ -45,7 +49,9 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 androidx-lifecycle-viewmodelCompose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-runtimeCompose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
+kotlinx-schema-annotations = { module = "org.jetbrains.kotlinx:kotlinx-schema-annotations", version.ref = "kotlinxSchemaAnnotations" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-server-swagger = { module = "io.ktor:ktor-server-swagger", version.ref = "ktor" }
 ktorm-core = { module = "org.ktorm:ktorm-core", version.ref = "ktormCore" }
 logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 ktor-serverCore = { module = "io.ktor:ktor-server-core-jvm", version.ref = "ktor" }
@@ -53,7 +59,7 @@ ktor-serverNetty = { module = "io.ktor:ktor-server-netty-jvm", version.ref = "kt
 ktor-serverTestHost = { module = "io.ktor:ktor-server-test-host-jvm", version.ref = "ktor" }
 json-schema-validator = { module = "io.github.optimumcode:json-schema-validator", version.ref = "jsonSchemaValidator" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
-kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJsonVersion" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 chardet4j = { module = "com.sigpwned:chardet4j", version.ref = "chardet4j" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
@@ -66,6 +72,7 @@ ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
 mpfilepicker = { module = "com.darkrockstudios:mpfilepicker", version.ref = "mpfilepicker" }
 openai-client = { module = "com.aallam.openai:openai-client", version.ref = "openaiClient" }
 oshi-core = { module = "com.github.oshi:oshi-core", version.ref = "oshiCore" }
+s3 = { module = "aws.sdk.kotlin:s3", version.ref = "s3" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4jApi" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
 sqlitenow-kmp = { module = "dev.goquick.sqlitenow:core", version.ref = "sqlitenow" }
@@ -73,6 +80,7 @@ sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sql
 vertx-core = { module = "io.vertx:vertx-core", version.ref = "vertx" }
 vertx-jdbc-client = { module = "io.vertx:vertx-jdbc-client", version.ref = "vertx" }
 vertx-lang-kotlin-coroutines = { module = "io.vertx:vertx-lang-kotlin-coroutines", version.ref = "vertx" }
+yabapi-core = { module = "moe.sdl.yabapi:yabapi-core", version.ref = "yabapiCore" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

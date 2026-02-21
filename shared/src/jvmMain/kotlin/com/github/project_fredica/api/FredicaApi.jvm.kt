@@ -1,30 +1,32 @@
 package com.github.project_fredica.api
 
-import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.createLogger
-import com.github.project_fredica.apputil.toKotlinJson
-import com.github.project_fredica.apputil.withContextVertx
-import com.github.project_fredica.orm.SqliteOrm
-import io.ktor.http.HttpHeaders
-import io.ktor.server.application.Application
-import io.ktor.server.application.install
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.vertx.jdbcclient.JDBCConnectOptions
-import io.vertx.jdbcclient.JDBCPool
-import io.vertx.kotlin.coroutines.coAwait
-import io.vertx.sqlclient.PoolOptions
-import kotlinx.serialization.ExperimentalSerializationApi
-
-import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.plugins.cors.routing.CORS
+import aws.smithy.kotlin.runtime.net.IpV4Addr
+import com.github.project_fredica.apputil.*
+import com.github.project_fredica.db.AppConfigDb
+import com.github.project_fredica.db.AppConfigRepo
+import com.github.project_fredica.db.AppConfigService
+import inet.ipaddr.AddressStringException
+import inet.ipaddr.IPAddressString
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.plugins.swagger.swaggerUI
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
-import io.vertx.sqlclient.Pool
-import io.vertx.sqlclient.Tuple
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import io.ktor.util.toMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import org.ktorm.database.Database
 
 
 @Serializable
@@ -34,81 +36,93 @@ data class FredicaApiJvmInitOption(
     val localhostWebUIPort: UShort = FredicaApi.DEFAULT_DEV_WEBUI_PORT,
 ) {
     fun ktorServerAllowHosts() = listOf("localhost:$localhostWebUIPort")
+
+    fun getLocalDomain(): String {
+        val logger = createLogger()
+        if (ktorServerHost == "localhost") {
+            return "localhost"
+        }
+        return try {
+            val addr = IPAddressString(ktorServerHost).toAddress()
+            if (addr.isLoopback or addr.isAnyLocal) {
+                "localhost"
+            } else {
+                addr.toString()
+            }
+        } catch (e: AddressStringException) {
+            logger.error("Failed to cast $ktorServerHost to address")
+            throw e
+        }
+    }
 }
 
 
 actual suspend fun FredicaApi.Companion.init(options: Any?) {
-    val o = if (options == null) FredicaApiJvmInitOption() else options as FredicaApiJvmInitOption
-    FredicaApiJvmContext.init(o)
+    withContext(Dispatchers.IO) {
+        listOf(async {
+
+        }, async {
+            val o = if (options == null) FredicaApiJvmInitOption() else options as FredicaApiJvmInitOption
+            FredicaApiJvmService.init(o)
+        }).awaitAll()
+    }
 }
 
-actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route<*, *>> {
+actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route> {
     return listOf()
 }
 
-object FredicaApiJvmContext {
-    lateinit var db: Pool
+actual suspend fun FredicaApi.Companion.getNativeWebServerLocalDomainAndPort(): Pair<String, UShort>? {
+    val logger = createLogger()
+    val r = Pair(
+        FredicaApiJvmService.CurrentInstance.initOption.getLocalDomain(),
+        FredicaApiJvmService.CurrentInstance.getLocalPort(),
+    )
+    logger.debug("native web server local domain and port is : $r")
+    return r
+}
+
+object FredicaApiJvmService {
+
+    object CurrentInstance {
+        lateinit var initOption: FredicaApiJvmInitOption
+        lateinit var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
+
+        fun getLocalPort(): UShort {
+            val p = initOption.ktorServerPort
+            return p
+        }
+    }
 
     suspend fun init(option: FredicaApiJvmInitOption) {
         val logger = createLogger()
-        withContextVertx { vertx ->
+        CurrentInstance.initOption = option
+
+        // Initialize SQLite database and config service
+        withContext(Dispatchers.IO) {
             val dbPath = AppUtil.Paths.appDbPath.also { it.parentFile.mkdirs() }
-            db = JDBCPool.pool(
-                vertx,
-                JDBCConnectOptions()
-                    .setJdbcUrl("jdbc:sqlite:file:$dbPath")
-                    .setUser("sa"),
-                PoolOptions().setMaxSize(16)
+            val database = Database.connect(
+                url = "jdbc:sqlite:${dbPath.absolutePath}",
+                driver = "org.sqlite.JDBC",
             )
-            db.query("SELECT 114514").execute().coAwait().forEach {
-                logger.debug("test sql result : ${it.toJson()}")
-            }
-            initDB()
+            val appConfigDb = AppConfigDb(database)
+            appConfigDb.initialize()
+            AppConfigService.initialize(appConfigDb)
+            logger.debug("AppConfigService initialized, db path: $dbPath")
         }
-        embeddedServer(
-            Netty,
-            port = option.ktorServerPort.toInt(), // This is the port to which Ktor is listening
-            host = option.ktorServerHost,
-            module = {
-                module(option)
-            }).startSuspend(wait = false)
+
+        CurrentInstance.server = embeddedServer(
+            Netty, port = option.ktorServerPort.toInt(), host = option.ktorServerHost, module = {
+                initModule(option)
+            })
+        logger.debug("server start suspend start")
+        CurrentInstance.server.startSuspend(wait = false)
+        logger.debug("server start suspend finish")
     }
 
-    private suspend fun initDB() {
-        SqliteOrm.allTable.forEach { table ->
-            table.createTable(createDbExecutor())
-        }
-    }
-
-    private fun createDbExecutor(): SqliteOrm.Executor {
-        val logger = createLogger()
-
-        return object : SqliteOrm.Executor {
-            override operator fun invoke(
-                s: String, args: List<Any>?
-            ): Flow<SqliteOrm.Executor.InvokeResult> {
-                return flow {
-                    logger.debug("SQL executing: \n$s\n$args")
-                    val rowSet = if (args == null || args.isEmpty()) {
-                        db.query(s).execute().coAwait()
-                    } else {
-                        db.preparedQuery(s)
-                            .execute(Tuple.wrap(args.toTypedArray())).coAwait()
-                    }
-                    rowSet.forEach { row ->
-                        val rowJson = row.toJson()
-                        logger.debug("SQL executing row :\n$rowJson")
-                        emit(SqliteOrm.Executor.RowResult(rowJson.toKotlinJson()))
-                    }
-                    logger.debug("SQL executing finish")
-                    emit(SqliteOrm.Executor.Finish)
-                }
-            }
-        }
-    }
 
     @OptIn(ExperimentalSerializationApi::class)
-    private fun Application.module(
+    private suspend fun Application.initModule(
         option: FredicaApiJvmInitOption
     ) {
         install(ContentNegotiation) {
@@ -118,14 +132,99 @@ object FredicaApiJvmContext {
             option.ktorServerAllowHosts().forEach {
                 allowHost(it)
             }
-            allowHeader(HttpHeaders.ContentType)
+            arrayOf(
+                HttpHeaders.ContentType,
+                HttpHeaders.Authorization,
+            ).forEach {
+                allowHeader(it)
+            }
+            HttpMethod.DefaultMethods.forEach {
+                allowMethod(it)
+            }
         }
-        configureRouting()
+        initRoute()
     }
 
-    fun Application.configureRouting() {
-        routing {
+    private suspend fun Application.initRoute() {
+        val logger = createLogger()
+        val allRoutes = FredicaApi.getAllRoutes()
 
+        routing {
+            get("/api/v1/ping") {
+                call.respond(
+                    HttpStatusCode.OK, mapOf(
+                        "message" to "Connect success", "addr" to call.request.local.toString()
+                    )
+                )
+            }
+
+            for (route in allRoutes) {
+                when (route.mode) {
+                    FredicaApi.Route.Mode.Get -> {
+                        get("/api/v1/${route.name}") {
+                            handleAuth {
+                                if (it == null) {
+                                    return@get
+                                }
+                            }
+
+                            val query = call.queryParameters.toMap()
+                            val result = route.handler(
+                                AppUtil.GlobalVars.json.encodeToString(query)
+                            )
+                            call.respondRouteResult(result)
+                        }
+                    }
+
+                    FredicaApi.Route.Mode.Post -> {
+                        post("/api/v1/${route.name}") {
+                            handleAuth {
+                                if (it == null) {
+                                    return@post
+                                }
+                            }
+
+                            val body = call.receiveText()
+                            val result = route.handler(body)
+                            call.respondRouteResult(result)
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+
+sealed interface FredicaApiJvmRouteAuthData {
+    data class Token(
+        val token: String
+    ) : FredicaApiJvmRouteAuthData
+}
+
+
+private suspend inline fun RoutingContext.handleAuth(scope: (FredicaApiJvmRouteAuthData?) -> Unit) {
+    val authHead = call.request.headers["Authorization"]
+    if (authHead.isNullOrBlank()) {
+        call.respond(HttpStatusCode.Unauthorized)
+        scope(null)
+        return
+    }
+    if (authHead.startsWith("Bearer ")) {
+        val token = authHead.removePrefix("Bearer ")
+        scope(FredicaApiJvmRouteAuthData.Token(token = token))
+        return
+    }
+    // Unrecognized header format
+    call.respond(HttpStatusCode.Unauthorized)
+    scope(null)
+    return
+}
+
+private suspend fun ApplicationCall.respondRouteResult(result: Any) {
+    when (result) {
+        is ValidJsonString -> respondText(result.str, ContentType.Application.Json)
+        is Unit -> respond(HttpStatusCode.OK)
+        else -> respond(HttpStatusCode.InternalServerError, "unexpected result type: ${result::class.simpleName}")
     }
 }

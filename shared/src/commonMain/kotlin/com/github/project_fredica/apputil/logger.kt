@@ -1,3 +1,5 @@
+@file:Suppress("NOTHING_TO_INLINE")
+
 package com.github.project_fredica.apputil
 
 
@@ -27,3 +29,9 @@ expect inline fun Logger.exception(msg: String, err: Throwable)
 expect inline fun Logger.Companion.defaultTagArg(): String
 
 inline fun createLogger(tag: () -> String = { Logger.defaultTagArg() }) = Logger(tag())
+
+inline fun Logger.error(msg: String, err: Throwable?) = if (err == null) {
+    this.error(msg)
+} else {
+    this.exception(msg, err)
+}

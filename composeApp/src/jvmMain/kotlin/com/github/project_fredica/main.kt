@@ -20,6 +20,7 @@ import com.github.project_fredica.apputil.burningwaveExportAllModule
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.globalVertx
 import com.github.project_fredica.apputil.readNetworkProxy
+import com.github.project_fredica.apputil.unsafe
 import com.github.project_fredica.resources.Res
 import com.github.project_fredica.resources.icon_512x512
 import dev.datlag.kcef.KCEF
@@ -31,6 +32,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 import kotlin.math.max
+import kotlin.system.exitProcess
 
 
 fun main() {
@@ -44,44 +46,53 @@ fun main() {
     AppUtil.MonkeyPatch.burningwaveExportAllModule()
 
     runBlocking(Dispatchers.IO) {
-        listOf(
-            async {
-                logger.debug("start read properties")
-                for (prop in System.getProperties() ?: mapOf()) {
-                    val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
-                        (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                    } else {
-                        prop.value
+        try {
+            listOf(
+                async {
+                    logger.debug("start read properties")
+                    for (prop in System.getProperties() ?: mapOf()) {
+                        val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
+                            (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                        } else {
+                            prop.value
+                        }
+                        logger.debug("property : ${prop.key} -> $valueInfo")
                     }
-                    logger.debug("property : ${prop.key} -> $valueInfo")
-                }
-                logger.debug("finish read properties")
-                logger.debug("start read env")
-                for (env in System.getenv()) {
-                    val envInfo = if (env.key.lowercase() == "path") {
-                        env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                    } else {
-                        env.value
+                    logger.debug("finish read properties")
+                    logger.debug("start read env")
+                    for (env in System.getenv()) {
+                        val envInfo = if (env.key.lowercase() == "path") {
+                            env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                        } else {
+                            env.value
+                        }
+                        logger.debug("env : ${env.key} -> $envInfo")
                     }
-                    logger.debug("env : ${env.key} -> $envInfo")
-                }
-                logger.debug("finish read env")
-            },
-            async {
-                AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
-            },
-            async {
-                withContext(Dispatchers.IO) {
-                    AppUtil.GlobalVars.globalVertx.setTimer(500) {
-                        logger.debug("Vert.X init success")
+                    logger.debug("finish read env")
+                },
+                async {
+                    AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
+                },
+                async {
+                    withContext(Dispatchers.IO) {
+                        AppUtil.GlobalVars.globalVertx.setTimer(500) {
+                            logger.debug("Vert.X init success")
+                        }
                     }
+                },
+                async {
+                    val unsafe = AppUtil.GlobalVars.unsafe
+                    logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
                 }
-            }
-        ).awaitAll()
-        val fredicaApiOption = FredicaApiJvmInitOption()
-        FredicaApi.init(
-            options = fredicaApiOption
-        )
+            ).awaitAll()
+            val fredicaApiOption = FredicaApiJvmInitOption()
+            FredicaApi.init(
+                options = fredicaApiOption
+            )
+        } catch (err: Throwable) {
+            logger.exception("Failed init app", err)
+            exitProcess(1)
+        }
     }
 
     val nativeAssetPath = JVMPlatform.getNativeAssetPath()
@@ -111,7 +122,7 @@ fun main() {
 
             LaunchedEffect(Unit) {
                 withContext(Dispatchers.IO) {
-                    logger.debug("start init KCEF")
+                    logger.debug("start init KCEF browser")
                     KCEF.init(builder = {
                         installDir(kcefBundleDir)
                         progress {
@@ -154,9 +165,9 @@ fun main() {
 
             DisposableEffect(Unit) {
                 onDispose {
-                    logger.debug("window dispose , start dispose KCEF")
+                    logger.debug("window dispose , start dispose KCEF browser")
                     KCEF.disposeBlocking()
-                    logger.debug("KCEF disposed")
+                    logger.debug("KCEF browser disposed")
                 }
             }
         }

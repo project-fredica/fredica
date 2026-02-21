@@ -1,3 +1,5 @@
+@file:Suppress("UnusedReceiverParameter")
+
 package com.github.project_fredica.apputil
 
 import oshi.PlatformEnum

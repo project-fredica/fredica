@@ -10,16 +10,16 @@ export const SidebarLayout: React.FC<SidebarLayoutProps> = ({ children }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     return (
-        <div className="flex min-h-screen bg-white text-slate-900">
+        <div className="flex min-h-screen text-slate-900">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-            <main className="flex-1 flex flex-col min-w-0">
+            <main className="flex-1 flex flex-col min-w-0" style={{ maxHeight: '100vh', maxWidth: '100vw', overflow: "scroll" }}>
                 {/* Header */}
-                <header className="h-16 flex items-center justify-between px-4 lg:px-8 bg-white/80 backdrop-blur-md sticky top-0 z-30">
+                <header className="absolute px-4 lg:px-8 backdrop-blur-md top-1 z-30">
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => setIsSidebarOpen(true)}
-                            className="p-2 hover:bg-gray-100 rounded-lg lg:hidden"
+                            className="p-2 rounded-lg lg:hidden cursor-pointer"
                         >
                             <Menu className="w-6 h-6 text-gray-600" />
                         </button>
