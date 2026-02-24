@@ -1,7 +1,6 @@
 import { type ReactNode, useState, useEffect } from "react";
 import { ExternalLink, Download, Play, Eye, Heart, MessageSquare, Check, Loader, Pencil } from "lucide-react";
-import { useImageProxyUrl } from "~/utils/requests";
-import { useAppConfig } from "~/context/appConfig";
+import { useImageProxyUrl, useAppFetch } from "~/utils/requests";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
 
 export interface MediaItem {
@@ -105,6 +104,7 @@ export function BilibiliVideoList(param: {
 }) {
     const { medias, nextPageSlot, currentPage, totalPages, totalCount, onJumpToPage, pageLoading, fid } = param;
     const buildProxyUrl = useImageProxyUrl();
+    const { apiFetch } = useAppFetch();
     const [selectedBvids, setSelectedBvids] = useState<Set<string>>(new Set());
     const [importingBvids, setImportingBvids] = useState<Set<string>>(new Set());
 
@@ -114,26 +114,16 @@ export function BilibiliVideoList(param: {
     // Category picker modal
     const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
 
-    const { appConfig } = useAppConfig();
-    const apiHost = `${appConfig.webserver_schema ?? 'http'}://${appConfig.webserver_domain ?? 'localhost'}:${appConfig.webserver_port ?? '7631'}`;
-    const authHeaders: Record<string, string> = appConfig.webserver_auth_token
-        ? { Authorization: `Bearer ${appConfig.webserver_auth_token}` }
-        : {};
-
     // ── Library map helpers ──────────────────────────────────────────────
 
     const fetchLibraryMapData = async (): Promise<Map<string, LibraryEntry>> => {
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialListRoute`, {
+            const { resp, data } = await apiFetch('/api/v1/MaterialListRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                headers: { 'Content-Type': 'application/json' },
                 body: '{}',
             });
             if (!resp.ok) return new Map();
-            let data = await resp.json();
-            while (typeof data === 'string') {
-                try { data = JSON.parse(data); } catch { break; }
-            }
             const map = new Map<string, LibraryEntry>();
             for (const v of data as MaterialVideoItem[]) {
                 if (v.source_type === 'bilibili') {
@@ -154,7 +144,7 @@ export function BilibiliVideoList(param: {
         });
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [apiHost]);
+    }, [apiFetch]);
 
     // ── Actions ─────────────────────────────────────────────────────────
 
@@ -162,9 +152,9 @@ export function BilibiliVideoList(param: {
         const bvids = items.map(v => v.bvid);
         setImportingBvids(prev => new Set([...prev, ...bvids]));
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialImportRoute`, {
+            const { resp } = await apiFetch('/api/v1/MaterialImportRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     source_type: 'bilibili',
                     source_fid: fid ?? '',
@@ -187,9 +177,9 @@ export function BilibiliVideoList(param: {
     };
 
     const updateVideoCategories = async (bvid: string, dbId: string, categoryIds: string[]) => {
-        const resp = await fetch(`${apiHost}/api/v1/MaterialSetCategoriesRoute`, {
+        const { resp } = await apiFetch('/api/v1/MaterialSetCategoriesRoute', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video_id: dbId, category_ids: categoryIds }),
         });
         if (resp.ok) {

@@ -6,6 +6,7 @@ import org.ktorm.database.Database
 import org.ktorm.dsl.*
 import org.ktorm.schema.BaseTable
 import org.ktorm.schema.varchar
+import kotlin.collections.iterator
 
 // 键值对表：每个配置项占一行，key 为字段名，value 统一存为 TEXT
 object AppConfigTable : BaseTable<Nothing>("app_config") {
