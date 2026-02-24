@@ -5,6 +5,7 @@ package com.github.project_fredica.apputil
 import com.google.common.base.CaseFormat
 import io.ktor.client.engine.ProxyConfig
 import io.netty.util.internal.shaded.org.jctools.util.UnsafeAccess
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -67,10 +68,7 @@ suspend fun AppUtil.Paths.InternalInit.detectDevProjectRootDir(): File? {
     val res = withContext(Dispatchers.IO) {
         val currentDir = File(System.getProperty("user.dir")).absoluteFile
         logger.debug("current dir is $currentDir")
-        if (currentDir.name == "composeApp"
-            && currentDir.parentFile.isDirectory
-            && currentDir.parentFile.name == "fredica"
-        ) {
+        if (currentDir.name == "composeApp" && currentDir.parentFile.isDirectory && currentDir.parentFile.name == "fredica") {
             return@withContext currentDir.parentFile
         }
         return@withContext null
@@ -94,4 +92,26 @@ fun AppUtil.GlobalVars.InternalInit.getUnsafe(): Unsafe {
 
 val AppUtil.GlobalVars.unsafe: Unsafe by lazy {
     AppUtil.GlobalVars.InternalInit.getUnsafe()
+}
+
+val AppUtil.GlobalVars.shutdownHookThreadGroup by lazy { ThreadGroup("shutdownHookThreadGroup") }
+
+actual fun AppUtil.addShutdownHook(tag: String, scope: suspend CoroutineScope.() -> Unit) {
+    val logger = createLogger()
+    val t = Thread(
+        AppUtil.GlobalVars.shutdownHookThreadGroup, {
+            runBlocking(Dispatchers.IO) {
+                try {
+                    logger.debug("[$tag] start shutdown hook")
+                    scope()
+                    logger.debug("[$tag] success run shutdown hook")
+                } catch (err: Throwable) {
+                    logger.error("[$tag] error on shutdown hook", err)
+                }
+            }
+        }, "shutdownHookThread-$tag"
+    )
+    t.isDaemon = false
+    t.priority = Thread.MAX_PRIORITY
+    Runtime.getRuntime().addShutdownHook(t)
 }

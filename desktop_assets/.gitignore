@@ -1,0 +1,6 @@
+*/lfs/python-314-embed/Lib/site-packages/*
+!*/lfs/python-314-embed/Lib/site-packages/pip
+!*/lfs/python-314-embed/Lib/site-packages/pip-*.dist-info
+
+*/lfs/python-314-embed/Scripts/*
+!*/lfs/python-314-embed/Scripts/pip*

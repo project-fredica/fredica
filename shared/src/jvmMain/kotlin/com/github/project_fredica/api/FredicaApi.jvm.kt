@@ -5,8 +5,10 @@ import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.AppConfigDb
 import com.github.project_fredica.db.AppConfigRepo
 import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.python.PythonUtil
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
+import com.github.project_fredica.api.routes.ImageProxyResponse
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -17,6 +19,7 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.swagger.swaggerUI
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.util.toMap
@@ -80,6 +83,10 @@ actual suspend fun FredicaApi.Companion.getNativeWebServerLocalDomainAndPort(): 
     )
     logger.debug("native web server local domain and port is : $r")
     return r
+}
+
+actual suspend fun FredicaApi.PyUtil.get(path: String): String {
+    return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Get, path)
 }
 
 object FredicaApiJvmService {
@@ -149,6 +156,18 @@ object FredicaApiJvmService {
         val logger = createLogger()
         val allRoutes = FredicaApi.getAllRoutes()
 
+        suspend fun RoutingContext.handleRouteResult(route: FredicaApi.Route, scope: suspend () -> Any) {
+            try {
+                when (val result = scope()) {
+                    is ImageProxyResponse -> call.respondBytes(result.bytes, ContentType.parse(result.contentType))
+                    else -> call.respond(result)
+                }
+            } catch (err: Throwable) {
+                logger.error("Failed in route ${route.name}", err)
+                call.respond(HttpStatusCode.InternalServerError)
+            }
+        }
+
         routing {
             get("/api/v1/ping") {
                 call.respond(
@@ -162,31 +181,37 @@ object FredicaApiJvmService {
                 when (route.mode) {
                     FredicaApi.Route.Mode.Get -> {
                         get("/api/v1/${route.name}") {
-                            handleAuth {
-                                if (it == null) {
-                                    return@get
+                            if (route.requiresAuth) {
+                                handleAuth {
+                                    if (it == null) {
+                                        return@get
+                                    }
                                 }
                             }
 
                             val query = call.queryParameters.toMap()
-                            val result = route.handler(
-                                AppUtil.GlobalVars.json.encodeToString(query)
-                            )
-                            call.respondRouteResult(result)
+                            handleRouteResult(route) {
+                                route.handler(
+                                    AppUtil.GlobalVars.json.encodeToString(query)
+                                )
+                            }
                         }
                     }
 
                     FredicaApi.Route.Mode.Post -> {
                         post("/api/v1/${route.name}") {
-                            handleAuth {
-                                if (it == null) {
-                                    return@post
+                            if (route.requiresAuth) {
+                                handleAuth {
+                                    if (it == null) {
+                                        return@post
+                                    }
                                 }
                             }
 
                             val body = call.receiveText()
-                            val result = route.handler(body)
-                            call.respondRouteResult(result)
+                            handleRouteResult(route) {
+                                route.handler(body)
+                            }
                         }
                     }
                 }
@@ -219,12 +244,4 @@ private suspend inline fun RoutingContext.handleAuth(scope: (FredicaApiJvmRouteA
     call.respond(HttpStatusCode.Unauthorized)
     scope(null)
     return
-}
-
-private suspend fun ApplicationCall.respondRouteResult(result: Any) {
-    when (result) {
-        is ValidJsonString -> respondText(result.str, ContentType.Application.Json)
-        is Unit -> respond(HttpStatusCode.OK)
-        else -> respond(HttpStatusCode.InternalServerError, "unexpected result type: ${result::class.simpleName}")
-    }
 }

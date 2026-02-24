@@ -31,7 +31,7 @@ object JVMPlatform : Platform {
         return@lazy false
     }
 
-    fun getNativeAssetPath(): File {
+    val nativeAssetPath: File by lazy {
         val nativeAssetPath = getAsset(
             "${
                 if (isWindows) "windows" else if (isLinux) "linux" else if (isMacOS) "macos" else throw Exception("invalid platform")
@@ -40,7 +40,7 @@ object JVMPlatform : Platform {
         if (nativeAssetPath == null) {
             throw FileNotFoundException("JVM APP Util not found base asset path")
         }
-        return nativeAssetPath.parentFile ?: throw kotlinx.io.IOException("no parent of $nativeAssetPath")
+        return@lazy nativeAssetPath.parentFile ?: throw kotlinx.io.IOException("no parent of $nativeAssetPath")
     }
 }
 

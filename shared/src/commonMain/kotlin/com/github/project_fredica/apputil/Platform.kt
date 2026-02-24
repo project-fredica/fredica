@@ -12,7 +12,7 @@ interface Platform {
 
     val isJs: Boolean get() = false
 
-    val isSupportPython get() = false
+    val isSupportPython get() = isWindows
 
     val isWindows: Boolean get() = false
 

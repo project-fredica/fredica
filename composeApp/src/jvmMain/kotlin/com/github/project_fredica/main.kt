@@ -16,11 +16,15 @@ import com.github.project_fredica.apputil.createLogger
 import dev.datlag.kcef.KCEFBuilder
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.JVMPlatform
+import com.github.project_fredica.apputil.Platform
+import com.github.project_fredica.apputil.addShutdownHook
 import com.github.project_fredica.apputil.burningwaveExportAllModule
 import com.github.project_fredica.apputil.exception
+import com.github.project_fredica.apputil.getPlatform
 import com.github.project_fredica.apputil.globalVertx
 import com.github.project_fredica.apputil.readNetworkProxy
 import com.github.project_fredica.apputil.unsafe
+import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.resources.Res
 import com.github.project_fredica.resources.icon_512x512
 import dev.datlag.kcef.KCEF
@@ -79,6 +83,14 @@ fun main() {
             }, async {
                 val unsafe = AppUtil.GlobalVars.unsafe
                 logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
+            }, async {
+                if (Platform.getPlatform().isSupportPython) {
+                    PythonUtil.Py314Embed.init()
+                    AppUtil.addShutdownHook("stopPyUtilServer") {
+                        PythonUtil.Py314Embed.PyUtilServer.stop()
+                    }
+                    PythonUtil.Py314Embed.PyUtilServer.start()
+                }
             }).awaitAll()
             val fredicaApiOption = FredicaApiJvmInitOption()
             FredicaApi.init(
@@ -90,9 +102,7 @@ fun main() {
         }
     }
 
-    val nativeAssetPath = JVMPlatform.getNativeAssetPath()
-    logger.debug("nativeAssetPath is $nativeAssetPath")
-    val kcefBundleDir = nativeAssetPath.resolve("lfs").resolve("kcef-bundle").also { it.mkdirs() }
+    val kcefBundleDir = JVMPlatform.nativeAssetPath.resolve("lfs").resolve("kcef-bundle").also { it.mkdirs() }
     val kcefCacheDir = AppUtil.Paths.appDataCacheDir.resolve("kcef-cache").also { it.mkdirs() }
     val kcefLogPath = AppUtil.Paths.appDataLogDir.resolve("kcef").also { it.mkdirs() }.resolve("kcef.log")
 
@@ -118,6 +128,9 @@ fun main() {
             LaunchedEffect(Unit) {
                 withContext(Dispatchers.IO) {
                     logger.debug("start init KCEF browser")
+                    AppUtil.addShutdownHook("KCEF_dispose") {
+                        KCEF.dispose()
+                    }
                     KCEF.init(builder = {
                         installDir(kcefBundleDir)
                         progress {

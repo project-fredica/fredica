@@ -3,7 +3,11 @@ import { useAppConfig } from "~/context/appConfig";
 
 export const DEFAULT_SERVER_PORT = "7631";
 
-function getAppHost(domain?: string | null, port?: string | null, schema?: string | null) {
+function getAppHost(
+    domain?: string | null,
+    port?: string | null,
+    schema?: string | null,
+) {
     const s = schema ?? "http";
     const d = domain ?? "localhost";
     const p = port ?? DEFAULT_SERVER_PORT;
@@ -13,6 +17,21 @@ function getAppHost(domain?: string | null, port?: string | null, schema?: strin
 function buildAuthHeaders(token?: string | null): Record<string, string> {
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * 返回一个将外部图片 URL 转换为本地代理 URL 的函数，用于规避跨站图片加载限制。
+ * 代理路由无需 Authorization 头，可直接用于 <img> src 属性。
+ */
+export function useImageProxyUrl(): (imageUrl: string) => string {
+    const { appConfig } = useAppConfig();
+    const host = getAppHost(
+        appConfig.webserver_domain,
+        appConfig.webserver_port,
+        appConfig.webserver_schema,
+    );
+    return (imageUrl: string) =>
+        `${host}/api/v1/ImageProxyRoute?url=${encodeURIComponent(imageUrl)}`;
 }
 
 /**
@@ -38,7 +57,9 @@ export function useAppFetch<J = unknown>(param?: {
 }) {
     const { appConfig } = useAppConfig();
     const [data, setData] = useState<J | null>(null);
-    const [loading, setLoading] = useState<boolean>(() => param?.appPath != null);
+    const [loading, setLoading] = useState<boolean>(() =>
+        param?.appPath != null
+    );
     const [error, setError] = useState<Error | null>(null);
     const [response, setResponse] = useState<Response | null>(null);
 
@@ -49,30 +70,6 @@ export function useAppFetch<J = unknown>(param?: {
         appConfig.webserver_schema,
     );
     const url = param?.appPath != null ? `${host}${param.appPath}` : null;
-
-    /** 命令式 fetch：自动注入 auth header，默认 10 s 超时，返回原始 Response。 */
-    const apiFetch = useCallback(
-        async (appPath: string, init?: Omit<RequestInit, "signal">, timeout = 10_000) => {
-            const abort = new AbortController();
-            const timer =
-                timeout > 0
-                    ? setTimeout(
-                          () => abort.abort(new DOMException("Request timed out", "TimeoutError")),
-                          timeout,
-                      )
-                    : null;
-            try {
-                return await fetch(`${host}${appPath}`, {
-                    ...init,
-                    headers: { ...buildAuthHeaders(authToken), ...init?.headers },
-                    signal: abort.signal,
-                });
-            } finally {
-                if (timer != null) clearTimeout(timer);
-            }
-        },
-        [host, authToken],
-    );
 
     // 声明式自动请求
     useEffect(() => {
@@ -87,13 +84,15 @@ export function useAppFetch<J = unknown>(param?: {
 
         let cancelled = false;
         const abort = new AbortController();
-        const timer =
-            timeout > 0
-                ? setTimeout(
-                      () => abort.abort(new DOMException("Request timed out", "TimeoutError")),
-                      timeout,
-                  )
-                : null;
+        const timer = timeout > 0
+            ? setTimeout(
+                () =>
+                    abort.abort(
+                        new DOMException("Request timed out", "TimeoutError"),
+                    ),
+                timeout,
+            )
+            : null;
 
         setLoading(true);
         setError(null);
@@ -102,10 +101,15 @@ export function useAppFetch<J = unknown>(param?: {
 
         (async () => {
             try {
-                console.debug(`[useAppFetch] ${new Date().toISOString()} : ${appPath}`);
+                console.debug(
+                    `[useAppFetch] ${new Date().toISOString()} : ${appPath}`,
+                );
                 const resp = await fetch(url, {
                     ...init,
-                    headers: { ...buildAuthHeaders(authToken), ...init?.headers },
+                    headers: {
+                        ...buildAuthHeaders(authToken),
+                        ...init?.headers,
+                    },
                     signal: abort.signal,
                 });
                 if (timer != null) clearTimeout(timer);
@@ -116,7 +120,15 @@ export function useAppFetch<J = unknown>(param?: {
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    setData((await resp.json()) as J);
+                    let res = await resp.json();
+                    while (typeof res === "string") {
+                        try {
+                            res = JSON.parse(res);
+                        } catch (err) {
+                            break;
+                        }
+                    }
+                    setData(res as J);
                 }
                 setError(null);
             } catch (err) {
@@ -135,5 +147,5 @@ export function useAppFetch<J = unknown>(param?: {
         };
     }, [url, authToken]);
 
-    return { data, loading, error, response, apiFetch };
+    return { data, loading, error, response };
 }

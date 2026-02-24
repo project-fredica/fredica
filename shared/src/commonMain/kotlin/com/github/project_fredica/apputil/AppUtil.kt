@@ -3,6 +3,7 @@ package com.github.project_fredica.apputil
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.ProxyConfig
 import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -28,6 +29,7 @@ object AppUtil {
             }
         }
         val appDataCacheDir: File get() = appDataDir.resolve("cache")
+        val appDataImageCacheDir: File get() = appDataCacheDir.resolve("images")
         val appDataLogDir: File get() = appDataDir.resolve("log")
 
         val appDbPath: File get() = appDataDir.resolve("db").resolve("fredica_app.db")
@@ -36,7 +38,7 @@ object AppUtil {
     object MonkeyPatch
 
     object GlobalVars {
-        val ktorClient by lazy {
+        val ktorClientProxied by lazy {
             HttpClient(OkHttp) {
                 engine {
                     config {
@@ -44,6 +46,18 @@ object AppUtil {
                     }
 
                     proxy = readNetworkProxy()
+                }
+            }
+        }
+
+        val ktorClientLocal by lazy {
+            HttpClient(OkHttp) {
+                engine {
+                    config {
+                        followRedirects(true)
+                    }
+
+                    proxy = ProxyConfig.NO_PROXY
                 }
             }
         }
@@ -78,3 +92,5 @@ fun ProxyConfig?.isDirect(): Boolean {
 expect fun AppUtil.StrUtil.caseCastLowerCamelToLowerUnderscore(src: String): String
 
 expect suspend fun AppUtil.Paths.InternalInit.detectAppDataDirOnInit(): File
+
+expect fun AppUtil.addShutdownHook(tag: String, scope: suspend CoroutineScope.() -> Unit)
