@@ -118,19 +118,19 @@ const settingSections: SettingSection[] = [
             },
         ],
     },
-    {
-        title: "第三方服务",
-        items: [
-            {
-                type: "text",
-                key: "rsshub_url",
-                label: "RSSHub 地址",
-                description: "自托管或公共 RSSHub 实例地址，用于生成 RSS 订阅源。",
-                defaultValue: "",
-                placeholder: "https://rsshub.app",
-            },
-        ],
-    },
+    // {
+    //     title: "第三方服务",
+    //     items: [
+    //         {
+    //             type: "text",
+    //             key: "rsshub_url",
+    //             label: "RSSHub 地址",
+    //             description: "自托管或公共 RSSHub 实例地址，用于生成 RSS 订阅源。",
+    //             defaultValue: "",
+    //             placeholder: "https://rsshub.app",
+    //         },
+    //     ],
+    // },
 ];
 
 function buildInitialValues(): Record<string, string | number | boolean> {

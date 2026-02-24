@@ -289,6 +289,7 @@ export default function Component() {
                 totalCount={totalCount}
                 onJumpToPage={handleJumpToPage}
                 pageLoading={nextPageLoading}
+                fid={fid}
             />
         </>
     );

@@ -54,9 +54,6 @@ fun AppUtil.MonkeyPatch.burningwaveExportAllModule() {
 }
 
 
-actual fun AppUtil.StrUtil.caseCastLowerCamelToLowerUnderscore(src: String): String {
-    return CaseFormat.LOWER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, src)
-}
 
 actual suspend fun AppUtil.Paths.InternalInit.detectAppDataDirOnInit(): File {
     return File(".data")

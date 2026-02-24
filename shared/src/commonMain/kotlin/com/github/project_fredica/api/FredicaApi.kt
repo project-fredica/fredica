@@ -3,6 +3,13 @@ package com.github.project_fredica.api
 import com.github.project_fredica.api.routes.BilibiliFavoriteGetPageRoute
 import com.github.project_fredica.api.routes.BilibiliFavoriteGetVideoListRoute
 import com.github.project_fredica.api.routes.ImageProxyRoute
+import com.github.project_fredica.api.routes.MaterialCategoryCreateRoute
+import com.github.project_fredica.api.routes.MaterialCategoryDeleteRoute
+import com.github.project_fredica.api.routes.MaterialCategoryListRoute
+import com.github.project_fredica.api.routes.MaterialDeleteRoute
+import com.github.project_fredica.api.routes.MaterialImportRoute
+import com.github.project_fredica.api.routes.MaterialListRoute
+import com.github.project_fredica.api.routes.MaterialSetCategoriesRoute
 
 interface FredicaApi {
     companion object {
@@ -36,6 +43,13 @@ interface FredicaApi {
                 BilibiliFavoriteGetPageRoute,
                 BilibiliFavoriteGetVideoListRoute,
                 ImageProxyRoute,
+                MaterialImportRoute,
+                MaterialListRoute,
+                MaterialDeleteRoute,
+                MaterialCategoryListRoute,
+                MaterialCategoryCreateRoute,
+                MaterialCategoryDeleteRoute,
+                MaterialSetCategoriesRoute,
             )
         }
     }

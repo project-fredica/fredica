@@ -5,7 +5,8 @@ import {
   Compass, ChevronDown, ChevronRight, FileText,
   Settings, HelpCircle, MessageCircle, BookOpen,
   LogOut,
-  Home
+  Home,
+  Database,
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 
@@ -77,6 +78,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         <div className="flex flex-col overflow-y-auto py-4 gap-4">
           <div className='striky'>
             <SideBarItem uid='add-resource' Icon={Plus} title='添加素材' routeTo='/add-resource' />
+            <SideBarItem uid='library' Icon={Database} title='素材库' routeTo='/library' />
             <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' />
             <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' />
             {/* <SideBarItem uid='source-search' Icon={Search} title='搜索' />

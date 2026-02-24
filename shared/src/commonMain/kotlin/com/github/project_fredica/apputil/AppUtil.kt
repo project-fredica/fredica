@@ -71,9 +71,7 @@ object AppUtil {
         }
     }
 
-    object StrUtil {
-
-    }
+    object StrUtil
 }
 
 expect fun AppUtil.readNetworkProxy(): ProxyConfig?
@@ -88,8 +86,6 @@ fun ProxyConfig?.isDirect(): Boolean {
     }
     return this.type() == Proxy.Type.DIRECT
 }
-
-expect fun AppUtil.StrUtil.caseCastLowerCamelToLowerUnderscore(src: String): String
 
 expect suspend fun AppUtil.Paths.InternalInit.detectAppDataDirOnInit(): File
 

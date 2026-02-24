@@ -5,6 +5,10 @@ import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.AppConfigDb
 import com.github.project_fredica.db.AppConfigRepo
 import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.db.MaterialCategoryDb
+import com.github.project_fredica.db.MaterialCategoryService
+import com.github.project_fredica.db.MaterialVideoDb
+import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.python.PythonUtil
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
@@ -116,6 +120,16 @@ object FredicaApiJvmService {
             appConfigDb.initialize()
             AppConfigService.initialize(appConfigDb)
             logger.debug("AppConfigService initialized, db path: $dbPath")
+
+            val materialVideoDb = MaterialVideoDb(database)
+            materialVideoDb.initialize()
+            MaterialVideoService.initialize(materialVideoDb)
+            logger.debug("MaterialVideoService initialized")
+
+            val materialCategoryDb = MaterialCategoryDb(database)
+            materialCategoryDb.initialize()
+            MaterialCategoryService.initialize(materialCategoryDb)
+            logger.debug("MaterialCategoryService initialized")
         }
 
         CurrentInstance.server = embeddedServer(
