@@ -73,6 +73,8 @@
         </triggeringPolicy>
     </appender>
 
+    <logger name="io.ktor.server.plugins.cors" level="WARN" />
+
     <root level="DEBUG">
         <appender-ref ref="STDOUT"/>
         <appender-ref ref="FILE_DEBUG"/>

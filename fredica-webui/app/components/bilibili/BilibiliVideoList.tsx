@@ -177,6 +177,23 @@ export function BilibiliVideoList(param: {
                             </button>
                         )
                     )}
+                    {/* 全量页码下拉跳转，补充窄屏下省略号覆盖的中间页 */}
+                    <select
+                        value=""
+                        onChange={(e) => {
+                            const p = Number(e.target.value);
+                            if (p) p <= loadedPage ? scrollToPage(p) : onJumpToPage?.(p);
+                        }}
+                        disabled={pageLoading}
+                        className="ml-1 h-6 text-xs rounded border border-gray-200 bg-gray-50 text-gray-500 px-1 cursor-pointer hover:border-blue-300 disabled:opacity-40"
+                    >
+                        <option value="" disabled>跳转到…</option>
+                        {Array.from({ length: totalPages! }, (_, i) => i + 1).map(p => (
+                            <option key={p} value={p}>
+                                第 {p} 页{p <= loadedPage ? '（已加载）' : ''}
+                            </option>
+                        ))}
+                    </select>
                     {pageLoading && (
                         <span className="text-xs text-blue-500 ml-1 animate-pulse">加载中…</span>
                     )}

@@ -23,7 +23,9 @@ export default function Component() {
         e.preventDefault();
         const fid = extractFid(urlInput);
         if (!fid) return;
-        navigate(`fid/${fid}`);
+        // 剥去已有的 /fid/xxx 后缀再拼接，避免子路由激活时相对路径叠加为 /fid/fid/xxx
+        const base = pathname.replace(/\/fid\/[^/]+$/, '');
+        navigate(`${base}/fid/${fid}`);
     };
 
     return (
