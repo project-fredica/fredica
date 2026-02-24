@@ -1,5 +1,6 @@
 package com.github.project_fredica.api
 
+import com.github.project_fredica.api.routes.BilibiliFavoriteGetPageRoute
 import com.github.project_fredica.api.routes.BilibiliFavoriteGetVideoListRoute
 import com.github.project_fredica.api.routes.ImageProxyRoute
 
@@ -32,6 +33,7 @@ interface FredicaApi {
 
         companion object {
             val allRoutes = listOf<Route>(
+                BilibiliFavoriteGetPageRoute,
                 BilibiliFavoriteGetVideoListRoute,
                 ImageProxyRoute,
             )

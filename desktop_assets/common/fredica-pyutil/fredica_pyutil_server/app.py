@@ -24,5 +24,17 @@ async def bilibili_favorite_get_video_list(fid: str):
     }
 
 
+@app.get("/bilibili/favorite/get-page/{fid}/{page}")
+async def bilibili_favorite_get_page(fid: str, page: int):
+    f = bilibili_api.favorite_list.FavoriteList(media_id=int(fid))
+    content = await f.get_content(page=page)
+    return {
+        "fid": fid,
+        "page": page,
+        "medias": content.get("medias", []),
+        "has_more": content.get("has_more", False),
+    }
+
+
 if __name__ == '__main__':
     pass

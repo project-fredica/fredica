@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ExternalLink, Download, Play, Eye, Heart, MessageSquare } from "lucide-react";
 import { useImageProxyUrl } from "~/utils/requests";
 
@@ -44,10 +44,48 @@ function formatFavDate(ts: number): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const PAGE_SIZE = 20;
+
+/** 计算哪些页码需要显示（含省略号占位符 0） */
+function buildPageWindows(totalPages: number, loadedPage: number): number[] {
+    const show = new Set<number>();
+    // 始终展示首末两页
+    show.add(1);
+    show.add(2);
+    show.add(totalPages - 1);
+    show.add(totalPages);
+    // 当前加载页附近 ±2
+    for (let d = -2; d <= 2; d++) {
+        const p = loadedPage + d;
+        if (p >= 1 && p <= totalPages) show.add(p);
+    }
+    const sorted = Array.from(show).sort((a, b) => a - b);
+    // 在不连续处插入 0 作为省略号占位
+    const result: number[] = [];
+    let prev = 0;
+    for (const p of sorted) {
+        if (prev > 0 && p > prev + 1) result.push(0);
+        result.push(p);
+        prev = p;
+    }
+    return result;
+}
+
 export function BilibiliVideoList(param: {
     medias?: MediaItem[];
+    nextPageSlot?: ReactNode;
+    /** 已加载到的最新页码（1-indexed） */
+    currentPage?: number;
+    /** 总页数（由 ids_list.length / PAGE_SIZE 算出） */
+    totalPages?: number;
+    /** 总视频数（ids_list.length） */
+    totalCount?: number;
+    /** 点击未加载页时的回调，由父组件处理实际请求 */
+    onJumpToPage?: (page: number) => void;
+    /** 是否正在加载某一页 */
+    pageLoading?: boolean;
 }) {
-    const { medias } = param
+    const { medias, nextPageSlot, currentPage, totalPages, totalCount, onJumpToPage, pageLoading } = param;
     const buildProxyUrl = useImageProxyUrl();
     const [selectedBvids, setSelectedBvids] = useState<Set<string>>(new Set());
 
@@ -71,6 +109,14 @@ export function BilibiliVideoList(param: {
         setSelectedBvids(allSelected ? new Set() : new Set(medias.map(v => v.bvid)));
     };
 
+    const scrollToPage = (page: number) => {
+        document.getElementById(`bilibili-video-page-${page}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const showPageNav = totalPages !== undefined && totalPages > 1;
+    const loadedPage = currentPage ?? 1;
+
     return (
         <div className="bg-white rounded-lg border border-gray-200">
             {/* Header */}
@@ -83,7 +129,10 @@ export function BilibiliVideoList(param: {
                         className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-sm text-gray-500">
-                        共 {medias.length} 个视频
+                        {totalCount !== undefined
+                            ? <>已加载 <span className="font-medium">{medias.length}</span> / {totalCount} 个视频</>
+                            : <>共 <span className="font-medium">{medias.length}</span> 个视频</>
+                        }
                         {selectedBvids.size > 0 && (
                             <span className="text-blue-600 ml-1">· 已选 {selectedBvids.size} 个</span>
                         )}
@@ -101,13 +150,51 @@ export function BilibiliVideoList(param: {
                 )}
             </div>
 
+            {/* Sticky page nav bar */}
+            {showPageNav && (
+                <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-1.5 flex-wrap shadow-sm">
+                    <span className="text-xs text-gray-400 mr-1 shrink-0">
+                        第 {loadedPage}/{totalPages} 页
+                    </span>
+                    {buildPageWindows(totalPages!, loadedPage).map((p, i) =>
+                        p === 0 ? (
+                            <span key={`ellipsis-${i}`} className="text-xs text-gray-300 select-none px-0.5">…</span>
+                        ) : (
+                            <button
+                                key={p}
+                                onClick={() => p <= loadedPage ? scrollToPage(p) : onJumpToPage?.(p)}
+                                disabled={pageLoading === true && p > loadedPage}
+                                title={p <= loadedPage ? `跳转到第 ${p} 页` : `加载第 ${p} 页`}
+                                className={
+                                    `min-w-7 h-6 px-1.5 text-xs rounded font-mono transition-colors ` +
+                                    (p <= loadedPage
+                                        ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 cursor-pointer'
+                                        : 'bg-gray-50 text-gray-400 border border-gray-200 hover:bg-blue-50 hover:text-blue-500 hover:border-blue-200 cursor-pointer') +
+                                    (pageLoading && p > loadedPage ? ' opacity-40 pointer-events-none' : '')
+                                }
+                            >
+                                {p}
+                            </button>
+                        )
+                    )}
+                    {pageLoading && (
+                        <span className="text-xs text-blue-500 ml-1 animate-pulse">加载中…</span>
+                    )}
+                </div>
+            )}
+
             {/* List */}
-            <div className="divide-y divide-gray-100">
-                {medias.map((media) => {
+            <div className="divide-y divide-gray-100" role="list">
+                {medias.map((media, index) => {
                     const selected = selectedBvids.has(media.bvid);
+                    // 每一页（每 PAGE_SIZE 条）的第一条打上 id 锚点供滚动定位
+                    const pageAnchorId = index % PAGE_SIZE === 0
+                        ? `bilibili-video-page-${Math.floor(index / PAGE_SIZE) + 1}`
+                        : undefined;
                     return (
                         <div
                             key={media.bvid}
+                            id={pageAnchorId}
                             className={`flex gap-3 p-3 sm:p-4 transition-colors ${selected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                         >
                             {/* Checkbox */}
@@ -205,6 +292,13 @@ export function BilibiliVideoList(param: {
                     );
                 })}
             </div>
+
+            {/* Next page slot */}
+            {nextPageSlot && (
+                <div className="px-4 sm:px-6 py-3 border-t border-gray-100 flex justify-center">
+                    {nextPageSlot}
+                </div>
+            )}
         </div>
     );
 }
