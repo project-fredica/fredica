@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import io.ktor.client.call.body
 import io.ktor.client.plugins.timeout
@@ -12,6 +13,7 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
 object ImageProxyRoute : FredicaApi.Route {
+    private val logger = createLogger()
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "图片跨站代理，缓存到本地后返回"
     override val requiresAuth = false
@@ -63,7 +65,11 @@ object ImageProxyRoute : FredicaApi.Route {
             "webp" -> "image/webp"
             "svg" -> "image/svg+xml"
             "avif" -> "image/avif"
-            else -> "image/jpeg"
+            else -> {
+                logger.warn("unknown image ext : $ext")
+                // TODO: 通过文件头判断
+                return "image/png"
+            }
         }
     }
 
@@ -77,4 +83,22 @@ object ImageProxyRoute : FredicaApi.Route {
 data class ImageProxyResponse(
     val bytes: ByteArray,
     val contentType: String,
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ImageProxyResponse
+
+        if (!bytes.contentEquals(other.bytes)) return false
+        if (contentType != other.contentType) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = bytes.contentHashCode()
+        result = 31 * result + contentType.hashCode()
+        return result
+    }
+}

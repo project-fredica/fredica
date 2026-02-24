@@ -11,10 +11,10 @@ export function meta({ }: Route.MetaArgs) {
 }
 
 const tabs = [
-    { label: '收藏夹', icon: Folder, path: 'favorite' },
-    { label: '视频合集', icon: List, path: 'collection' },
-    { label: '视频分P', icon: Video, path: 'multi-part' },
-    { label: 'UP主视频', icon: User, path: 'uploader' },
+    { label: '收藏夹', icon: Folder, path: 'favorite', todo: false },
+    { label: '视频合集', icon: List, path: 'collection', todo: true },
+    { label: '视频分P', icon: Video, path: 'multi-part', todo: true },
+    { label: 'UP主视频', icon: User, path: 'uploader', todo: true },
 ] as const;
 
 export default function Component({ }: Route.ComponentProps) {
@@ -40,21 +40,34 @@ export default function Component({ }: Route.ComponentProps) {
                 <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
                     <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">选择视频来源类型</h2>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-                        {tabs.map(({ label, icon: Icon, path }) => (
-                            <NavLink
-                                key={path}
-                                to={path}
-                                className={({ isActive }) =>
-                                    `flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-lg border-2 transition-all ${isActive
-                                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                                    }`
-                                }
-                            >
-                                <Icon className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                                <span className="font-medium text-sm sm:text-base">{label}</span>
-                            </NavLink>
-                        ))}
+                        {tabs.map(({ label, icon: Icon, path, todo }) =>
+                            todo ? (
+                                <div
+                                    key={path}
+                                    className="relative flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 text-gray-300 cursor-not-allowed select-none"
+                                >
+                                    <Icon className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                                    <span className="font-medium text-sm sm:text-base">{label}</span>
+                                    <span className="absolute top-1.5 right-2 text-[10px] font-semibold text-gray-300 uppercase tracking-wide">
+                                        即将推出
+                                    </span>
+                                </div>
+                            ) : (
+                                <NavLink
+                                    key={path}
+                                    to={path}
+                                    className={({ isActive }) =>
+                                        `flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-lg border-2 transition-all ${isActive
+                                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                                        }`
+                                    }
+                                >
+                                    <Icon className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                                    <span className="font-medium text-sm sm:text-base">{label}</span>
+                                </NavLink>
+                            )
+                        )}
                     </div>
                 </div>
 

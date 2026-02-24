@@ -1,16 +1,46 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
+import { Bookmark, BookmarkCheck, Calendar, Eye, Film, Share2, ThumbsUp } from "lucide-react";
 import { useAppFetch, useImageProxyUrl } from "~/utils/requests";
 import { BilibiliVideoList, type MediaItem } from "~/components/bilibili/BilibiliVideoList";
 
 const PAGE_SIZE = 20;
 
+function formatCount(n: number): string {
+    if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}亿`;
+    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
+    return String(n);
+}
+
+function formatDate(ts: number): string {
+    const d = new Date(ts * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 interface FavoriteInfo {
+    id: number;
+    fid: number;
     title: string;
     cover: string;
     intro: string;
     media_count: number;
-    upper: { name: string; face: string };
+    upper: {
+        mid: number;
+        name: string;
+        face: string;
+        followed: boolean;
+        vip_type: number;
+    };
+    cnt_info: {
+        collect: number;
+        play: number;
+        thumb_up: number;
+        share: number;
+    };
+    ctime: number;
+    mtime: number;
+    is_top: boolean;
+    fav_state: number;
 }
 
 interface BilibiliFavoriteVideoListResult {
@@ -162,30 +192,93 @@ export default function Component() {
                 </div>
             )}
 
-            {/* 收藏夹信息摘要 */}
-            {result && (
-                <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-                    <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3">收藏夹信息</h2>
-                    <div className="flex gap-4 items-start">
-                        {result.first_page.info.cover && (
-                            <img
-                                src={buildProxyUrl(result.first_page.info.cover)}
-                                alt={result.first_page.info.title}
-                                className="w-24 h-16 object-cover rounded-lg flex-shrink-0"
-                            />
-                        )}
-                        <div className="space-y-1">
-                            <p className="font-medium text-gray-900">{result.first_page.info.title}</p>
-                            {result.first_page.info.intro && (
-                                <p className="text-sm text-gray-500">{result.first_page.info.intro}</p>
+            {/* 收藏夹信息 */}
+            {result && (() => {
+                const info = result.first_page.info;
+                return (
+                    <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 space-y-3">
+                        {/* 标题行：封面 + 主要信息 */}
+                        <div className="flex gap-4 items-start">
+                            {info.cover && (
+                                <img
+                                    src={buildProxyUrl(info.cover)}
+                                    alt={info.title}
+                                    className="w-28 h-[72px] object-cover rounded-lg flex-shrink-0 bg-gray-100"
+                                />
                             )}
-                            <p className="text-sm text-gray-600">
-                                共 <span className="font-medium">{result.first_page.info.media_count}</span> 个视频
-                            </p>
+                            <div className="flex-1 min-w-0 space-y-1.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <h2 className="text-base sm:text-lg font-semibold text-gray-900 leading-tight">
+                                        {info.title}
+                                    </h2>
+                                    {info.is_top && (
+                                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">
+                                            已置顶
+                                        </span>
+                                    )}
+                                    {info.fav_state === 1 && (
+                                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-pink-100 text-pink-700 shrink-0">
+                                            已收藏
+                                        </span>
+                                    )}
+                                </div>
+                                {info.intro && (
+                                    <p className="text-sm text-gray-500 line-clamp-2">{info.intro}</p>
+                                )}
+                                {/* UP主 */}
+                                <a
+                                    href={`https://space.bilibili.com/${info.upper.mid}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 transition-colors"
+                                >
+                                    <img
+                                        src={buildProxyUrl(info.upper.face)}
+                                        alt={info.upper.name}
+                                        className="w-4 h-4 rounded-full flex-shrink-0 bg-gray-100"
+                                    />
+                                    <span>{info.upper.name}</span>
+                                    {info.upper.followed && (
+                                        <span className="text-[10px] text-green-600">已关注</span>
+                                    )}
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* 统计数据 */}
+                        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-gray-500 pt-1 border-t border-gray-100">
+                            <span className="flex items-center gap-1">
+                                <Film className="w-3.5 h-3.5 text-gray-400" />
+                                {info.media_count} 个视频
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <Eye className="w-3.5 h-3.5 text-gray-400" />
+                                {formatCount(info.cnt_info.play)} 播放
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <Bookmark className="w-3.5 h-3.5 text-gray-400" />
+                                {formatCount(info.cnt_info.collect)} 收藏
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <ThumbsUp className="w-3.5 h-3.5 text-gray-400" />
+                                {formatCount(info.cnt_info.thumb_up)} 点赞
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <Share2 className="w-3.5 h-3.5 text-gray-400" />
+                                {formatCount(info.cnt_info.share)} 分享
+                            </span>
+                        </div>
+
+                        {/* 时间 + fid */}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                            <span className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                创建于 {formatDate(info.ctime)}
+                            </span>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* 视频列表 */}
             <BilibiliVideoList

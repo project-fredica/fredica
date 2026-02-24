@@ -159,7 +159,13 @@ object FredicaApiJvmService {
         suspend fun RoutingContext.handleRouteResult(route: FredicaApi.Route, scope: suspend () -> Any) {
             try {
                 when (val result = scope()) {
-                    is ImageProxyResponse -> call.respondBytes(result.bytes, ContentType.parse(result.contentType))
+                    is ImageProxyResponse -> {
+                        call.response.headers.append(
+                            HttpHeaders.CacheControl,
+                            "public, max-age=31536000, immutable"
+                        )
+                        call.respondBytes(result.bytes, ContentType.parse(result.contentType))
+                    }
                     else -> call.respond(result)
                 }
             } catch (err: Throwable) {
