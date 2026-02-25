@@ -5,7 +5,8 @@ import { useAppConfig } from "~/context/appConfig";
 export interface Category {
     id: string;
     name: string;
-    video_count: number;
+    /** Count of all materials (any type) in this category. */
+    material_count: number;
 }
 
 interface CategoryPickerModalProps {
@@ -17,6 +18,8 @@ interface CategoryPickerModalProps {
     existingCategoryIds?: string[];
     /** When true, changes copy from "加入" to "修改分类" */
     isEditMode?: boolean;
+    /** Called when the user wants to remove this material from the library (edit mode only) */
+    onDelete?: () => void;
 }
 
 /** Double-parse helper — mirrors useAppFetch behaviour for ValidJsonString responses */
@@ -34,6 +37,7 @@ export function CategoryPickerModal({
     onCancel,
     existingCategoryIds,
     isEditMode = false,
+    onDelete,
 }: CategoryPickerModalProps) {
     const [categories, setCategories] = useState<Category[]>([]);
     const [loadingList, setLoadingList] = useState(true);
@@ -90,7 +94,7 @@ export function CategoryPickerModal({
             if (!resp.ok) return;
             const cat = await parseApiResponse(resp) as Category;
             setCategories(prev =>
-                prev.some(c => c.id === cat.id) ? prev : [...prev, { ...cat, video_count: 0 }]
+                prev.some(c => c.id === cat.id) ? prev : [...prev, { ...cat, material_count: 0 }]
             );
             setSelected(prev => new Set([...prev, cat.id]));
             setNewName("");
@@ -102,11 +106,10 @@ export function CategoryPickerModal({
     const title = isEditMode ? "修改分类" : "加入素材库";
     const subtitle = isEditMode
         ? `已选 ${selected.size} 个分类`
-        : `${videoCount} 个视频 · 选择分类（可跳过）`;
-    const leftBtnLabel = isEditMode ? "清除所有分类" : "不分类，直接加入";
+        : `${videoCount} 个视频 · 请选择分类（必填）`;
     const rightBtnLabel = isEditMode
         ? (selected.size > 0 ? `保存（${selected.size} 个分类）` : "保存（无分类）")
-        : (selected.size > 0 ? `加入 ${selected.size} 个分类` : "确认加入");
+        : (selected.size > 0 ? `加入 ${selected.size} 个分类` : "请先选择分类");
 
     return (
         <div
@@ -150,7 +153,7 @@ export function CategoryPickerModal({
                                     className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 <span className="flex-1 text-sm text-gray-800">{cat.name}</span>
-                                <span className="text-xs text-gray-400">{cat.video_count} 个视频</span>
+                                <span className="text-xs text-gray-400">{cat.material_count} 个素材</span>
                             </label>
                         ))
                     )}
@@ -182,19 +185,32 @@ export function CategoryPickerModal({
                 </div>
 
                 {/* Footer */}
-                <div className="flex gap-2 px-5 py-4 border-t border-gray-100">
-                    <button
-                        onClick={() => onConfirm([])}
-                        className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-                    >
-                        {leftBtnLabel}
-                    </button>
-                    <button
-                        onClick={() => onConfirm(Array.from(selected))}
-                        className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                        {rightBtnLabel}
-                    </button>
+                <div className="flex flex-col gap-2 px-5 py-4 border-t border-gray-100">
+                    <div className="flex gap-2">
+                        {isEditMode && (
+                            <button
+                                onClick={() => onConfirm([])}
+                                className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                            >
+                                清除所有分类
+                            </button>
+                        )}
+                        <button
+                            onClick={() => onConfirm(Array.from(selected))}
+                            disabled={!isEditMode && selected.size === 0}
+                            className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {rightBtnLabel}
+                        </button>
+                    </div>
+                    {isEditMode && onDelete && (
+                        <button
+                            onClick={onDelete}
+                            className="w-full px-4 py-2 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                        >
+                            移出素材库
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

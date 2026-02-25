@@ -13,7 +13,7 @@ export const SidebarLayout: React.FC<SidebarLayoutProps> = ({ children }) => {
         <div className="flex min-h-screen text-slate-900">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-            <main className="flex-1 flex flex-col min-w-0" style={{ maxHeight: '100vh', maxWidth: '100vw', overflow: "scroll" }}>
+            <main className="flex-1 flex flex-col min-w-0 max-h-screen overflow-y-auto overflow-x-auto">
                 {/* Header */}
                 <header className="absolute px-4 lg:px-8 backdrop-blur-md top-1 z-30">
                     <div className="flex items-center gap-4">
@@ -34,6 +34,6 @@ export const SidebarLayout: React.FC<SidebarLayoutProps> = ({ children }) => {
 
                 {children}
             </main>
-        </div>
+        </div >
     )
 }

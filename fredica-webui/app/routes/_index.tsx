@@ -4,7 +4,7 @@ import type { Route } from "./+types/_index";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { useSearchParams } from "react-router";
 import { useAppConfig } from "~/context/appConfig";
-import { DEFAULT_SERVER_PORT } from "~/utils/requests";
+import { DEFAULT_SERVER_PORT } from "~/utils/app_fetch";
 
 export function meta({ }: Route.MetaArgs) {
     return [

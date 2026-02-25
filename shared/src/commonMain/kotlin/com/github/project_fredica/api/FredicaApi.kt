@@ -2,6 +2,7 @@ package com.github.project_fredica.api
 
 import com.github.project_fredica.api.routes.BilibiliFavoriteGetPageRoute
 import com.github.project_fredica.api.routes.BilibiliFavoriteGetVideoListRoute
+import com.github.project_fredica.api.routes.BilibiliVideoGetPagesRoute
 import com.github.project_fredica.api.routes.ImageProxyRoute
 import com.github.project_fredica.api.routes.MaterialCategoryCreateRoute
 import com.github.project_fredica.api.routes.MaterialCategoryDeleteRoute
@@ -10,6 +11,9 @@ import com.github.project_fredica.api.routes.MaterialDeleteRoute
 import com.github.project_fredica.api.routes.MaterialImportRoute
 import com.github.project_fredica.api.routes.MaterialListRoute
 import com.github.project_fredica.api.routes.MaterialSetCategoriesRoute
+import com.github.project_fredica.api.routes.MaterialTaskCreateRoute
+import com.github.project_fredica.api.routes.MaterialTaskListRoute
+import com.github.project_fredica.api.routes.MaterialTaskUpdateRoute
 
 interface FredicaApi {
     companion object {
@@ -42,6 +46,7 @@ interface FredicaApi {
             val allRoutes = listOf<Route>(
                 BilibiliFavoriteGetPageRoute,
                 BilibiliFavoriteGetVideoListRoute,
+                BilibiliVideoGetPagesRoute,
                 ImageProxyRoute,
                 MaterialImportRoute,
                 MaterialListRoute,
@@ -50,6 +55,9 @@ interface FredicaApi {
                 MaterialCategoryCreateRoute,
                 MaterialCategoryDeleteRoute,
                 MaterialSetCategoriesRoute,
+                MaterialTaskCreateRoute,
+                MaterialTaskListRoute,
+                MaterialTaskUpdateRoute,
             )
         }
     }

@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 
 object MaterialDeleteRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
-    override val desc = "删除素材库中指定的视频"
+    override val desc = "删除素材库中指定的素材"
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<MaterialDeleteParam>().getOrThrow()

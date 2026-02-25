@@ -1,4 +1,6 @@
 # -*- coding: UTF-8 -*-
+import json
+
 from fastapi import FastAPI
 import bilibili_api
 
@@ -34,6 +36,15 @@ async def bilibili_favorite_get_page(fid: str, page: int):
         "medias": content.get("medias", []),
         "has_more": content.get("has_more", False),
     }
+
+
+@app.get("/bilibili/video/get-pages/{bvid}")
+async def bilibili_video_get_pages(bvid: str):
+    v = bilibili_api.video.Video(bvid=bvid)
+    pages = await v.get_pages()
+    return [
+        p for p in pages
+    ]
 
 
 if __name__ == '__main__':

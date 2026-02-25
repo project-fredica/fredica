@@ -1,8 +1,8 @@
 import { type ReactNode, useState } from "react";
 import { Trash2, ExternalLink, Plus, X, Loader } from "lucide-react";
-import { useAppFetch, useImageProxyUrl } from "~/utils/requests";
-import { useAppConfig } from "~/context/appConfig";
+import { useAppFetch, useImageProxyUrl } from "~/utils/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
+import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,8 @@ interface MaterialCategory {
     id: string;
     name: string;
     description: string;
-    video_count: number;
+    /** Count of all materials (any type) in this category. */
+    material_count: number;
     created_at: number;
     updated_at: number;
 }
@@ -46,22 +47,27 @@ interface BilibiliExtra {
     bvid?: string;
 }
 
+interface MaterialTask {
+    id: string;
+    material_id: string;
+    task_type: string;
+    status: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_TABS = [
-    { key: 'all', label: '全部' },
-    { key: 'pending', label: '待处理' },
-    { key: 'downloaded', label: '已下载' },
-    { key: 'transcribed', label: '已转录' },
+    { key: 'all',         label: '全部' },
+    { key: 'pending',     label: '未下载' },
+    { key: 'local_ready', label: '已就绪' },
+    { key: 'local_error', label: '下载失败' },
 ] as const;
 type StatusTab = typeof STATUS_TABS[number]['key'];
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-    pending:     { label: '待处理', className: 'bg-gray-100 text-gray-600' },
-    downloading: { label: '下载中', className: 'bg-blue-100 text-blue-700' },
-    downloaded:  { label: '已下载', className: 'bg-green-100 text-green-700' },
-    transcribed: { label: '已转录', className: 'bg-purple-100 text-purple-700' },
-    analyzed:    { label: '已分析', className: 'bg-amber-100 text-amber-700' },
+    pending:     { label: '未下载',   className: 'bg-gray-100 text-gray-600' },
+    local_ready: { label: '已就绪',   className: 'bg-green-100 text-green-700' },
+    local_error: { label: '下载失败', className: 'bg-red-100 text-red-700' },
 };
 
 const SOURCE_BADGE: Record<string, { label: string; className: string }> = {
@@ -101,16 +107,14 @@ export default function LibraryPage() {
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
 
+    // Task data keyed by material_id
+    const [tasksMap, setTasksMap] = useState<Map<string, MaterialTask[]>>(new Map());
+
     const buildProxyUrl = useImageProxyUrl();
-    const { appConfig } = useAppConfig();
-    const apiHost = `${appConfig.webserver_schema ?? 'http'}://${appConfig.webserver_domain ?? 'localhost'}:${appConfig.webserver_port ?? '7631'}`;
-    const authHeaders: Record<string, string> = appConfig.webserver_auth_token
-        ? { Authorization: `Bearer ${appConfig.webserver_auth_token}` }
-        : {};
 
     // ── Data fetching ───────────────────────────────────────────────────────
 
-    const { data: videos, loading: videosLoading, error: videosError } = useAppFetch<MaterialVideo[]>({
+    const { data: videos, loading: videosLoading, error: videosError, apiFetch } = useAppFetch<MaterialVideo[]>({
         appPath: `/api/v1/MaterialListRoute?_r=${refreshCounter}`,
         init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
         timeout: 15_000,
@@ -122,14 +126,29 @@ export default function LibraryPage() {
         timeout: 10_000,
     });
 
+    // Lazily load tasks for videos that are visible
+    const loadTasksForMaterial = async (materialId: string) => {
+        if (tasksMap.has(materialId)) return;
+        try {
+            const { resp, data } = await apiFetch('/api/v1/MaterialTaskListRoute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ material_id: materialId }),
+            });
+            if (resp.ok) {
+                setTasksMap(prev => new Map(prev).set(materialId, data as MaterialTask[]));
+            }
+        } catch { /* ignore */ }
+    };
+
     // ── Imperative actions ──────────────────────────────────────────────────
 
     const handleDeleteVideo = async (id: string) => {
         setDeletingVideoIds(prev => new Set([...prev, id]));
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialDeleteRoute`, {
+            const { resp } = await apiFetch('/api/v1/MaterialDeleteRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ids: [id] }),
             });
             if (resp.ok) setRefreshCounter(c => c + 1);
@@ -141,9 +160,9 @@ export default function LibraryPage() {
     const handleDeleteCategory = async (id: string) => {
         setDeletingCategoryIds(prev => new Set([...prev, id]));
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialCategoryDeleteRoute`, {
+            const { resp } = await apiFetch('/api/v1/MaterialCategoryDeleteRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id }),
             });
             if (resp.ok) {
@@ -160,9 +179,9 @@ export default function LibraryPage() {
         if (!name || creatingCategory) return;
         setCreatingCategory(true);
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialCategoryCreateRoute`, {
+            const { resp } = await apiFetch('/api/v1/MaterialCategoryCreateRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name }),
             });
             if (resp.ok) {
@@ -242,7 +261,7 @@ export default function LibraryPage() {
                                         onClick={() => setSelectedCategoryId(isActive ? null : cat.id)}
                                         className="leading-none"
                                     >
-                                        {cat.name} ({cat.video_count})
+                                        {cat.name} ({cat.material_count})
                                     </button>
                                     <button
                                         onClick={() => handleDeleteCategory(cat.id)}
@@ -341,6 +360,7 @@ export default function LibraryPage() {
                             const statusBadge = STATUS_BADGE[video.pipeline_status]
                                 ?? { label: video.pipeline_status, className: 'bg-gray-100 text-gray-600' };
                             const isDeleting = deletingVideoIds.has(video.id);
+                            const videoTasks = tasksMap.get(video.id);
 
                             // Category pills shown on the video row
                             const videoCats = (categories ?? []).filter(c =>
@@ -369,6 +389,7 @@ export default function LibraryPage() {
                                 <div
                                     key={video.id}
                                     className={`flex gap-3 p-3 sm:p-4 transition-colors hover:bg-gray-50 ${isDeleting ? 'opacity-50' : ''}`}
+                                    onMouseEnter={() => loadTasksForMaterial(video.id)}
                                 >
                                     {/* Cover */}
                                     <div className="relative flex-shrink-0">
@@ -411,6 +432,19 @@ export default function LibraryPage() {
                                         </div>
 
                                         <span className="text-xs text-gray-400 font-mono">{video.source_id}</span>
+
+                                        {/* Task badges */}
+                                        {videoTasks && videoTasks.length > 0 && (
+                                            <div className="flex items-center gap-1 flex-wrap">
+                                                {videoTasks.map(task => (
+                                                    <MaterialTaskBadge
+                                                        key={task.id}
+                                                        taskType={task.task_type}
+                                                        status={task.status}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Actions */}

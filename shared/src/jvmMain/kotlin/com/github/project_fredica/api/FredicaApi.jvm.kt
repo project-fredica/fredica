@@ -5,6 +5,10 @@ import com.github.project_fredica.db.AppConfigDb
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.MaterialCategoryDb
 import com.github.project_fredica.db.MaterialCategoryService
+import com.github.project_fredica.db.MaterialDb
+import com.github.project_fredica.db.MaterialService
+import com.github.project_fredica.db.MaterialTaskDb
+import com.github.project_fredica.db.MaterialTaskService
 import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.python.PythonUtil
@@ -21,6 +25,7 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.util.toMap
 import kotlinx.coroutines.Dispatchers
@@ -117,15 +122,29 @@ object FredicaApiJvmService {
             AppConfigService.initialize(appConfigDb)
             logger.debug("AppConfigService initialized, db path: $dbPath")
 
+            // 1. Base material table + all type-specific detail table stubs (must come first)
+            val materialDb = MaterialDb(database)
+            materialDb.initialize()
+            MaterialService.initialize(materialDb)
+            logger.debug("MaterialService initialized")
+
+            // 2. Video detail table (depends on material base table existing)
             val materialVideoDb = MaterialVideoDb(database)
             materialVideoDb.initialize()
             MaterialVideoService.initialize(materialVideoDb)
             logger.debug("MaterialVideoService initialized")
 
+            // 3. Category definitions + material_category_rel junction table
             val materialCategoryDb = MaterialCategoryDb(database)
             materialCategoryDb.initialize()
             MaterialCategoryService.initialize(materialCategoryDb)
             logger.debug("MaterialCategoryService initialized")
+
+            // 4. Task table (references material.id)
+            val materialTaskDb = MaterialTaskDb(database)
+            materialTaskDb.initialize()
+            MaterialTaskService.initialize(materialTaskDb)
+            logger.debug("MaterialTaskService initialized")
         }
 
         CurrentInstance.server = embeddedServer(
@@ -176,6 +195,7 @@ object FredicaApiJvmService {
                         )
                         call.respondBytes(result.bytes, ContentType.parse(result.contentType))
                     }
+                    is ValidJsonString -> call.respondText(result.str, ContentType.Application.Json)
                     else -> call.respond(result)
                 }
             } catch (err: Throwable) {

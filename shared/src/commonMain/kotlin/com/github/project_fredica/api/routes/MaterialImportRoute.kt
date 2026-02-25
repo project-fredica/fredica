@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.db.MaterialCategoryService
+import com.github.project_fredica.db.MaterialType
 import com.github.project_fredica.db.MaterialVideo
 import com.github.project_fredica.db.MaterialVideoService
 import kotlinx.serialization.SerialName
@@ -13,13 +14,13 @@ import kotlinx.serialization.json.Json
 private val lenientJson = Json { ignoreUnknownKeys = true }
 
 /**
- * Builds the deterministic DB primary key for a bilibili video.
+ * Builds the deterministic DB primary key for a bilibili video page.
  *
  * Format: `bilibili_bvid__{bvid}__P{page}`
  * Example: `bilibili_bvid__BV1NK4y1V7M5__P1`
  *
- * When importing from a favorites list the entry represents the whole video
- * (page 1 of potentially many). Multi-page imports use distinct page numbers.
+ * `page` is the actual 1-based page number of this item.
+ * Favourites-list imports always pass `page = 1` (the representative entry).
  */
 fun bilibiliVideoId(bvid: String, page: Int = 1): String =
     "bilibili_bvid__${bvid}__P$page"
@@ -30,6 +31,7 @@ object MaterialImportRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = lenientJson.decodeFromString<MaterialImportParam>(param)
+        require(p.categoryIds.isNotEmpty()) { "至少需要指定一个分类" }
 
         val nowSec = System.currentTimeMillis() / 1000L
 
@@ -44,14 +46,13 @@ object MaterialImportRoute : FredicaApi.Route {
                     kv("cnt_danmaku", video.cntInfo.danmaku)
                     kv("fav_time", video.favTime)
                     kv("source_fid", p.sourceFid)
-                    kv("page_count", video.page)
                     kv("bvid", video.bvid)
                 }
             }.toString()
 
             MaterialVideo(
-                // Deterministic ID — no UUID, survives repeated imports
-                id = bilibiliVideoId(video.bvid),
+                id = bilibiliVideoId(video.bvid, video.page),
+                type = MaterialType.VIDEO,
                 sourceType = p.sourceType,
                 sourceId = video.bvid,
                 title = video.title,
@@ -73,8 +74,8 @@ object MaterialImportRoute : FredicaApi.Route {
         // Link to categories if any were provided.
         // IDs are deterministic so we can compute them directly — no extra DB query needed.
         if (p.categoryIds.isNotEmpty()) {
-            val videoIds = p.videos.map { bilibiliVideoId(it.bvid) }
-            MaterialCategoryService.repo.linkVideos(videoIds, p.categoryIds)
+            val materialIds = p.videos.map { bilibiliVideoId(it.bvid, it.page) }
+            MaterialCategoryService.repo.linkMaterials(materialIds, p.categoryIds)
         }
 
         return ValidJsonString("""{"inserted":$inserted,"total":${materials.size}}""")
@@ -95,6 +96,7 @@ data class BilibiliMediaImportItem(
     val title: String = "",
     val cover: String = "",
     val intro: String = "",
+    /** Actual 1-based page number this item represents (default 1). */
     val page: Int = 1,
     val duration: Int = 0,
     val upper: BilibiliUpperImportInfo = BilibiliUpperImportInfo(),

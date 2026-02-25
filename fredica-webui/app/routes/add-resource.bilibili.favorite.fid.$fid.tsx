@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { Bookmark, BookmarkCheck, Calendar, Eye, Film, Share2, ThumbsUp } from "lucide-react";
-import { useAppFetch, useImageProxyUrl } from "~/utils/requests";
+import { useAppFetch, useImageProxyUrl } from "~/utils/app_fetch";
 import { BilibiliVideoList, type MediaItem } from "~/components/bilibili/BilibiliVideoList";
 
 const PAGE_SIZE = 20;
@@ -203,7 +203,7 @@ export default function Component() {
                                 <img
                                     src={buildProxyUrl(info.cover)}
                                     alt={info.title}
-                                    className="w-28 h-[72px] object-cover rounded-lg flex-shrink-0 bg-gray-100"
+                                    className="w-20 sm:w-28 h-[52px] sm:h-[72px] object-cover rounded-lg flex-shrink-0 bg-gray-100"
                                 />
                             )}
                             <div className="flex-1 min-w-0 space-y-1.5">
