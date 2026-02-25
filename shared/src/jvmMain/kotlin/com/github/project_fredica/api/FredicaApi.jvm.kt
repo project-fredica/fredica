@@ -1,9 +1,7 @@
 package com.github.project_fredica.api
 
-import aws.smithy.kotlin.runtime.net.IpV4Addr
 import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.AppConfigDb
-import com.github.project_fredica.db.AppConfigRepo
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.MaterialCategoryDb
 import com.github.project_fredica.db.MaterialCategoryService
@@ -20,11 +18,9 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.plugins.swagger.swaggerUI
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.util.toMap
 import kotlinx.coroutines.Dispatchers
