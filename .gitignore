@@ -21,3 +21,6 @@ node_modules/
 
 .data/
 .claude/
+
+docs/.vitepress/dist
+docs/.vitepress/cache
