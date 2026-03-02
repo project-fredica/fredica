@@ -105,19 +105,57 @@ class PipelineDb(private val db: Database) : PipelineRepo {
         }
     }
 
-    /** 返回所有流水线，按 created_at DESC 排序（最新在前）。 */
-    override suspend fun listAll(): List<PipelineInstance> = withContext(Dispatchers.IO) {
-        val result = mutableListOf<PipelineInstance>()
+    /**
+     * 分页查询流水线，支持按 status / template 过滤，固定按 created_at DESC 排序。
+     *
+     * pageSize 限制在 1‒100 之间；page 超出范围时自动回到最近合法值。
+     * total = 0 时 totalPages 返回 1（避免前端显示"第 0 页"）。
+     */
+    override suspend fun listPaged(query: PipelineListQuery): PipelinePage = withContext(Dispatchers.IO) {
         db.useConnection { conn ->
-            conn.createStatement().use { stmt ->
-                stmt.executeQuery(
-                    "SELECT * FROM pipeline_instance ORDER BY created_at DESC"
-                ).use { rs ->
-                    while (rs.next()) result.add(rowToPipeline(rs))
+            // ── 构造 WHERE 子句 ─────────────────────────────────────────────
+            val conditions  = mutableListOf<String>()
+            val bindParams  = mutableListOf<String>()
+            query.status?.let   { conditions += "status = ?";   bindParams += it }
+            query.template?.let { conditions += "template = ?"; bindParams += it }
+            val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+
+            val safePageSize = query.pageSize.coerceIn(1, 100)
+
+            // ── COUNT ───────────────────────────────────────────────────────
+            val total = conn.prepareStatement(
+                "SELECT COUNT(*) FROM pipeline_instance $where"
+            ).use { ps ->
+                bindParams.forEachIndexed { i, p -> ps.setString(i + 1, p) }
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+            }
+
+            val totalPages = if (total == 0) 1 else (total + safePageSize - 1) / safePageSize
+            val safePage   = query.page.coerceIn(1, totalPages)
+            val offset     = (safePage - 1) * safePageSize
+
+            // ── 数据行 ──────────────────────────────────────────────────────
+            val items = mutableListOf<PipelineInstance>()
+            conn.prepareStatement(
+                "SELECT * FROM pipeline_instance $where ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            ).use { ps ->
+                var idx = 1
+                bindParams.forEach { ps.setString(idx++, it) }
+                ps.setInt(idx++, safePageSize)
+                ps.setInt(idx,   offset)
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) items.add(rowToPipeline(rs))
                 }
             }
+
+            PipelinePage(
+                items      = items,
+                total      = total,
+                page       = safePage,
+                pageSize   = safePageSize,
+                totalPages = totalPages,
+            )
         }
-        result
     }
 
     // ── cancel：取消流水线 ────────────────────────────────────────────────────

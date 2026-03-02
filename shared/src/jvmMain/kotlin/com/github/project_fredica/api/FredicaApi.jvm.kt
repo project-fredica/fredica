@@ -21,6 +21,7 @@ import com.github.project_fredica.worker.executors.AiAnalyzeExecutor
 import com.github.project_fredica.worker.executors.DownloadVideoExecutor
 import com.github.project_fredica.worker.executors.ExtractAudioExecutor
 import com.github.project_fredica.worker.executors.MergeTranscriptionExecutor
+import com.github.project_fredica.worker.executors.NetworkTestExecutor
 import com.github.project_fredica.worker.executors.SplitAudioExecutor
 import com.github.project_fredica.worker.executors.TranscribeChunkExecutor
 import inet.ipaddr.AddressStringException
@@ -181,6 +182,7 @@ object FredicaApiJvmService {
                 TranscribeChunkExecutor,     // Python faster-whisper 转录（PythonUtil）
                 MergeTranscriptionExecutor,  // 合并转录分片（纯 Kotlin）
                 AiAnalyzeExecutor,           // AI 分析占位（纯 Kotlin）
+                NetworkTestExecutor,         // 网速和延迟测试（ktor-client，纯 Kotlin）
             ),
         )
         logger.debug("WorkerEngine started")

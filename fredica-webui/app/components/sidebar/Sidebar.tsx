@@ -8,6 +8,7 @@ import {
   Home,
   Database,
   Cpu,
+  Wrench,
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 
@@ -81,6 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             <SideBarItem uid='add-resource' Icon={Plus} title='添加素材' routeTo='/add-resource' />
             <SideBarItem uid='library' Icon={Database} title='素材库' routeTo='/library' />
             <SideBarItem uid='processing' Icon={Cpu} title='处理中心' routeTo='/processing' />
+            <SideBarItem uid='tools' Icon={Wrench} title='小工具' routeTo='/tools' />
             <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' />
             <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' />
             {/* <SideBarItem uid='source-search' Icon={Search} title='搜索' />

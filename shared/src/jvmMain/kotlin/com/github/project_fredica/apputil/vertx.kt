@@ -14,7 +14,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 
-private val vertx: Vertx by lazy { Vertx.vertx() }
+private val vertx: Vertx by lazy {
+    val v = Vertx.vertx()
+    AppUtil.addShutdownHook("closeVertx") {
+        closeVertx()
+    }
+    return@lazy v
+}
 
 val AppUtil.GlobalVars.globalVertx: Vertx get() = vertx
 

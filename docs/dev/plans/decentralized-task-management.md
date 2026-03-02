@@ -3469,3 +3469,95 @@ B 站 Cookie 等用户凭证：
 | Kotlinx Serialization | 任务 payload JSON | 现有 |
 
 无需引入 Kafka、Redis、etcd 等重型中间件，全部基于现有技术栈扩展。
+
+---
+
+## 附录 A：网速和延迟测试任务能力（NETWORK_TEST）
+
+### A.1 设计目的
+
+NETWORK_TEST 是一个**轻量级内置工具任务**，主要用途：
+
+1. **开发阶段可视化调试**：提供一个简单、无外部依赖的任务，用于在前端"小工具"页面
+   直接触发 Worker Engine 并观察任务从 `pending → claimed → running → completed` 的
+   完整状态流转，验证 Worker Engine、Pipeline 状态机、前端轮询等各层协同工作。
+
+2. **网络诊断工具**：测试本机到各服务器（Baidu、Google、GitHub、OpenAI 等）的 HTTP
+   连接延迟，帮助用户了解当前网络状况，判断哪些下游服务（如 AI API、Python 转录）
+   可正常访问。
+
+### A.2 任务规格
+
+| 属性 | 值 |
+|------|-----|
+| taskType | `NETWORK_TEST` |
+| Executor 位置 | `commonMain/worker/executors/NetworkTestExecutor.kt` |
+| 触发方式 | `POST /api/v1/NetworkTestRoute` |
+| 平台依赖 | `ktor-client-core`（multiplatform），无需 ffmpeg / Python |
+
+### A.3 Payload 格式
+
+```json
+{
+  "urls": [
+    "https://www.baidu.com",
+    "https://www.google.com",
+    "https://github.com",
+    "https://api.openai.com"
+  ],
+  "timeout_ms": 5000
+}
+```
+
+- `urls`：需要测试的 URL 列表，省略时使用内置默认列表
+- `timeout_ms`：每个 URL 的请求超时时间（毫秒），默认 5000
+
+### A.4 Result 格式
+
+```json
+{
+  "results": [
+    { "url": "https://www.baidu.com",   "latency_ms": 42,   "status": "ok" },
+    { "url": "https://www.google.com",  "latency_ms": 350,  "status": "ok" },
+    { "url": "https://github.com",      "latency_ms": 850,  "status": "ok" },
+    { "url": "https://api.openai.com",  "latency_ms": null, "status": "timeout", "error": "超时（>5000ms）" }
+  ]
+}
+```
+
+状态值：
+- `ok`：请求成功，`latency_ms` 为实测延迟（毫秒）
+- `timeout`：请求超时
+- `error`：其他错误（DNS 解析失败、连接被拒绝等），`error` 字段含详情
+
+### A.5 NetworkTestRoute API
+
+```
+POST /api/v1/NetworkTestRoute
+Content-Type: application/json
+
+{
+  "urls": [...],        // 可选，省略时用默认列表
+  "timeout_ms": 5000   // 可选
+}
+
+响应：
+{
+  "pipeline_id": "uuid",
+  "task_id": "uuid"
+}
+```
+
+调用方通过 `pipeline_id` 轮询 `GET /api/v1/WorkerTaskListRoute?pipeline_id=xxx`
+等待任务完成，然后从 `task.result` 中解析测速结果。
+
+### A.6 前端"小工具"页面
+
+路由：`/tools`
+
+提供一个卡片式工具面板，当前包含"网速和延迟测试"工具：
+- 展示默认测试目标列表
+- "开始测试"按钮触发 NetworkTestRoute
+- 实时显示任务状态（轮询，每 1s 一次）
+- 任务完成后渲染延迟结果表格（URL | 延迟 | 状态）
+- 侧边栏新增"小工具"导航项（`Wrench` 图标）

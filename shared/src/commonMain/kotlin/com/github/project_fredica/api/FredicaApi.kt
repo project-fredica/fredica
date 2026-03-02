@@ -14,6 +14,7 @@ import com.github.project_fredica.api.routes.MaterialSetCategoriesRoute
 import com.github.project_fredica.api.routes.MaterialTaskCreateRoute
 import com.github.project_fredica.api.routes.MaterialTaskListRoute
 import com.github.project_fredica.api.routes.MaterialTaskUpdateRoute
+import com.github.project_fredica.api.routes.NetworkTestRoute
 import com.github.project_fredica.api.routes.PipelineCancelRoute
 import com.github.project_fredica.api.routes.PipelineCreateRoute
 import com.github.project_fredica.api.routes.PipelineGetRoute
@@ -68,6 +69,7 @@ interface FredicaApi {
                 PipelineGetRoute,
                 PipelineCancelRoute,
                 WorkerTaskListRoute,
+                NetworkTestRoute,
             )
         }
     }

@@ -100,6 +100,48 @@ data class TaskEvent(
 // PipelineRepo —— 流水线数据访问接口
 // =============================================================================
 
+// =============================================================================
+// PipelineListQuery / PipelinePage —— 分页查询参数与响应
+// =============================================================================
+
+/**
+ * [PipelineRepo.listPaged] 的查询参数。
+ *
+ * @param status   按状态过滤（null = 不过滤）
+ * @param template 按模板名过滤（null = 不过滤）
+ * @param page     页码（1 起始）
+ * @param pageSize 每页条数（1‒100，默认 20）
+ */
+@Serializable
+data class PipelineListQuery(
+    val status:   String? = null,
+    val template: String? = null,
+    val page:     Int = 1,
+    @SerialName("page_size") val pageSize: Int = 20,
+)
+
+/**
+ * [PipelineRepo.listPaged] 的分页响应。
+ *
+ * @param items      当前页的流水线列表
+ * @param total      符合过滤条件的总记录数
+ * @param page       实际生效的页码
+ * @param pageSize   实际生效的每页条数
+ * @param totalPages 总页数（最小为 1）
+ */
+@Serializable
+data class PipelinePage(
+    val items:      List<PipelineInstance>,
+    val total:      Int,
+    val page:       Int,
+    @SerialName("page_size")   val pageSize:   Int,
+    @SerialName("total_pages") val totalPages: Int,
+)
+
+// =============================================================================
+// PipelineRepo —— 流水线数据访问接口
+// =============================================================================
+
 interface PipelineRepo {
     /** 创建一条流水线记录。 */
     suspend fun create(pipeline: PipelineInstance)
@@ -107,8 +149,11 @@ interface PipelineRepo {
     /** 按 id 查询流水线，不存在时返回 null。 */
     suspend fun getById(id: String): PipelineInstance?
 
-    /** 返回全部流水线，按 created_at 倒序排列。 */
-    suspend fun listAll(): List<PipelineInstance>
+    /**
+     * 分页查询流水线，默认按 created_at 倒序排列。
+     * 支持按 [PipelineListQuery.status] 和 [PipelineListQuery.template] 过滤。
+     */
+    suspend fun listPaged(query: PipelineListQuery = PipelineListQuery()): PipelinePage
 
     /**
      * 取消流水线：将所有 pending 任务改为 cancelled，流水线本身也标记为 cancelled。

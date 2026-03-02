@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import java.io.File
 import java.net.Proxy
 import kotlin.contracts.ExperimentalContracts
@@ -42,10 +43,13 @@ object AppUtil {
                 }
             }
         }
+
         /** 通用缓存目录：`{appDataDir}/cache` */
         val appDataCacheDir: File get() = appDataDir.resolve("cache")
+
         /** 图片缓存目录：`{appDataDir}/cache/images`，用于缓存封面等远程图片。 */
         val appDataImageCacheDir: File get() = appDataCacheDir.resolve("images")
+
         /** 日志目录：`{appDataDir}/log` */
         val appDataLogDir: File get() = appDataDir.resolve("log")
 
@@ -60,21 +64,25 @@ object AppUtil {
      * 全局共享资源，使用 `lazy` 延迟初始化，避免启动时不必要的资源开销。
      */
     object GlobalVars {
+        private fun OkHttpClient.Builder.useAppKtorClientCommonConfig() {
+            followRedirects(true)
+            followSslRedirects(true)
+        }
+
         /**
          * 读取系统网络代理配置的 Ktor HTTP 客户端，用于访问外部网络（如 B 站 API）。
          * 代理配置由平台 actual 的 [AppUtil.readNetworkProxy] 提供。
          */
-        val ktorClientProxied by lazy {
-            HttpClient(OkHttp) {
+        val ktorClientProxied
+            get() = HttpClient(OkHttp) {
                 engine {
                     config {
-                        followRedirects(true)
+                        useAppKtorClientCommonConfig()
                     }
 
                     proxy = readNetworkProxy()
                 }
             }
-        }
 
         /**
          * 强制直连（不走代理）的 Ktor HTTP 客户端，用于访问本地服务器或局域网资源。
@@ -84,7 +92,7 @@ object AppUtil {
             HttpClient(OkHttp) {
                 engine {
                     config {
-                        followRedirects(true)
+                        useAppKtorClientCommonConfig()
                     }
 
                     proxy = ProxyConfig.NO_PROXY

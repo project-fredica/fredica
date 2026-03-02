@@ -11,7 +11,7 @@ package com.github.project_fredica.db
 //   4. recalculate（有失败）  — 任意子任务 failed → pipeline = failed（优先于其他状态）
 //   5. cancel                 — pending 任务被取消，running 任务不受影响
 //   6. hasActivePipeline      — 活跃流水线阻止重复创建，完成后解除阻塞
-//   7. listAll                — 批量查询返回全部记录
+//   7. listPaged              — 分页查询（过滤 + 分页 + 倒序）
 //
 // 测试环境：每个测试用例独立的 SQLite 临时文件（@BeforeTest 重新创建）。
 // =============================================================================
@@ -237,24 +237,41 @@ class PipelineDbTest {
         )
     }
 
-    // ── 测试 7：listAll —— 批量查询 ───────────────────────────────────────────
+    // ── 测试 7：listPaged —— 分页查询 ─────────────────────────────────────────
 
     /**
-     * 证明目的：listAll() 能返回数据库中的全部流水线记录。
+     * 证明目的：listPaged() 能正确实现分页、状态过滤和倒序排列。
      *
      * 证明过程：
-     *   1. 连续插入 3 条流水线。
-     *   2. 调用 listAll()，断言返回数量 >= 3。
-     *   （用 >= 而非 == 是因为某些测试环境可能有其他遗留数据，
-     *    但本测试每次都是新库，实际上等于 3。）
+     *   1. 插入 3 条流水线（status 各不同：pending / running / completed）。
+     *   2. 不加过滤，pageSize=100 → 应返回全部 3 条，total=3。
+     *   3. 过滤 status=running  → 只返回 1 条。
+     *   4. page=1, pageSize=2   → items.size=2，totalPages=2。
+     *   5. page=2, pageSize=2   → items.size=1（最后一页）。
      */
     @Test
-    fun testListAll() = runBlocking {
-        pipelineDb.create(pipeline("pl-list-1"))
-        pipelineDb.create(pipeline("pl-list-2"))
-        pipelineDb.create(pipeline("pl-list-3"))
+    fun testListPaged() = runBlocking {
+        pipelineDb.create(pipeline("pl-page-1").copy(status = "pending"))
+        pipelineDb.create(pipeline("pl-page-2").copy(status = "running"))
+        pipelineDb.create(pipeline("pl-page-3").copy(status = "completed"))
 
-        assertTrue(pipelineDb.listAll().size >= 3, "listAll 应返回全部 3 条流水线记录")
+        // 全量查询
+        val all = pipelineDb.listPaged(PipelineListQuery(pageSize = 100))
+        assertTrue(all.total >= 3, "total 应 >= 3")
+        assertTrue(all.items.size >= 3, "items.size 应 >= 3")
+
+        // 按状态过滤
+        val running = pipelineDb.listPaged(PipelineListQuery(status = "running", pageSize = 100))
+        assertEquals(1, running.total, "过滤 running 应只有 1 条")
+
+        // 分页：第 1 页，每页 2 条
+        val page1 = pipelineDb.listPaged(PipelineListQuery(page = 1, pageSize = 2))
+        assertEquals(2, page1.items.size, "第 1 页应返回 2 条")
+        assertEquals(2, page1.totalPages, "总页数应为 2")
+
+        // 分页：第 2 页
+        val page2 = pipelineDb.listPaged(PipelineListQuery(page = 2, pageSize = 2))
+        assertEquals(1, page2.items.size, "第 2 页应返回 1 条")
     }
 
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
