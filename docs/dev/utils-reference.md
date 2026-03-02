@@ -39,3 +39,9 @@ JVM 平台特定实现位于 `shared/src/jvmMain/kotlin/com/github/project_fredi
 | `Platform.kt` | 运行平台检测 |
 | `stringUtil.kt` | 命名格式枚举定义（`CaseFormat`）；`convertCase` expect 声明 |
 | `stringUtil.jvm.kt` | `convertCase` JVM actual 实现（委托 Guava）|
+
+**JVM 平台专属（`jvmMain/`）**
+
+| 文件 | 职责 |
+|------|------|
+| `python/PythonUtil.kt` | Python 辅助服务 HTTP 客户端；`Py314Embed.PyUtilServer.requestText(method, path, body?)` |

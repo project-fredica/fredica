@@ -14,6 +14,7 @@ order: 4
 ```
 
 启动 Compose Desktop 应用，内嵌 WebView 加载前端页面。这是日常开发的主要入口。
+应用启动时会同步启动 Ktor API 服务器（`:7631`）和 Python 辅助服务（`:7632`）。
 
 ### 构建共享模块
 
@@ -28,21 +29,38 @@ order: 4
 ./gradlew :shared:build --info
 ```
 
-### 构建前端
+### 构建 WebUI 前端
 
-```shell
-# 安装 Node 依赖（首次或依赖变更后）
-npm install
-
-# 构建前端产物（输出到 fredica-webui/build/）
-npm run docs:build
-```
-
-或进入前端目录单独构建：
+WebUI 是独立的 Node 工程，位于 `fredica-webui/` 目录，有自己的 `package.json`。
 
 ```shell
 cd fredica-webui
+
+# 首次或依赖变更后安装依赖
+npm install
+
+# 启动开发服务器（热更新，默认 :7630）
+npm run dev
+
+# 构建生产产物（输出到 fredica-webui/build/）
 npm run build
+```
+
+### 构建文档站（VitePress）
+
+文档站使用根目录的 `package.json`（与 WebUI 前端工程**相互独立**）。
+
+```shell
+# 在项目根目录执行
+
+# 安装 VitePress 等文档依赖
+npm install
+
+# 本地预览文档
+npm run docs:dev
+
+# 构建文档产物
+npm run docs:build
 ```
 
 ### 构建桌面发行包
@@ -74,6 +92,44 @@ npm run build
 
 ---
 
+## 运行测试
+
+所有单元测试位于 `shared/src/jvmTest/`，通过 Gradle 在 JVM 上运行。
+
+### 运行全部测试
+
+```shell
+./gradlew :shared:jvmTest
+```
+
+### 运行单个测试类
+
+```shell
+./gradlew :shared:jvmTest --tests "com.github.project_fredica.db.TaskDbTest"
+./gradlew :shared:jvmTest --tests "com.github.project_fredica.worker.WorkerEngineTest"
+```
+
+### 测试文件一览
+
+| 测试文件 | 覆盖范围 |
+|---------|---------|
+| `db/TaskDbTest.kt` | 任务队列 CRUD、DAG 依赖 `claimNext` 逻辑 |
+| `db/PipelineDbTest.kt` | Pipeline 生命周期、`recalculate()` 状态机 |
+| `worker/WorkerEngineTest.kt` | Worker 并发限制、任务执行流程 |
+| `worker/DagEngineTest.kt` | DAG 拓扑调度正确性 |
+| `python/PythonUtilTest.kt` | Python 服务 HTTP 通信（需要 Python 服务运行） |
+
+::: warning SQLite 测试隔离
+数据库测试使用临时文件（`File.createTempFile`），而非内存数据库。
+原因：ktorm 连接池每次 `useConnection{}` 开新连接，内存库每条连接是独立空库，会导致测试间数据不共享。
+:::
+
+::: warning WorkerEngine 测试隔离
+`WorkerEngine` 是全局单例，每次 `start()` 都会新增轮询协程。测试类须在 `@AfterTest` 中取消所有通过 `activeScopes` 记录的 `CoroutineScope`，避免上一个测试的协程抢占下一个测试的任务。
+:::
+
+---
+
 ## 关键依赖版本
 
 | 依赖 | 版本 |
@@ -98,24 +154,30 @@ npm run build
 
 ```
 fredica/
-├── composeApp/          # Compose Multiplatform 桌面应用
+├── composeApp/              # Compose Multiplatform 桌面应用
 │   └── src/
-│       ├── commonMain/  # 跨平台 UI 代码
-│       ├── jvmMain/     # JVM 平台特定代码
-│       └── androidMain/ # Android 特定代码
-├── shared/              # 跨平台核心业务逻辑
+│       ├── commonMain/      # 跨平台 UI 代码
+│       ├── jvmMain/         # JVM 平台特定代码
+│       └── androidMain/     # Android 特定代码
+├── shared/                  # 跨平台核心业务逻辑
 │   └── src/
-│       ├── commonMain/  # 共享代码（API、DB 模型、工具）
-│       └── jvmMain/     # JVM 实现（Ktor 服务器启动）
-├── fredica-webui/       # React 前端
-│   └── app/routes/      # 页面路由文件
-├── server/              # 独立服务器模块（实验性）
-├── docs/                # VitePress 文档
-├── build.gradle.kts     # 根构建脚本
-├── settings.gradle.kts  # 模块注册
+│       ├── commonMain/      # 共享代码（API、DB 模型、Worker 引擎、工具）
+│       ├── jvmMain/         # JVM 实现（Ktor 启动、Python 客户端、JVM Executor）
+│       └── jvmTest/         # JVM 单元测试
+├── fredica-webui/           # React 前端（独立 Node 工程）
+│   ├── app/routes/          # 页面路由文件
+│   └── package.json         # WebUI 专属 Node 依赖
+├── desktop_assets/          # 随安装包分发的平台资产
+│   ├── common/
+│   │   └── fredica-pyutil/  # Python 辅助服务源码（FastAPI + faster-whisper）
+│   └── windows/lfs/         # Windows LFS 大文件（Python 嵌入式运行时等）
+├── server/                  # 独立服务器模块（实验性）
+├── docs/                    # VitePress 文档站（独立 Node 工程）
+├── build.gradle.kts         # 根构建脚本
+├── settings.gradle.kts      # 模块注册
 ├── gradle/
-│   └── libs.versions.toml  # 统一版本管理
-└── package.json         # Node 脚本（文档 + 前端）
+│   └── libs.versions.toml   # 统一版本管理
+└── package.json             # 根 Node 脚本（仅文档站 docs:dev / docs:build）
 ```
 
 ---
@@ -127,6 +189,6 @@ fredica/
 :::
 
 计划使用 GitHub Actions 实现：
-- PR 提交时自动运行 Kotlin 单元测试
+- PR 提交时自动运行 Kotlin 单元测试（`./gradlew :shared:jvmTest`）
 - Tag 推送时自动构建各平台安装包并发布到 GitHub Releases
 - 文档推送时自动部署到 GitHub Pages
