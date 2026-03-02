@@ -11,7 +11,18 @@ import com.github.project_fredica.db.MaterialTaskDb
 import com.github.project_fredica.db.MaterialTaskService
 import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
+import com.github.project_fredica.db.PipelineDb
+import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.TaskDb
+import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.python.PythonUtil
+import com.github.project_fredica.worker.WorkerEngine
+import com.github.project_fredica.worker.executors.AiAnalyzeExecutor
+import com.github.project_fredica.worker.executors.DownloadVideoExecutor
+import com.github.project_fredica.worker.executors.ExtractAudioExecutor
+import com.github.project_fredica.worker.executors.MergeTranscriptionExecutor
+import com.github.project_fredica.worker.executors.SplitAudioExecutor
+import com.github.project_fredica.worker.executors.TranscribeChunkExecutor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
@@ -83,8 +94,8 @@ actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route
 actual suspend fun FredicaApi.Companion.getNativeWebServerLocalDomainAndPort(): Pair<String, UShort>? {
     val logger = createLogger()
     val r = Pair(
-        FredicaApiJvmService.CurrentInstance.initOption.getLocalDomain(),
-        FredicaApiJvmService.CurrentInstance.getLocalPort(),
+        FredicaApiJvmService.CurrentInstanceHandler.initOption.getLocalDomain(),
+        FredicaApiJvmService.CurrentInstanceHandler.getLocalPort(),
     )
     logger.debug("native web server local domain and port is : $r")
     return r
@@ -96,64 +107,83 @@ actual suspend fun FredicaApi.PyUtil.get(path: String): String {
 
 object FredicaApiJvmService {
 
-    object CurrentInstance {
+    object CurrentInstanceHandler {
         lateinit var initOption: FredicaApiJvmInitOption
         lateinit var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
 
-        fun getLocalPort(): UShort {
-            val p = initOption.ktorServerPort
-            return p
-        }
+        fun getLocalPort(): UShort = initOption.ktorServerPort
     }
 
     suspend fun init(option: FredicaApiJvmInitOption) {
         val logger = createLogger()
-        CurrentInstance.initOption = option
+        CurrentInstanceHandler.initOption = option
 
-        // Initialize SQLite database and config service
+        // Initialize SQLite database and service layers
         withContext(Dispatchers.IO) {
             val dbPath = AppUtil.Paths.appDbPath.also { it.parentFile.mkdirs() }
             val database = Database.connect(
                 url = "jdbc:sqlite:${dbPath.absolutePath}",
                 driver = "org.sqlite.JDBC",
             )
-            val appConfigDb = AppConfigDb(database)
-            appConfigDb.initialize()
-            AppConfigService.initialize(appConfigDb)
-            logger.debug("AppConfigService initialized, db path: $dbPath")
 
+            suspend fun <T> boot(label: String, repo: T, init: suspend T.() -> Unit, register: (T) -> Unit) {
+                repo.init()
+                register(repo)
+                logger.debug("$label initialized")
+            }
+
+            boot(
+                "AppConfigService, db path: $dbPath",
+                AppConfigDb(database),
+                { initialize() }) { AppConfigService.initialize(it) }
             // 1. Base material table + all type-specific detail table stubs (must come first)
-            val materialDb = MaterialDb(database)
-            materialDb.initialize()
-            MaterialService.initialize(materialDb)
-            logger.debug("MaterialService initialized")
-
+            boot("MaterialService", MaterialDb(database), { initialize() }) { MaterialService.initialize(it) }
             // 2. Video detail table (depends on material base table existing)
-            val materialVideoDb = MaterialVideoDb(database)
-            materialVideoDb.initialize()
-            MaterialVideoService.initialize(materialVideoDb)
-            logger.debug("MaterialVideoService initialized")
-
+            boot("MaterialVideoService", MaterialVideoDb(database), { initialize() }) {
+                MaterialVideoService.initialize(
+                    it
+                )
+            }
             // 3. Category definitions + material_category_rel junction table
-            val materialCategoryDb = MaterialCategoryDb(database)
-            materialCategoryDb.initialize()
-            MaterialCategoryService.initialize(materialCategoryDb)
-            logger.debug("MaterialCategoryService initialized")
-
+            boot(
+                "MaterialCategoryService",
+                MaterialCategoryDb(database),
+                { initialize() }) { MaterialCategoryService.initialize(it) }
             // 4. Task table (references material.id)
-            val materialTaskDb = MaterialTaskDb(database)
-            materialTaskDb.initialize()
-            MaterialTaskService.initialize(materialTaskDb)
-            logger.debug("MaterialTaskService initialized")
+            boot(
+                "MaterialTaskService",
+                MaterialTaskDb(database),
+                { initialize() }) { MaterialTaskService.initialize(it) }
+            // 5. Async worker task queue (pipeline_instance + task + task_event tables)
+            boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
+            boot("PipelineService", PipelineDb(database), { initialize() }) { PipelineService.initialize(it) }
         }
 
-        CurrentInstance.server = embeddedServer(
+        CurrentInstanceHandler.server = embeddedServer(
             Netty, port = option.ktorServerPort.toInt(), host = option.ktorServerHost, module = {
                 initModule(option)
             })
         logger.debug("server start suspend start")
-        CurrentInstance.server.startSuspend(wait = false)
+        CurrentInstanceHandler.server.startSuspend(wait = false)
         logger.debug("server start suspend finish")
+
+        // 启动异步任务引擎，显式传入全部 executor（JVM 平台特有的 executor 在此注册）。
+        // WorkerEngine 位于 commonMain，defaultExecutors 仅含纯 Kotlin 的通用 executor；
+        // 依赖 ProcessBuilder / PythonUtil 的 JVM executor 在此处补充传入。
+        val engineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        WorkerEngine.start(
+            maxWorkers = 2,
+            scope = engineScope,
+            executors = listOf(
+                DownloadVideoExecutor,       // curl 下载视频（ProcessBuilder）
+                ExtractAudioExecutor,        // ffmpeg 提取音轨（ProcessBuilder）
+                SplitAudioExecutor,          // ffmpeg 切片（ProcessBuilder + java.io.File）
+                TranscribeChunkExecutor,     // Python faster-whisper 转录（PythonUtil）
+                MergeTranscriptionExecutor,  // 合并转录分片（纯 Kotlin）
+                AiAnalyzeExecutor,           // AI 分析占位（纯 Kotlin）
+            ),
+        )
+        logger.debug("WorkerEngine started")
     }
 
 
@@ -190,11 +220,11 @@ object FredicaApiJvmService {
                 when (val result = scope()) {
                     is ImageProxyResponse -> {
                         call.response.headers.append(
-                            HttpHeaders.CacheControl,
-                            "public, max-age=31536000, immutable"
+                            HttpHeaders.CacheControl, "public, max-age=31536000, immutable"
                         )
                         call.respondBytes(result.bytes, ContentType.parse(result.contentType))
                     }
+
                     is ValidJsonString -> call.respondText(result.str, ContentType.Application.Json)
                     else -> call.respond(result)
                 }
@@ -202,6 +232,11 @@ object FredicaApiJvmService {
                 logger.error("Failed in route ${route.name}", err)
                 call.respond(HttpStatusCode.InternalServerError)
             }
+        }
+
+        suspend fun RoutingContext.handleRoute(route: FredicaApi.Route, getBody: suspend RoutingContext.() -> String) {
+            if (route.requiresAuth && !checkAuth()) return
+            handleRouteResult(route) { route.handler(getBody()) }
         }
 
         routing {
@@ -215,40 +250,12 @@ object FredicaApiJvmService {
 
             for (route in allRoutes) {
                 when (route.mode) {
-                    FredicaApi.Route.Mode.Get -> {
-                        get("/api/v1/${route.name}") {
-                            if (route.requiresAuth) {
-                                handleAuth {
-                                    if (it == null) {
-                                        return@get
-                                    }
-                                }
-                            }
-
-                            val query = call.queryParameters.toMap()
-                            handleRouteResult(route) {
-                                route.handler(
-                                    AppUtil.GlobalVars.json.encodeToString(query)
-                                )
-                            }
-                        }
+                    FredicaApi.Route.Mode.Get -> get("/api/v1/${route.name}") {
+                        handleRoute(route) { AppUtil.GlobalVars.json.encodeToString(call.queryParameters.toMap()) }
                     }
 
-                    FredicaApi.Route.Mode.Post -> {
-                        post("/api/v1/${route.name}") {
-                            if (route.requiresAuth) {
-                                handleAuth {
-                                    if (it == null) {
-                                        return@post
-                                    }
-                                }
-                            }
-
-                            val body = call.receiveText()
-                            handleRouteResult(route) {
-                                route.handler(body)
-                            }
-                        }
+                    FredicaApi.Route.Mode.Post -> post("/api/v1/${route.name}") {
+                        handleRoute(route) { call.receiveText() }
                     }
                 }
             }
@@ -257,27 +264,11 @@ object FredicaApiJvmService {
 }
 
 
-sealed interface FredicaApiJvmRouteAuthData {
-    data class Token(
-        val token: String
-    ) : FredicaApiJvmRouteAuthData
-}
-
-
-private suspend inline fun RoutingContext.handleAuth(scope: (FredicaApiJvmRouteAuthData?) -> Unit) {
+private suspend fun RoutingContext.checkAuth(): Boolean {
     val authHead = call.request.headers["Authorization"]
-    if (authHead.isNullOrBlank()) {
+    if (authHead.isNullOrBlank() || !authHead.startsWith("Bearer ")) {
         call.respond(HttpStatusCode.Unauthorized)
-        scope(null)
-        return
+        return false
     }
-    if (authHead.startsWith("Bearer ")) {
-        val token = authHead.removePrefix("Bearer ")
-        scope(FredicaApiJvmRouteAuthData.Token(token = token))
-        return
-    }
-    // Unrecognized header format
-    call.respond(HttpStatusCode.Unauthorized)
-    scope(null)
-    return
+    return true
 }

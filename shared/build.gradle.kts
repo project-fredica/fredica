@@ -57,6 +57,11 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
+        jvmTest.dependencies {
+            implementation(libs.kotlin.test)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+            implementation(libs.sqlite.jdbc)
+        }
         androidMain.dependencies {
             //noinspection UseTomlInstead
             implementation("com.google.guava:guava:33.5.0-android")

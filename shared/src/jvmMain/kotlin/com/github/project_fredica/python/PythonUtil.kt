@@ -9,6 +9,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toFixed
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.request
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
@@ -204,7 +205,12 @@ object PythonUtil {
                 }
             }
 
-            suspend fun requestText(method: HttpMethod, p: String): String {
+            suspend fun requestText(
+                method: HttpMethod,
+                p: String,
+                body: String? = null,
+                requestTimeoutMs: Long = 60_000L,
+            ): String {
                 logger.debug("request to $_name route ${method.value} $p")
                 val resp = AppUtil.GlobalVars.ktorClientLocal.request {
                     url {
@@ -215,10 +221,13 @@ object PythonUtil {
                     }
                     this.method = method
                     contentType(ContentType.Application.Json)
+                    if (body != null) {
+                        setBody(body)
+                    }
                     timeout {
-                        this.connectTimeoutMillis = 60000
-                        this.requestTimeoutMillis = 60000
-                        this.socketTimeoutMillis = 60000
+                        this.connectTimeoutMillis = 60_000
+                        this.requestTimeoutMillis = requestTimeoutMs
+                        this.socketTimeoutMillis = requestTimeoutMs
                     }
                 }
                 if (resp.status.value != 200) {

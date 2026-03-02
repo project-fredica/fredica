@@ -128,7 +128,7 @@ fun ProxyConfig?.isDirect(): Boolean {
 
 /**
  * 检测并返回应用数据目录，在应用首次启动时执行一次。
- * 由平台 actual 实现，例如 Windows 返回 `%APPDATA%\Fredica`。
+ * 由平台 actual 实现。
  */
 expect suspend fun AppUtil.Paths.InternalInit.detectAppDataDirOnInit(): File
 

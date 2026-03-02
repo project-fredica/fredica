@@ -14,6 +14,11 @@ import com.github.project_fredica.api.routes.MaterialSetCategoriesRoute
 import com.github.project_fredica.api.routes.MaterialTaskCreateRoute
 import com.github.project_fredica.api.routes.MaterialTaskListRoute
 import com.github.project_fredica.api.routes.MaterialTaskUpdateRoute
+import com.github.project_fredica.api.routes.PipelineCancelRoute
+import com.github.project_fredica.api.routes.PipelineCreateRoute
+import com.github.project_fredica.api.routes.PipelineGetRoute
+import com.github.project_fredica.api.routes.PipelineListRoute
+import com.github.project_fredica.api.routes.WorkerTaskListRoute
 
 interface FredicaApi {
     companion object {
@@ -58,6 +63,11 @@ interface FredicaApi {
                 MaterialTaskCreateRoute,
                 MaterialTaskListRoute,
                 MaterialTaskUpdateRoute,
+                PipelineCreateRoute,
+                PipelineListRoute,
+                PipelineGetRoute,
+                PipelineCancelRoute,
+                WorkerTaskListRoute,
             )
         }
     }

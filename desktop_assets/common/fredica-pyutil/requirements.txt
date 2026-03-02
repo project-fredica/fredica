@@ -4,3 +4,4 @@ loguru
 fastapi[standard]
 uvicorn[standard]
 bilibili-api-python
+faster-whisper
