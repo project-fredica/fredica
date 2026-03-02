@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Plus, Loader } from "lucide-react";
 import { useAppConfig } from "~/context/appConfig";
+import { parseJsonBody } from "~/util/app_fetch";
 
 export interface Category {
     id: string;
@@ -20,15 +21,6 @@ interface CategoryPickerModalProps {
     isEditMode?: boolean;
     /** Called when the user wants to remove this material from the library (edit mode only) */
     onDelete?: () => void;
-}
-
-/** Double-parse helper — mirrors useAppFetch behaviour for ValidJsonString responses */
-async function parseApiResponse(resp: Response): Promise<unknown> {
-    let data = await resp.json();
-    while (typeof data === "string") {
-        try { data = JSON.parse(data); } catch { break; }
-    }
-    return data;
 }
 
 export function CategoryPickerModal({
@@ -63,7 +55,7 @@ export function CategoryPickerModal({
                     body: "{}",
                 });
                 if (!resp.ok || cancelled) return;
-                const data = await parseApiResponse(resp) as Category[];
+                const data = await parseJsonBody(resp) as Category[];
                 if (!cancelled) setCategories(data);
             } finally {
                 if (!cancelled) setLoadingList(false);
@@ -92,7 +84,7 @@ export function CategoryPickerModal({
                 body: JSON.stringify({ name }),
             });
             if (!resp.ok) return;
-            const cat = await parseApiResponse(resp) as Category;
+            const cat = await parseJsonBody(resp) as Category;
             setCategories(prev =>
                 prev.some(c => c.id === cat.id) ? prev : [...prev, { ...cat, material_count: 0 }]
             );

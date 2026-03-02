@@ -2,19 +2,40 @@ import { createContext, useContext, useLayoutEffect, useState } from "react";
 
 type WebserverSchema = "http" | "https";
 
+/** 后端 Web 服务器连接配置，所有字段均可为 null（未填写时使用默认值）。 */
 interface AppConfig {
+    /** 服务器域名，null 时 useAppFetch 默认使用 "localhost"。 */
     webserver_domain: string | null;
+    /** 服务器端口号（字符串形式），null 时使用 DEFAULT_SERVER_PORT。 */
     webserver_port: string | null;
+    /** 协议，null 时默认使用 "http"。 */
     webserver_schema: WebserverSchema | null;
+    /**
+     * Bearer Token 鉴权令牌。
+     * 注意：出于安全考虑，此字段**不持久化**到 localStorage，
+     * 仅在内存中保留，页面刷新后需重新输入。
+     */
     webserver_auth_token: string | null;
 }
 
+/** React Context 暴露的类型，通过 `useAppConfig()` 获取。 */
 interface AppConfigContextType {
+    /** 当前生效的配置对象（初始值为 defaultConfig，localStorage 加载完成后更新）。 */
     appConfig: AppConfig;
+    /**
+     * 更新配置的部分字段，内部会 merge 到当前配置并写入 localStorage。
+     * 传入 `webserver_auth_token` 时同样会写入，但 localStorage 读取时会忽略该字段。
+     */
     setAppConfig: (config: Partial<AppConfig>) => void;
+    /**
+     * localStorage 是否已完成初始化加载。
+     * 在首次渲染时为 false，`useLayoutEffect` 执行完毕后变为 true。
+     * 依赖配置才能正确渲染的组件可等待此标志后再渲染，避免闪烁。
+     */
     isStorageLoaded: boolean;
 }
 
+/** localStorage 中存储配置的键名。 */
 const STORAGE_KEY = "fredica_app_config";
 
 const defaultConfig: AppConfig = { webserver_domain: null, webserver_port: null, webserver_schema: null, webserver_auth_token: null };
@@ -25,6 +46,20 @@ const AppConfigContext = createContext<AppConfigContextType>({
     isStorageLoaded: false,
 });
 
+/**
+ * 应用配置 Context Provider。
+ *
+ * - 始终以 `defaultConfig` 初始化，避免 SSR hydration 不一致。
+ * - 使用 `useLayoutEffect` 在首次绘制前同步读取 localStorage，不产生 UI 闪烁。
+ * - `webserver_auth_token` 不从 localStorage 恢复，需在每次会话中重新设置。
+ *
+ * 在 `root.tsx` 中包裹整个应用：
+ * ```tsx
+ * <AppConfigProvider>
+ *   <App />
+ * </AppConfigProvider>
+ * ```
+ */
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     // 始终以 defaultConfig 初始化，避免 SSR hydration 不一致
     const [appConfig, setAppConfigState] = useState<AppConfig>(defaultConfig);
@@ -61,6 +96,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     );
 }
 
+/** 获取应用配置 Context，需在 `AppConfigProvider` 内使用。 */
 export function useAppConfig() {
     return useContext(AppConfigContext);
 }

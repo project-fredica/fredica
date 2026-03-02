@@ -14,6 +14,13 @@ title: 开发文档
 | [项目架构](./architecture) | 模块划分、技术选型与系统设计 |
 | [API 参考](./api-reference) | 后端 RESTful API 完整文档 |
 | [构建指南](./build) | 各模块构建命令与产物说明 |
+| [工具函数参考](./utils-reference) | 前端与 Kotlin 工具函数索引，AI 辅助开发必读 |
+
+## 架构计划
+
+| 计划 | 说明 |
+|------|------|
+| [去中心化任务管理架构](./plans/decentralized-task-management) | 多设备协同处理素材的分布式任务调度方案 |
 
 ## 技术栈速览
 

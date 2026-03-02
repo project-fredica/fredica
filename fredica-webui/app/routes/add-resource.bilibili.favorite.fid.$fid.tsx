@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { Bookmark, BookmarkCheck, Calendar, Eye, Film, Share2, ThumbsUp } from "lucide-react";
-import { useAppFetch, useImageProxyUrl } from "~/utils/app_fetch";
+import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import { BilibiliVideoList, type MediaItem } from "~/components/bilibili/BilibiliVideoList";
 
 const PAGE_SIZE = 20;

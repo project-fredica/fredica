@@ -1,7 +1,8 @@
 import { type ReactNode, useState, useEffect } from "react";
 import { ExternalLink, Download, Play, Eye, Heart, MessageSquare, Check, Loader, Pencil, ChevronDown, Braces, X } from "lucide-react";
-import { useImageProxyUrl, useAppFetch } from "~/utils/app_fetch";
+import { useImageProxyUrl, useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
+import { formatDuration, formatCount, formatFavDate, buildPageWindows } from "~/util/bilibili";
 
 export interface MediaItem {
     id: number;
@@ -64,48 +65,7 @@ function computeDbId(media: MediaItem): string {
     return media.dbId ?? `bilibili_bvid__${media.bvid}__P1`;
 }
 
-function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) {
-        return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    }
-    return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatCount(n: number): string {
-    if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
-    return String(n);
-}
-
-function formatFavDate(ts: number): string {
-    const d = new Date(ts * 1000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 const PAGE_SIZE = 20;
-
-function buildPageWindows(totalPages: number, loadedPage: number): number[] {
-    const show = new Set<number>();
-    show.add(1);
-    show.add(2);
-    show.add(totalPages - 1);
-    show.add(totalPages);
-    for (let d = -2; d <= 2; d++) {
-        const p = loadedPage + d;
-        if (p >= 1 && p <= totalPages) show.add(p);
-    }
-    const sorted = Array.from(show).sort((a, b) => a - b);
-    const result: number[] = [];
-    let prev = 0;
-    for (const p of sorted) {
-        if (prev > 0 && p > prev + 1) result.push(0);
-        result.push(p);
-        prev = p;
-    }
-    return result;
-}
 
 // ─── Component ─────────────────────────────────────────────────────────────
 
@@ -601,14 +561,6 @@ export function BilibiliVideoList(param: {
                                         )}
                                         {inLibrary ? '已加入' : '加入素材库'}
                                     </button>}
-
-                                    <button
-                                        onClick={() => console.log('analyze', dbId)}
-                                        className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
-                                    >
-                                        <Play className="w-3.5 h-3.5 flex-shrink-0" />
-                                        分析
-                                    </button>
                                 </div>
                             </div>
                         );

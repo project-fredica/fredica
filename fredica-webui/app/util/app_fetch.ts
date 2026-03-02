@@ -24,8 +24,11 @@ function buildAuthHeaders(token?: string | null): Record<string, string> {
 /**
  * 解析响应体为 JSON，并处理 Ktor 偶发的双重 stringify 问题
  * （服务端有时会将已序列化的 JSON 字符串再次序列化为字符串，需递归 parse）。
+ *
+ * 供需要直接调用 `fetch` 的场景使用（如不便使用 `useAppFetch` Hook 的工具函数）。
+ * 在组件内部优先使用 `useAppFetch`，它已内部调用此函数。
  */
-async function parseJsonBody(resp: Response): Promise<unknown> {
+export async function parseJsonBody(resp: Response): Promise<unknown> {
     let res = await resp.json();
     while (typeof res === "string") {
         try {

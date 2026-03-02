@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Loader, Search } from "lucide-react";
-import { useAppFetch } from "~/utils/app_fetch";
+import { useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
-import { useImageProxyUrl } from "~/utils/app_fetch";
+import { useImageProxyUrl } from "~/util/app_fetch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

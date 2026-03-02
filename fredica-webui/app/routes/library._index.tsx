@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Trash2, ExternalLink, Plus, X, Loader } from "lucide-react";
-import { useAppFetch, useImageProxyUrl } from "~/utils/app_fetch";
+import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 
