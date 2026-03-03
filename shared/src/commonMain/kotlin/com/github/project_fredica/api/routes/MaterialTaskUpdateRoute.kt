@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialTaskService
 import kotlinx.serialization.SerialName
@@ -23,7 +24,7 @@ object MaterialTaskUpdateRoute : FredicaApi.Route {
             errorMsg = p.errorMsg,
             outputPath = p.outputPath,
         )
-        return ValidJsonString("""{"ok":true}""")
+        return buildValidJson { kv("ok", true) }
     }
 }
 

@@ -15,6 +15,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.PipelineInstance
@@ -61,37 +62,37 @@ object NetworkTestRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         // 解析请求体，失败时使用默认参数（允许 POST 空 body "{}"）
         val p = param.loadJsonModel<Param>().getOrElse { Param() }
-        val nowSec     = System.currentTimeMillis() / 1000L
+        val nowSec = System.currentTimeMillis() / 1000L
         val pipelineId = UUID.randomUUID().toString()
-        val taskId     = UUID.randomUUID().toString()
+        val taskId = UUID.randomUUID().toString()
 
         // 将参数序列化为 task payload，NetworkTestExecutor 会原样解析
         val taskPayload = AppUtil.GlobalVars.json.encodeToString(p)
 
         val task = Task(
-            id         = taskId,
-            type       = "NETWORK_TEST",
+            id = taskId,
+            type = "NETWORK_TEST",
             pipelineId = pipelineId,
             materialId = "system",          // 系统任务不关联素材
-            status     = "pending",
-            priority   = 5,                 // 中等优先级，不抢占媒体处理任务
-            payload    = taskPayload,
-            createdAt  = nowSec,
+            status = "pending",
+            priority = 5,                 // 中等优先级，不抢占媒体处理任务
+            payload = taskPayload,
+            createdAt = nowSec,
         )
 
         val pipeline = PipelineInstance(
-            id         = pipelineId,
-            materialId = "system",
-            template   = "NETWORK_TEST",
-            status     = "pending",
+            id = pipelineId,
+            materialId = "",
+            template = "NETWORK_TEST",
+            status = "pending",
             totalTasks = 1,
-            doneTasks  = 0,
-            createdAt  = nowSec,
+            doneTasks = 0,
+            createdAt = nowSec,
         )
 
         PipelineService.repo.create(pipeline)
         TaskService.repo.createAll(listOf(task))
 
-        return ValidJsonString("""{"pipeline_id":"$pipelineId","task_id":"$taskId"}""")
+        return buildValidJson { kv("pipeline_id", pipelineId); kv("task_id", taskId) }
     }
 }

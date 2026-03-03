@@ -21,7 +21,7 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 @Serializable
 @JvmInline
-value class ValidJsonString internal constructor(val str: String) {
+value class ValidJsonString(val str: String) {
     override fun toString(): String = str
 
     /** 将此 JSON 字符串反序列化为 [JsonElement] 树。 */
@@ -178,10 +178,20 @@ object CreateJsonUtil {
         fun kv(k: String, v: String?)
         fun kv(k: String, v: Boolean?)
         fun kv(k: String, v: Number?)
+
         /** 将键 [k] 的值显式设为 JSON null。 */
         fun kNull(k: String)
         fun kv(k: String, v: JsonObject?)
         fun kv(k: String, v: JsonArray?)
+
+        /** 直接嵌入任意 [JsonElement]，null 时写入 JSON null。 */
+        fun kv(k: String, v: JsonElement?)
+
+        /**
+         * 将已序列化的 [ValidJsonString] 解析后嵌入，null 时写入 JSON null。
+         * 适用于持有其他序列化结果（如 `Json.encodeToString(obj)`）需要内嵌的场景。
+         */
+        fun kv(k: String, v: ValidJsonString?)
     }
 
     /** 在 DSL 块中构建一个 [JsonObject]，在 [scope] 内调用 `kv` / `kNull` 方法添加键值对。 */
@@ -211,6 +221,15 @@ object CreateJsonUtil {
             override fun kv(k: String, v: JsonArray?) {
                 m[k] = v ?: JsonNull
             }
+
+            override fun kv(k: String, v: JsonElement?) {
+                m[k] = v ?: JsonNull
+            }
+
+            override fun kv(k: String, v: ValidJsonString?) {
+                m[k] = if (v == null) JsonNull
+                else AppUtil.GlobalVars.json.decodeFromString<JsonElement>(v.str)
+            }
         }
         ctx.run { scope() }
         return m.toJsonObject()
@@ -227,4 +246,34 @@ object CreateJsonUtil {
 inline fun <R> createJson(scope: CreateJsonUtil.() -> R): R {
     return scope(CreateJsonUtil)
 }
+
+/**
+ * 以 [CreateJsonUtil] DSL 风格构建 JSON 对象，直接返回 [ValidJsonString]。
+ *
+ * 是 `createJson { obj { … } }.dumpJsonStr().getOrThrow()` 的简化写法，
+ * 可安全替换手动字符串拼接的 `ValidJsonString("""{"key":"$value"}""")` 模式——
+ * 字符串值由 [JsonPrimitive] 自动转义，不存在 JSON 注入风险。
+ *
+ * ```kotlin
+ * // Before（字符串插值：$id 若含引号或反斜杠会破坏 JSON 结构）
+ * return ValidJsonString("""{"error":"not_found","id":"$id"}""")
+ *
+ * // After（类型安全，自动转义）
+ * return buildValidJson {
+ *     kv("error", "not_found")
+ *     kv("id", id)
+ * }
+ * ```
+ *
+ * 嵌套已序列化的 JSON 对象/数组时，使用 [CreateJsonUtil.ObjContext.kv] 的
+ * [ValidJsonString] 重载：
+ * ```kotlin
+ * return buildValidJson {
+ *     kv("pipeline", ValidJsonString(json.encodeToString(pipeline)))
+ *     kv("tasks",    ValidJsonString(json.encodeToString(tasks)))
+ * }
+ * ```
+ */
+inline fun buildValidJson(scope: CreateJsonUtil.ObjContext.() -> Unit): ValidJsonString =
+    ValidJsonString(CreateJsonUtil.obj(scope).toString())
 

@@ -33,8 +33,8 @@ data class PipelineInstance(
     /** 流水线唯一 ID（UUID），由 PipelineCreateRoute 生成。 */
     val id: String,
 
-    /** 关联的素材 ID，与 material_video.id 对应。 */
-    @SerialName("material_id")  val materialId: String,
+    /** 关联的素材 ID，与 material_video.id 对应。 若无，传入空字符串。 */
+    @SerialName("material_id") val materialId: String,
 
     /** 流水线模板名称，如 "FULL_PIPELINE" / "TRANSCRIBE_ONLY"，由调用方自定义。 */
     val template: String,
@@ -43,13 +43,13 @@ data class PipelineInstance(
     val status: String = "pending",
 
     /** 子任务总数（由 recalculate 从 task 表统计后写入）。 */
-    @SerialName("total_tasks")  val totalTasks: Int = 0,
+    @SerialName("total_tasks") val totalTasks: Int = 0,
 
     /** 已完成的子任务数（completed 状态的任务数量）。 */
-    @SerialName("done_tasks")   val doneTasks: Int = 0,
+    @SerialName("done_tasks") val doneTasks: Int = 0,
 
     /** 创建时间（Unix 秒）。 */
-    @SerialName("created_at")   val createdAt: Long,
+    @SerialName("created_at") val createdAt: Long,
 
     /** 流水线进入 completed 状态的时间（Unix 秒），未完成时为 null。 */
     @SerialName("completed_at") val completedAt: Long? = null,
@@ -73,10 +73,10 @@ data class TaskEvent(
     val id: String,
 
     /** 触发本事件的任务 ID。 */
-    @SerialName("task_id")     val taskId: String,
+    @SerialName("task_id") val taskId: String,
 
     /** 触发事件的节点 ID（单节点模式为 "local-node-1"）。 */
-    @SerialName("node_id")     val nodeId: String,
+    @SerialName("node_id") val nodeId: String,
 
     /**
      * 事件类型，描述发生了什么操作：
@@ -87,7 +87,7 @@ data class TaskEvent(
      * - RETRIED：任务被重置为 pending 准备重试
      * - CANCELLED：任务被取消
      */
-    @SerialName("event_type")  val eventType: String,
+    @SerialName("event_type") val eventType: String,
 
     /** 可选的附加说明（如错误信息摘要）。 */
     val message: String? = null,
@@ -114,9 +114,9 @@ data class TaskEvent(
  */
 @Serializable
 data class PipelineListQuery(
-    val status:   String? = null,
+    val status: String? = null,
     val template: String? = null,
-    val page:     Int = 1,
+    val page: Int = 1,
     @SerialName("page_size") val pageSize: Int = 20,
 )
 
@@ -131,10 +131,10 @@ data class PipelineListQuery(
  */
 @Serializable
 data class PipelinePage(
-    val items:      List<PipelineInstance>,
-    val total:      Int,
-    val page:       Int,
-    @SerialName("page_size")   val pageSize:   Int,
+    val items: List<PipelineInstance>,
+    val total: Int,
+    val page: Int,
+    @SerialName("page_size") val pageSize: Int,
     @SerialName("total_pages") val totalPages: Int,
 )
 

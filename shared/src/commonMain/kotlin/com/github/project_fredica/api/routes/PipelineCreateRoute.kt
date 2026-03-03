@@ -3,8 +3,10 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.apputil.toJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import com.github.project_fredica.db.PipelineInstance
 import com.github.project_fredica.db.PipelineService
 import com.github.project_fredica.db.Task
@@ -31,7 +33,11 @@ object PipelineCreateRoute : FredicaApi.Route {
 
         // Idempotency: reject if active pipeline already exists
         if (PipelineService.repo.hasActivePipeline(p.materialId, p.template)) {
-            return ValidJsonString("""{"error":"active_pipeline_exists","material_id":"${p.materialId}","template":"${p.template}"}""")
+            return buildValidJson {
+                kv("error", "active_pipeline_exists")
+                kv("material_id", p.materialId)
+                kv("template", p.template)
+            }
         }
 
         val pipelineId = UUID.randomUUID().toString()
@@ -44,13 +50,15 @@ object PipelineCreateRoute : FredicaApi.Route {
             val depIds = parseIds(taskDef.dependsOn)
             val invalidDeps = depIds.filter { depId -> depId !in taskIds }
             if (invalidDeps.isNotEmpty()) {
-                return ValidJsonString(
-                    """{"error":"invalid_depends_on","task_index":$idx,"invalid_ids":${invalidDeps.joinToString(",","[","]"){""""$it""""}}}"""
-                )
+                return buildValidJson {
+                    kv("error", "invalid_depends_on")
+                    kv("task_index", idx)
+                    kv("invalid_ids", invalidDeps.map { JsonPrimitive(it) }.toJsonArray())
+                }
             }
             // Detect self-cycle
             if (taskIds[idx] in depIds) {
-                return ValidJsonString("""{"error":"self_cycle","task_index":$idx}""")
+                return buildValidJson { kv("error", "self_cycle"); kv("task_index", idx) }
             }
         }
 
@@ -84,9 +92,7 @@ object PipelineCreateRoute : FredicaApi.Route {
         PipelineService.repo.create(pipeline)
         TaskService.repo.createAll(tasks)
 
-        return ValidJsonString(
-            """{"pipeline_id":"$pipelineId","task_count":${tasks.size}}"""
-        )
+        return buildValidJson { kv("pipeline_id", pipelineId); kv("task_count", tasks.size) }
     }
 
     private fun parseIds(json: String): List<String> = try {

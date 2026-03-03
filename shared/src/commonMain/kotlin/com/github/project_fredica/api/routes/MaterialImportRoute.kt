@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.db.MaterialCategoryService
 import com.github.project_fredica.db.MaterialType
@@ -78,7 +79,7 @@ object MaterialImportRoute : FredicaApi.Route {
             MaterialCategoryService.repo.linkMaterials(materialIds, p.categoryIds)
         }
 
-        return ValidJsonString("""{"inserted":$inserted,"total":${materials.size}}""")
+        return buildValidJson { kv("inserted", inserted); kv("total", materials.size) }
     }
 }
 

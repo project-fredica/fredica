@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.PipelineService
 import kotlinx.serialization.Serializable
@@ -19,7 +20,7 @@ object PipelineCancelRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<PipelineCancelParam>().getOrThrow()
         val cancelled = PipelineService.repo.cancel(p.id)
-        return ValidJsonString("""{"cancelled_count":$cancelled}""")
+        return buildValidJson { kv("cancelled_count", cancelled) }
     }
 }
 
