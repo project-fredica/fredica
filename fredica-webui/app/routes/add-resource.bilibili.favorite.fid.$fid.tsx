@@ -90,7 +90,6 @@ export default function Component() {
             : undefined,
         init: fid != null ? {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fid }),
         } : undefined,
         timeout: 30_000,
@@ -103,7 +102,6 @@ export default function Component() {
             : undefined,
         init: nextPageTrigger != null ? {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fid: nextPageTrigger.fid, page: nextPageTrigger.page }),
         } : undefined,
         timeout: 30_000,

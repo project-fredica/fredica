@@ -3,6 +3,7 @@ import { Loader, Search } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
 import { useImageProxyUrl } from "~/util/app_fetch";
+import { print_error, reportHttpError } from "~/util/error_handler";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,6 @@ export default function MultiPartPage() {
     const [urlInput, setUrlInput] = useState('');
     const [pages, setPages] = useState<SelectedPageEntry[]>([]);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [currentBvid, setCurrentBvid] = useState('');
     const [pickerOpen, setPickerOpen] = useState(false);
     const [importingState, setImportingState] = useState<'idle' | 'importing' | 'done'>('idle');
@@ -59,7 +59,6 @@ export default function MultiPartPage() {
         if (!bvid) return;
 
         setLoading(true);
-        setError(null);
         setPages([]);
         setCurrentBvid(bvid);
         setImportingState('idle');
@@ -67,17 +66,16 @@ export default function MultiPartPage() {
         try {
             const { resp, data } = await apiFetch('/api/v1/BilibiliVideoGetPagesRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ bvid }),
             });
             if (!resp.ok) {
-                setError(`获取失败：HTTP ${resp.status}`);
+                reportHttpError('获取分P失败', resp);
                 return;
             }
             const pageList = data as PageInfo[];
             setPages(pageList.map(p => ({ ...p, selected: true })));
         } catch (err) {
-            setError('网络错误，请检查服务器连接');
+            print_error({ reason: '网络错误，请检查服务器连接', err });
         } finally {
             setLoading(false);
         }
@@ -119,7 +117,6 @@ export default function MultiPartPage() {
 
             const { resp } = await apiFetch('/api/v1/MaterialImportRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     source_type: 'bilibili',
                     source_fid: '',
@@ -131,11 +128,11 @@ export default function MultiPartPage() {
                 setImportingState('done');
             } else {
                 setImportingState('idle');
-                setError(`导入失败：HTTP ${resp.status}`);
+                reportHttpError('导入失败', resp);
             }
-        } catch {
+        } catch (err) {
             setImportingState('idle');
-            setError('导入时发生网络错误');
+            print_error({ reason: '导入时发生网络错误', err });
         }
     };
 
@@ -175,7 +172,6 @@ export default function MultiPartPage() {
                             获取分P
                         </button>
                     </form>
-                    {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
                 </div>
 
                 {/* Page list */}
@@ -221,9 +217,8 @@ export default function MultiPartPage() {
                                 <div
                                     key={p.page}
                                     onClick={() => togglePage(p.page)}
-                                    className={`flex items-center gap-3 px-4 sm:px-6 py-3 cursor-pointer transition-colors ${
-                                        p.selected ? 'bg-blue-50' : 'hover:bg-gray-50'
-                                    }`}
+                                    className={`flex items-center gap-3 px-4 sm:px-6 py-3 cursor-pointer transition-colors ${p.selected ? 'bg-blue-50' : 'hover:bg-gray-50'
+                                        }`}
                                 >
                                     <input
                                         type="checkbox"

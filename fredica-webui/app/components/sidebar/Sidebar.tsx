@@ -80,8 +80,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         <div className="flex flex-col overflow-y-auto py-4 gap-4">
           <div className='striky'>
             <SideBarItem uid='add-resource' Icon={Plus} title='添加素材' routeTo='/add-resource' />
-            <SideBarItem uid='library' Icon={Database} title='素材库' routeTo='/library' />
-            <SideBarItem uid='processing' Icon={Cpu} title='处理中心' routeTo='/processing' />
+            <SideBarItem uid='library' Icon={Database} title='素材库' routeTo='/material-library' />
+            <SideBarItem uid='tasks' Icon={Cpu} title='任务中心' routeTo='/tasks' />
             <SideBarItem uid='tools' Icon={Wrench} title='小工具' routeTo='/tools' />
             <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' />
             <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' />

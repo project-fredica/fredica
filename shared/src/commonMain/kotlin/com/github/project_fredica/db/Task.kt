@@ -104,6 +104,12 @@ data class Task(
 
     /** 最近一次被重新认领的时间（Unix 秒），预留 */
     @SerialName("reclaimed_at") val reclaimedAt: Long? = null,
+
+    /** 任务执行进度（0–100），由 Executor 通过 TaskRepo.updateProgress() 实时写入 */
+    val progress: Int = 0,
+
+    /** 任务是否处于暂停状态；仅在 status=running 时有意义 */
+    @SerialName("is_paused") val isPaused: Boolean = false,
 )
 
 // =============================================================================
@@ -113,6 +119,16 @@ data class Task(
 // 注意：recalculate（重新计算流水线进度）不在 TaskRepo 里，
 //       因为它需要写 pipeline_instance 表，属于 PipelineRepo 的职责。
 // =============================================================================
+
+// =============================================================================
+// TaskListResult —— listAll 分页查询结果
+// =============================================================================
+
+@Serializable
+data class TaskListResult(
+    val items: List<Task>,
+    val total: Int,
+)
 
 interface TaskRepo {
     /**
@@ -147,11 +163,37 @@ interface TaskRepo {
     suspend fun listByPipeline(pipelineId: String): List<Task>
 
     /**
-     * 查询所有任务，支持可选过滤：
+     * 查询所有任务，支持可选过滤 + 分页 + 排序，返回 [TaskListResult]。
+     *
+     * @param taskId     为 null 时不按 id 过滤
      * @param pipelineId 为 null 时不过滤 pipeline
-     * @param status     为 null 时不过滤 status
+     * @param status     特殊值：`pending`=等待(pending+claimed)，`running`=运行中(running且未暂停)，
+     *                   `paused`=已暂停(running且is_paused=1)；其他值精确匹配
+     * @param materialId 为 null 时不过滤素材
+     * @param categoryId 为 null 时不按分类过滤（通过 material_category_rel JOIN）
+     * @param page       从 1 开始
+     * @param pageSize   每页条数
+     * @param sortDesc   true=按 created_at 降序（最新优先），false=升序
      */
-    suspend fun listAll(pipelineId: String? = null, status: String? = null): List<Task>
+    suspend fun listAll(
+        taskId: String? = null,
+        pipelineId: String? = null,
+        status: String? = null,
+        materialId: String? = null,
+        categoryId: String? = null,
+        page: Int = 1,
+        pageSize: Int = 20,
+        sortDesc: Boolean = true,
+    ): TaskListResult
+
+    /** 更新任务执行进度（0–100）。 */
+    suspend fun updateProgress(id: String, progress: Int)
+
+    /** 更新任务暂停状态。 */
+    suspend fun updatePaused(id: String, paused: Boolean)
+
+    /** 按 ID 查询单个任务，不存在时返回 null。 */
+    suspend fun findById(id: String): Task?
 
     /** 插入单个任务（内部调用 createAll）。 */
     suspend fun create(task: Task): Task

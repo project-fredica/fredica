@@ -60,7 +60,6 @@ object MaterialImportRoute : FredicaApi.Route {
                 coverUrl = video.cover,
                 description = video.intro,
                 duration = video.duration,
-                pipelineStatus = "pending",
                 localVideoPath = "",
                 localAudioPath = "",
                 transcriptPath = "",
@@ -79,7 +78,10 @@ object MaterialImportRoute : FredicaApi.Route {
             MaterialCategoryService.repo.linkMaterials(materialIds, p.categoryIds)
         }
 
-        return buildValidJson { kv("inserted", inserted); kv("total", materials.size) }
+        return buildValidJson {
+            kv("inserted", inserted)
+            kv("total", materials.size)
+        }
     }
 }
 

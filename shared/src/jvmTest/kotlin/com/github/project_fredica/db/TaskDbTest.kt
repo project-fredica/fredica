@@ -89,8 +89,8 @@ class TaskDbTest {
         taskDb.createAll(tasks)
 
         val all = taskDb.listAll()
-        assertEquals(3, all.size, "createAll 写入 3 条，listAll 应返回全部 3 条")
-        assertTrue(all.all { it.status == "pending" }, "新建任务的默认状态必须是 pending")
+        assertEquals(3, all.items.size, "createAll 写入 3 条，listAll 应返回全部 3 条")
+        assertTrue(all.items.all { it.status == "pending" }, "新建任务的默认状态必须是 pending")
     }
 
     // ── 测试 2：幂等键去重 ────────────────────────────────────────────────────
@@ -123,8 +123,8 @@ class TaskDbTest {
         taskDb.create(t2)
 
         val all = taskDb.listAll()
-        assertEquals(1, all.size, "相同幂等键的第二次插入应被静默忽略")
-        assertEquals("idem-1", all.first().id, "保留的应该是第一次插入的任务")
+        assertEquals(1, all.items.size, "相同幂等键的第二次插入应被静默忽略")
+        assertEquals("idem-1", all.items.first().id, "保留的应该是第一次插入的任务")
     }
 
     // ── 测试 3：claimNext 原子性 ──────────────────────────────────────────────
@@ -206,7 +206,7 @@ class TaskDbTest {
         taskDb.create(t)
         taskDb.updateStatus("upd-1", "completed", result = """{"output":"ok"}""")
 
-        val updated = taskDb.listAll().find { it.id == "upd-1" }
+        val updated = taskDb.listAll().items.find { it.id == "upd-1" }
         assertNotNull(updated, "更新后的任务应能通过 listAll 查到")
         assertEquals("completed", updated.status, "状态必须已更新为 completed")
         assertEquals("""{"output":"ok"}""", updated.result, "result 字段内容必须与写入完全一致")

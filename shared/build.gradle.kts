@@ -43,6 +43,7 @@ kotlin {
                 api(libs.kotlinx.coroutines.core)
                 api(libs.openai.client)
                 api(libs.ktor.client.okhttp)
+                api(libs.ktor.client.websockets)
                 implementation(libs.kotlinx.schema.annotations)
 //                implementation(libs.kotlinx.serialization.json)
                 api(libs.s3)

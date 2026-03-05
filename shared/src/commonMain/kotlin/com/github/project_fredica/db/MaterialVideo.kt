@@ -23,7 +23,6 @@ data class MaterialVideo(
     val description: String,
     /** Total duration in seconds (video-specific). */
     val duration: Int,
-    @SerialName("pipeline_status")  val pipelineStatus: String,
     @SerialName("local_video_path") val localVideoPath: String,
     @SerialName("local_audio_path") val localAudioPath: String,
     @SerialName("transcript_path")  val transcriptPath: String,
@@ -39,6 +38,8 @@ interface MaterialVideoRepo {
     suspend fun upsertAll(videos: List<MaterialVideo>): Int
     /** Returns all video materials as a JOIN view. */
     suspend fun listAll(): List<MaterialVideo>
+    /** Returns a single video material by ID, or null if not found. */
+    suspend fun findById(id: String): MaterialVideo?
     /** Delete video materials and cascade to detail table, category associations, and tasks. */
     suspend fun deleteByIds(ids: List<String>)
 }

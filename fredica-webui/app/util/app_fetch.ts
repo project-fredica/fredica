@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppConfig } from "~/context/appConfig";
+import { print_error, reportHttpError } from "./error_handler";
 
 export const DEFAULT_SERVER_PORT = "7631";
 
@@ -22,19 +23,18 @@ function buildAuthHeaders(token?: string | null): Record<string, string> {
 }
 
 /**
- * 解析响应体为 JSON，并处理 Ktor 偶发的双重 stringify 问题
- * （服务端有时会将已序列化的 JSON 字符串再次序列化为字符串，需递归 parse）。
+ * 解析响应体为 JSON。
  *
  * 供需要直接调用 `fetch` 的场景使用（如不便使用 `useAppFetch` Hook 的工具函数）。
  * 在组件内部优先使用 `useAppFetch`，它已内部调用此函数。
  */
 export async function parseJsonBody(resp: Response): Promise<unknown> {
     let res = await resp.json();
-    while (typeof res === "string") {
+    if (typeof res === "string") {
         try {
             res = JSON.parse(res);
         } catch {
-            break;
+            // ignore
         }
     }
     return res;
@@ -56,7 +56,8 @@ function makeAbortWithTimeout(timeout: number): {
     const abort = new AbortController();
     if (timeout <= 0) return { abort, clearTimer: () => {} };
     const timer = setTimeout(
-        () => abort.abort(new DOMException("Request timed out", "TimeoutError")),
+        () =>
+            abort.abort(new DOMException("Request timed out", "TimeoutError")),
         timeout,
     );
     return { abort, clearTimer: () => clearTimeout(timer) };
@@ -76,6 +77,7 @@ async function fetchWithAuth(
         ...init,
         headers: {
             ...buildAuthHeaders(authToken),
+            "Content-Type": "application/json",
             ...init?.headers,
         },
         signal,
@@ -115,7 +117,7 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * ```tsx
  * const { data, loading, error } = useAppFetch<MaterialCategory[]>({
  *     appPath: '/api/v1/MaterialCategoryListRoute',
- *     init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+ *     init: { method: 'POST', body: '{}' },
  * });
  * if (loading) return <Spinner />;
  * if (error) return <ErrorMsg error={error} />;
@@ -134,10 +136,9 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  *     try {
  *         const { resp, data } = await apiFetch('/api/v1/MaterialImportRoute', {
  *             method: 'POST',
- *             headers: { 'Content-Type': 'application/json' },
  *             body: JSON.stringify({ source_type: 'bilibili', videos }),
  *         });
- *         if (!resp.ok) { showError(`导入失败: HTTP ${resp.status}`); return; }
+ *         if (!resp.ok) { reportHttpError(`导入失败: HTTP ${resp.status}`, resp); return; }
  *         console.log('导入成功', data);
  *     } catch (e) {
  *         showError('网络错误');
@@ -159,7 +160,8 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  *         method: 'POST',
  *         body: JSON.stringify({ id }),
  *     });
- *     if (resp.ok) refreshList();
+ *     if (!resp.ok) { reportHttpError(`删除失败: HTTP ${resp.status}`, resp); return; }
+ *     refreshList();
  * };
  * ```
  *
@@ -183,9 +185,13 @@ export function useAppFetch<J = unknown>(param?: {
     /** 请求超时毫秒（默认 10000；0 表示不超时）。 */
     timeout?: number;
 }) {
+    const { allowNot2XX = false } = param ?? {};
+
     const { appConfig } = useAppConfig();
     const [data, setData] = useState<J | null>(null);
-    const [loading, setLoading] = useState<boolean>(() => param?.appPath != null);
+    const [loading, setLoading] = useState<boolean>(() =>
+        param?.appPath != null
+    );
     const [error, setError] = useState<Error | null>(null);
     const [response, setResponse] = useState<Response | null>(null);
 
@@ -203,14 +209,14 @@ export function useAppFetch<J = unknown>(param?: {
     // init / parseJson / timeout 通常是字面量，不加入 deps 以避免每次 render 重新请求。
     // 若确实需要响应这些参数的变化，请改用命令式 apiFetch。
     useEffect(() => {
-        if (!url) return;
         const {
             appPath,
             init,
             parseJson = true,
-            allowNot2XX = false,
             timeout = 10_000,
-        } = param!;
+        } = param ?? {};
+
+        if (!url) return;
 
         let cancelled = false;
         const { abort, clearTimer } = makeAbortWithTimeout(timeout);
@@ -222,13 +228,21 @@ export function useAppFetch<J = unknown>(param?: {
 
         (async () => {
             try {
-                console.debug(`[useAppFetch] ${new Date().toISOString()} : ${appPath}`);
-                const resp = await fetchWithAuth(url, init, authToken, abort.signal);
+                console.debug(
+                    `[useAppFetch] ${new Date().toISOString()} : ${appPath}`,
+                );
+                const resp = await fetchWithAuth(
+                    url,
+                    init,
+                    authToken,
+                    abort.signal,
+                );
                 clearTimer();
                 if (cancelled) return;
 
                 setResponse(resp);
                 if (!resp.ok && !allowNot2XX) {
+                    reportHttpError(`HTTP 请求失败 : ${appPath}`, resp);
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
@@ -238,6 +252,11 @@ export function useAppFetch<J = unknown>(param?: {
             } catch (err) {
                 // 组件卸载触发的 AbortError 属于正常 cleanup，不写入错误状态
                 if (cancelled) return;
+                print_error({
+                    reason: `HTTP 请求失败 : ${appPath}  ---  ${err}`,
+                    err,
+                    variables: { appPath, param },
+                });
                 setError(err instanceof Error ? err : new Error(String(err)));
             } finally {
                 if (!cancelled) setLoading(false);
@@ -258,19 +277,33 @@ export function useAppFetch<J = unknown>(param?: {
         async (
             path: string,
             init?: RequestInit,
-            options?: { parseJson?: boolean; timeout?: number },
+            options?: { parseJson?: boolean; timeout?: number; silent?: boolean },
         ): Promise<{ resp: Response; data: unknown }> => {
-            const { parseJson = true, timeout = 10_000 } = options ?? {};
+            const { parseJson = true, timeout = 10_000, silent = false } = options ?? {};
             const { abort, clearTimer } = makeAbortWithTimeout(timeout);
             try {
-                const resp = await fetchWithAuth(`${host}${path}`, init, authToken, abort.signal);
+                const resp = await fetchWithAuth(
+                    `${host}${path}`,
+                    init,
+                    authToken,
+                    abort.signal,
+                );
                 clearTimer();
+                if (!resp.ok && !allowNot2XX) {
+                    if (!silent) reportHttpError(`HTTP 请求失败 : ${path}`, resp);
+                    throw new Error(`HTTP ${resp.status}`);
+                }
                 if (parseJson) {
                     return { resp, data: await parseJsonBody(resp) };
                 }
                 return { resp, data: null };
             } catch (err) {
                 clearTimer();
+                if (!silent) print_error({
+                    reason: `HTTP 请求失败 : ${path}  ---  ${err}`,
+                    err,
+                    variables: { param, host, path },
+                });
                 throw err;
             }
         },

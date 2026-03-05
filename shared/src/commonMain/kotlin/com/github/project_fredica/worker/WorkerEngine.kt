@@ -17,19 +17,7 @@ package com.github.project_fredica.worker
 //
 // 多平台说明：
 //   WorkerEngine 本身位于 commonMain，仅依赖 kotlinx.coroutines（多平台）。
-//
-//   Executor 分为两类：
-//   ┌─ commonMain（纯 Kotlin，位于 worker/executors/）
-//   │   MergeTranscriptionExecutor  — 合并转录分片
-//   │   AiAnalyzeExecutor           — AI 分析（Phase 1 stub）
-//   └─ jvmMain（依赖 ProcessBuilder / PythonUtil）
-//       DownloadVideoExecutor        — curl 下载
-//       ExtractAudioExecutor         — ffmpeg 提取音轨
-//       SplitAudioExecutor           — ffmpeg 切片
-//       TranscribeChunkExecutor      — Python faster-whisper 转录
-//
-//   JVM 启动代码（FredicaApi.jvm.kt）在调用 start() 时显式传入全部 executor，
-//   无需 expect/actual，Android 平台不受影响。
+//   Executor 实现位于 jvmMain，由 FredicaApi.jvm.kt 启动时通过 executors 参数传入。
 //
 // Phase 1 限制：
 //   - 单节点模式，WORKER_ID 硬编码为 "local-node-1"
@@ -42,8 +30,6 @@ import com.github.project_fredica.apputil.error
 import com.github.project_fredica.db.PipelineService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
-import com.github.project_fredica.worker.executors.AiAnalyzeExecutor
-import com.github.project_fredica.worker.executors.MergeTranscriptionExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -61,17 +47,14 @@ object WorkerEngine {
     private const val POLL_INTERVAL_MS = 1_000L
 
     // 队列为空时的退避间隔（5 秒），减少无效数据库查询
-    private const val IDLE_BACKOFF_MS  = 5_000L
+    private const val IDLE_BACKOFF_MS = 5_000L
 
     // ==========================================================================
     // commonMain 通用 Executor：纯 Kotlin 实现，无任何平台特定依赖。
     // JVM 专属 Executor（依赖 ProcessBuilder / PythonUtil）在 jvmMain 中实现，
     // 由 FredicaApi.jvm.kt 启动时通过 executors 参数显式传入。
     // ==========================================================================
-    private val commonExecutors: List<TaskExecutor> = listOf(
-        MergeTranscriptionExecutor,
-        AiAnalyzeExecutor,
-    )
+    private val commonExecutors: List<TaskExecutor> = listOf()
 
     /** 已注册的 Executor，key = taskType（如 "DOWNLOAD_VIDEO"）。 */
     private val registry = mutableMapOf<String, TaskExecutor>()
@@ -81,8 +64,7 @@ object WorkerEngine {
      *
      * @param maxWorkers  最大并行任务数（受 Semaphore 限制）
      * @param scope       协程 scope（通常使用服务器生命周期的 IO scope）
-     * @param executors   Executor 列表，默认仅包含 commonMain 的纯 Kotlin executor；
-     *                    JVM 平台应在此传入完整列表（含 DownloadVideo / ExtractAudio 等）；
+     * @param executors   Executor 列表；JVM 平台由 FredicaApi.jvm.kt 传入；
      *                    测试时可传入 FakeExecutor 覆盖
      */
     fun start(
@@ -170,18 +152,23 @@ object WorkerEngine {
         }
 
         // 步骤 4：根据结果更新状态
-        if (execResult.isSuccess) {
+        if (execResult.errorType == "CANCELLED") {
+            TaskService.repo.updateStatus(task.id, "cancelled", error = execResult.error, errorType = "CANCELLED")
+            logger.info("WorkerEngine: 任务 ${task.id} 已被用户取消")
+        } else if (execResult.isSuccess) {
             TaskService.repo.updateStatus(task.id, "completed", result = execResult.result)
             logger.info("WorkerEngine: 任务 ${task.id} 执行成功")
         } else {
-            val canRetry = task.retryCount < task.maxRetries
+            // AWAITING_CREDENTIAL：等待用户配置凭据，不自动重试（需用户手动跳过或重试）
+            val canRetry = task.retryCount < task.maxRetries &&
+                    execResult.errorType != "AWAITING_CREDENTIAL"
             if (canRetry) {
                 // 记录重试次数 +1，然后重置回 pending（让 claimNext 再次认领）
                 TaskService.repo.incrementRetry(task.id)
                 TaskService.repo.updateStatus(
-                    id        = task.id,
-                    status    = "pending",
-                    error     = execResult.error,
+                    id = task.id,
+                    status = "pending",
+                    error = execResult.error,
                     errorType = execResult.errorType,
                 )
                 logger.warn(

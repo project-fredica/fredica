@@ -74,33 +74,6 @@ export default function Component({
             >
                 在浏览器中打开
             </button>
-            {/* <button
-                onClick={() => navigate('/app-user-setting')}
-                style={{
-                    padding: '12px 28px',
-                    fontSize: '16px',
-                    fontWeight: 600,
-                    color: '#374151',
-                    backgroundColor: '#f9fafb',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
-                    transition: 'all 0.3s ease',
-                }}
-                onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#f3f4f6';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.1)';
-                }}
-                onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#f9fafb';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-                }}
-            >
-                打开用户设置
-            </button> */}
             <button
                 onClick={() => navigate('/app-desktop-setting')}
                 style={{

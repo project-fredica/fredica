@@ -7,10 +7,16 @@ import {
   Scripts,
   ScrollRestoration,
 } from "react-router";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { Route } from "./+types/root";
 import "./app.css";
 import { AppConfigProvider } from "~/context/appConfig";
+
+const ToastContainer = lazy(() =>
+  import("react-toastify").then((m) => ({ default: m.ToastContainer }))
+);
+
 
 export const links: Route.LinksFunction = () => [
   {
@@ -56,9 +62,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+
+
   return (
     <AppConfigProvider>
       <Outlet />
+      {mounted && (
+        <Suspense fallback={null}>
+          <ToastContainer />
+        </Suspense>
+      )}
     </AppConfigProvider>
   );
 }

@@ -1,31 +1,12 @@
 package com.github.project_fredica.api
 
-import com.github.project_fredica.api.routes.BilibiliFavoriteGetPageRoute
-import com.github.project_fredica.api.routes.BilibiliFavoriteGetVideoListRoute
-import com.github.project_fredica.api.routes.BilibiliVideoGetPagesRoute
-import com.github.project_fredica.api.routes.ImageProxyRoute
-import com.github.project_fredica.api.routes.MaterialCategoryCreateRoute
-import com.github.project_fredica.api.routes.MaterialCategoryDeleteRoute
-import com.github.project_fredica.api.routes.MaterialCategoryListRoute
-import com.github.project_fredica.api.routes.MaterialDeleteRoute
-import com.github.project_fredica.api.routes.MaterialImportRoute
-import com.github.project_fredica.api.routes.MaterialListRoute
-import com.github.project_fredica.api.routes.MaterialSetCategoriesRoute
-import com.github.project_fredica.api.routes.MaterialTaskCreateRoute
-import com.github.project_fredica.api.routes.MaterialTaskListRoute
-import com.github.project_fredica.api.routes.MaterialTaskUpdateRoute
-import com.github.project_fredica.api.routes.NetworkTestRoute
-import com.github.project_fredica.api.routes.PipelineCancelRoute
-import com.github.project_fredica.api.routes.PipelineCreateRoute
-import com.github.project_fredica.api.routes.PipelineGetRoute
-import com.github.project_fredica.api.routes.PipelineListRoute
-import com.github.project_fredica.api.routes.WorkerTaskListRoute
+import com.github.project_fredica.api.routes.getCommonRoutes
 
 interface FredicaApi {
     companion object {
         suspend fun getAllRoutes(): List<Route> {
             return listOf(
-                *Route.allRoutes.toTypedArray(), *getNativeRoutes().toTypedArray()
+                *Route.getCommonRoutes().toTypedArray(), *getNativeRoutes().toTypedArray()
             ).sortedBy { route -> route.name }
         }
 
@@ -48,30 +29,7 @@ interface FredicaApi {
 
         suspend fun handler(param: String): Any
 
-        companion object {
-            val allRoutes = listOf<Route>(
-                BilibiliFavoriteGetPageRoute,
-                BilibiliFavoriteGetVideoListRoute,
-                BilibiliVideoGetPagesRoute,
-                ImageProxyRoute,
-                MaterialImportRoute,
-                MaterialListRoute,
-                MaterialDeleteRoute,
-                MaterialCategoryListRoute,
-                MaterialCategoryCreateRoute,
-                MaterialCategoryDeleteRoute,
-                MaterialSetCategoriesRoute,
-                MaterialTaskCreateRoute,
-                MaterialTaskListRoute,
-                MaterialTaskUpdateRoute,
-                PipelineCreateRoute,
-                PipelineListRoute,
-                PipelineGetRoute,
-                PipelineCancelRoute,
-                WorkerTaskListRoute,
-                NetworkTestRoute,
-            )
-        }
+        companion object
     }
 }
 

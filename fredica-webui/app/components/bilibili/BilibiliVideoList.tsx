@@ -3,6 +3,7 @@ import { ExternalLink, Download, Play, Eye, Heart, MessageSquare, Check, Loader,
 import { useImageProxyUrl, useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
 import { formatDuration, formatCount, formatFavDate, buildPageWindows } from "~/util/bilibili";
+import { print_error, reportHttpError } from "~/util/error_handler";
 
 export interface MediaItem {
     id: number;
@@ -106,10 +107,9 @@ export function BilibiliVideoList(param: {
         try {
             const { resp, data } = await apiFetch('/api/v1/MaterialListRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: '{}',
             });
-            if (!resp.ok) return new Map();
+            if (!resp.ok) { reportHttpError('获取素材库状态失败', resp); return new Map(); }
             const map = new Map<string, LibraryEntry>();
             for (const v of data as MaterialVideoItem[]) {
                 if (v.source_type === 'bilibili') {
@@ -141,7 +141,6 @@ export function BilibiliVideoList(param: {
         try {
             const { resp } = await apiFetch('/api/v1/MaterialImportRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     source_type: 'bilibili',
                     source_fid: fid ?? '',
@@ -158,6 +157,8 @@ export function BilibiliVideoList(param: {
                 // Refresh library map to pick up new DB IDs and category state
                 const newMap = await fetchLibraryMapData();
                 setLibraryMap(newMap);
+            } else {
+                reportHttpError('加入素材库失败', resp);
             }
         } finally {
             setImportingDbIds(prev => {
@@ -171,7 +172,6 @@ export function BilibiliVideoList(param: {
     const updateVideoCategories = async (dbId: string, categoryIds: string[]) => {
         const { resp } = await apiFetch('/api/v1/MaterialSetCategoriesRoute', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ material_id: dbId, category_ids: categoryIds }),
         });
         if (resp.ok) {
@@ -180,13 +180,14 @@ export function BilibiliVideoList(param: {
                 next.set(dbId, { id: dbId, categoryIds });
                 return next;
             });
+        } else {
+            reportHttpError('修改分类失败', resp);
         }
     };
 
     const deleteFromLibrary = async (dbId: string) => {
         const { resp } = await apiFetch('/api/v1/MaterialDeleteRoute', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ids: [dbId] }),
         });
         if (resp.ok) {
@@ -195,6 +196,8 @@ export function BilibiliVideoList(param: {
                 next.delete(dbId);
                 return next;
             });
+        } else {
+            reportHttpError('移出素材库失败', resp);
         }
     };
 
@@ -205,10 +208,12 @@ export function BilibiliVideoList(param: {
         try {
             const { resp, data } = await apiFetch('/api/v1/BilibiliVideoGetPagesRoute', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ bvid: media.bvid }),
             });
-            if (!resp.ok) return;
+            if (!resp.ok) {
+                reportHttpError('获取分P信息失败', resp);
+                return;
+            }
             type PageInfo = { page: number; title: string; duration: number; cover: string };
             const pages: PageInfo[] = data as PageInfo[];
             const expanded: MediaItem[] = pages.map(p => ({

@@ -16,14 +16,9 @@ import com.github.project_fredica.db.PipelineService
 import com.github.project_fredica.db.TaskDb
 import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.python.PythonUtil
+import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
-import com.github.project_fredica.worker.executors.AiAnalyzeExecutor
-import com.github.project_fredica.worker.executors.DownloadVideoExecutor
-import com.github.project_fredica.worker.executors.ExtractAudioExecutor
-import com.github.project_fredica.worker.executors.MergeTranscriptionExecutor
-import com.github.project_fredica.worker.executors.NetworkTestExecutor
-import com.github.project_fredica.worker.executors.SplitAudioExecutor
-import com.github.project_fredica.worker.executors.TranscribeChunkExecutor
+import com.github.project_fredica.worker.executors.DownloadBilibiliVideoExecutor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
@@ -43,6 +38,7 @@ import io.ktor.util.toMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -171,21 +167,39 @@ object FredicaApiJvmService {
         // 启动异步任务引擎，显式传入全部 executor（JVM 平台特有的 executor 在此注册）。
         // WorkerEngine 位于 commonMain，defaultExecutors 仅含纯 Kotlin 的通用 executor；
         // 依赖 ProcessBuilder / PythonUtil 的 JVM executor 在此处补充传入。
-        val engineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        val engineScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         WorkerEngine.start(
             maxWorkers = 2,
             scope = engineScope,
             executors = listOf(
-                DownloadVideoExecutor,       // curl 下载视频（ProcessBuilder）
-                ExtractAudioExecutor,        // ffmpeg 提取音轨（ProcessBuilder）
-                SplitAudioExecutor,          // ffmpeg 切片（ProcessBuilder + java.io.File）
-                TranscribeChunkExecutor,     // Python faster-whisper 转录（PythonUtil）
-                MergeTranscriptionExecutor,  // 合并转录分片（纯 Kotlin）
-                AiAnalyzeExecutor,           // AI 分析占位（纯 Kotlin）
-                NetworkTestExecutor,         // 网速和延迟测试（ktor-client，纯 Kotlin）
+                DownloadBilibiliVideoExecutor,
             ),
         )
         logger.debug("WorkerEngine started")
+
+        // 注册前置清理：关闭 Python 服务 / 数据库等 shutdown hook 之前，
+        // 先取消所有正在运行的任务，等它们离开 running 状态后再释放锁。
+        AppUtil.setPreShutdownCleanup {
+            logger.info("[preShutdownCleanup] 开始取消正在运行的任务…")
+            val runningTasks = TaskService.repo.listAll(status = "running", pageSize = 200).items
+
+            for (task in runningTasks) {
+                val cancelled = TaskCancelService.cancel(task.id)
+                logger.info("[preShutdownCleanup] 任务 ${task.id} (${task.type}) 发送取消信号：signalled=$cancelled")
+            }
+
+            if (runningTasks.isNotEmpty()) {
+                // 等待所有 running 任务结束（最多 60s）
+                val deadlineMs = System.currentTimeMillis() + 60_000L
+                while (System.currentTimeMillis() < deadlineMs) {
+                    val stillRunning = TaskService.repo.listAll(status = "running", pageSize = 200).items
+                    if (stillRunning.isEmpty()) break
+                    logger.debug("[preShutdownCleanup] 等待 ${stillRunning.size} 个任务结束…")
+                    delay(300)
+                }
+            }
+            logger.info("[preShutdownCleanup] 任务清理完成，释放前置清理锁")
+        }
     }
 
 

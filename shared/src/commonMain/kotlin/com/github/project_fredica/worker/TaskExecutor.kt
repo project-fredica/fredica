@@ -18,6 +18,7 @@ package com.github.project_fredica.worker
 // =============================================================================
 
 import com.github.project_fredica.db.Task
+import kotlinx.serialization.Serializable
 
 /**
  * 任务执行器接口。每个实现类负责处理一种 [taskType] 的任务。
@@ -55,6 +56,7 @@ interface TaskExecutor {
  *                  建议值：PAYLOAD_ERROR / FFMPEG_ERROR / DOWNLOAD_ERROR /
  *                         TRANSCRIBE_ERROR / DEPENDENCY_ERROR / EXCEPTION 等
  */
+@Serializable
 data class ExecuteResult(
     val result: String = "{}",
     val error: String? = null,

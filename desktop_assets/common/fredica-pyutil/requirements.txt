@@ -1,7 +1,11 @@
 setuptools
 wheel
 loguru
-fastapi[standard]
+fastapi[all]>=0.135.0
 uvicorn[standard]
+websockets
+starlette
 bilibili-api-python
 faster-whisper
+aiohttp
+pydantic

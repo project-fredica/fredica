@@ -55,6 +55,16 @@ object AppUtil {
 
         /** SQLite 数据库文件路径：`{appDataDir}/db/fredica_app.db` */
         val appDbPath: File get() = appDataDir.resolve("db").resolve("fredica_app.db")
+
+        /** 媒体文件根目录：`{appDataDir}/media` */
+        val appMediaDir: File get() = appDataDir.resolve("media")
+
+        /**
+         * 返回指定素材的媒体工作目录（首次调用时自动创建）：
+         * `{appDataDir}/media/{materialId}/`
+         */
+        fun materialMediaDir(materialId: String): File =
+            appMediaDir.resolve(materialId).also { it.mkdirs() }
     }
 
     /** 猴子补丁扩展函数的命名空间接收者，用于限制内部修复扩展的作用域。 */
@@ -70,7 +80,7 @@ object AppUtil {
         }
 
         /**
-         * 读取系统网络代理配置的 Ktor HTTP 客户端，用于访问外部网络（如 B 站 API）。
+         * 读取系统网络代理配置的 Ktor HTTP 客户端，用于访问外部网络。
          * 代理配置由平台 actual 的 [AppUtil.readNetworkProxy] 提供。
          */
         val ktorClientProxied

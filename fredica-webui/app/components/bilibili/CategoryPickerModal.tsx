@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, Plus, Loader } from "lucide-react";
 import { useAppConfig } from "~/context/appConfig";
 import { parseJsonBody } from "~/util/app_fetch";
+import { print_error, reportHttpError } from "~/util/error_handler";
 
 export interface Category {
     id: string;
@@ -54,7 +55,10 @@ export function CategoryPickerModal({
                     headers: { "Content-Type": "application/json", ...authHeaders },
                     body: "{}",
                 });
-                if (!resp.ok || cancelled) return;
+                if (!resp.ok || cancelled) {
+                    if (!cancelled) reportHttpError('获取分类列表失败', resp);
+                    return;
+                }
                 const data = await parseJsonBody(resp) as Category[];
                 if (!cancelled) setCategories(data);
             } finally {
@@ -83,7 +87,10 @@ export function CategoryPickerModal({
                 headers: { "Content-Type": "application/json", ...authHeaders },
                 body: JSON.stringify({ name }),
             });
-            if (!resp.ok) return;
+            if (!resp.ok) {
+                reportHttpError('创建分类失败', resp);
+                return;
+            }
             const cat = await parseJsonBody(resp) as Category;
             setCategories(prev =>
                 prev.some(c => c.id === cat.id) ? prev : [...prev, { ...cat, material_count: 0 }]

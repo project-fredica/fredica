@@ -68,6 +68,16 @@ class TaskDb(private val db: Database) : TaskRepo {
                         )
                         """.trimIndent()
                     )
+                    // Schema migration: add progress column if it doesn't exist yet
+                    @Suppress("SwallowedException")
+                    try {
+                        stmt.execute("ALTER TABLE task ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
+                    } catch (_: Exception) { /* column already exists */ }
+                    // Schema migration: add is_paused column if it doesn't exist yet
+                    @Suppress("SwallowedException")
+                    try {
+                        stmt.execute("ALTER TABLE task ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0")
+                    } catch (_: Exception) { /* column already exists */ }
                 }
             }
         }
@@ -196,6 +206,30 @@ class TaskDb(private val db: Database) : TaskRepo {
         }
     }
 
+    // ── updateProgress：更新任务进度 ─────────────────────────────────────────
+
+    override suspend fun updateProgress(id: String, progress: Int): Unit = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement("UPDATE task SET progress = ? WHERE id = ?").use { ps ->
+                ps.setInt(1, progress.coerceIn(0, 100))
+                ps.setString(2, id)
+                ps.executeUpdate()
+            }
+        }
+    }
+
+    // ── updatePaused：更新暂停状态 ───────────────────────────────────────────
+
+    override suspend fun updatePaused(id: String, paused: Boolean): Unit = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement("UPDATE task SET is_paused = ? WHERE id = ?").use { ps ->
+                ps.setInt(1, if (paused) 1 else 0)
+                ps.setString(2, id)
+                ps.executeUpdate()
+            }
+        }
+    }
+
     // ── incrementRetry：重试计数 ──────────────────────────────────────────────
 
     /**
@@ -233,31 +267,76 @@ class TaskDb(private val db: Database) : TaskRepo {
         }
 
     /**
-     * 查询所有任务，支持可选过滤。
-     * WHERE 子句根据传入参数动态拼接，避免占位符数量与实际参数不匹配。
+     * 查询所有任务，支持可选过滤 + 分页 + 排序，返回 [TaskListResult]。
+     * WHERE 子句根据传入参数动态拼接，特殊 status 值（pending/running/paused）
+     * 会展开为对应的 SQL 条件，无需额外绑定参数。
      */
-    override suspend fun listAll(pipelineId: String?, status: String?): List<Task> =
-        withContext(Dispatchers.IO) {
-            val result     = mutableListOf<Task>()
-            val conditions = mutableListOf<String>()
-            if (pipelineId != null) conditions.add("pipeline_id = ?")
-            if (status     != null) conditions.add("status = ?")
-            val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+    override suspend fun listAll(
+        taskId: String?,
+        pipelineId: String?,
+        status: String?,
+        materialId: String?,
+        categoryId: String?,
+        page: Int,
+        pageSize: Int,
+        sortDesc: Boolean,
+    ): TaskListResult = withContext(Dispatchers.IO) {
+        // Build (sql, params) pairs in order — params must match '?' placeholders
+        val conditions = mutableListOf<Pair<String, List<String>>>()
+        if (taskId     != null) conditions.add("t.id = ?" to listOf(taskId))
+        if (pipelineId != null) conditions.add("t.pipeline_id = ?" to listOf(pipelineId))
+        if (materialId != null) conditions.add("t.material_id = ?" to listOf(materialId))
+        if (categoryId != null) conditions.add(
+            "EXISTS (SELECT 1 FROM material_category_rel mcr WHERE mcr.material_id = t.material_id AND mcr.category_id = ?)" to listOf(categoryId)
+        )
+        if (status != null) when (status) {
+            "pending" -> conditions.add("(t.status = 'pending' OR t.status = 'claimed')" to emptyList())
+            "running" -> conditions.add("(t.status = 'running' AND t.is_paused = 0)"     to emptyList())
+            "paused"  -> conditions.add("(t.status = 'running' AND t.is_paused = 1)"     to emptyList())
+            else      -> conditions.add("t.status = ?" to listOf(status))
+        }
 
-            db.useConnection { conn ->
-                conn.prepareStatement(
-                    "SELECT * FROM task $where ORDER BY priority DESC, created_at ASC"
-                ).use { ps ->
-                    var idx = 1
-                    if (pipelineId != null) ps.setString(idx++, pipelineId)
-                    if (status     != null) ps.setString(idx,   status)
-                    ps.executeQuery().use { rs ->
-                        while (rs.next()) result.add(rowToTask(rs))
-                    }
+        val where     = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ") { it.first }}"
+        val allParams = conditions.flatMap { it.second }
+        val order     = if (sortDesc) "DESC" else "ASC"
+        val offset    = (page - 1).coerceAtLeast(0) * pageSize
+
+        fun bindAll(ps: java.sql.PreparedStatement, extraInts: List<Int> = emptyList()) {
+            allParams.forEachIndexed { i, v -> ps.setString(i + 1, v) }
+            extraInts.forEachIndexed  { i, v -> ps.setInt(allParams.size + i + 1, v) }
+        }
+
+        var total = 0
+        val items = mutableListOf<Task>()
+
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT COUNT(*) FROM task t $where").use { ps ->
+                bindAll(ps)
+                ps.executeQuery().use { rs -> if (rs.next()) total = rs.getInt(1) }
+            }
+            conn.prepareStatement(
+                "SELECT t.* FROM task t $where ORDER BY t.created_at $order LIMIT ? OFFSET ?"
+            ).use { ps ->
+                bindAll(ps, listOf(pageSize, offset))
+                ps.executeQuery().use { rs -> while (rs.next()) items.add(rowToTask(rs)) }
+            }
+        }
+
+        TaskListResult(items = items, total = total)
+    }
+
+    // ── findById：按 ID 查询 ───────────────────────────────────────────────────
+
+    override suspend fun findById(id: String): Task? = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT * FROM task WHERE id = ?").use { ps ->
+                ps.setString(1, id)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) rowToTask(rs) else null
                 }
             }
-            result
         }
+    }
 
     // ── create / createAll：插入 ──────────────────────────────────────────────
 
@@ -342,5 +421,7 @@ class TaskDb(private val db: Database) : TaskRepo {
         heartbeatAt       = rs.getLong("heartbeat_at").takeIf     { !rs.wasNull() },
         staleAt           = rs.getLong("stale_at").takeIf         { !rs.wasNull() },
         reclaimedAt       = rs.getLong("reclaimed_at").takeIf     { !rs.wasNull() },
+        progress          = rs.getInt("progress"),
+        isPaused          = rs.getInt("is_paused") != 0,
     )
 }

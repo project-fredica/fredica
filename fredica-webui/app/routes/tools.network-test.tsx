@@ -52,11 +52,11 @@ const POLL_INTERVAL_MS = 1_000;
 const CONTINUOUS_DELAY_MS = 1_500;
 
 const PHASE_LABEL: Record<TestPhase, string> = {
-    idle:     "",
+    idle: "",
     creating: "正在提交任务…",
-    waiting:  "测试中，请稍候…",
-    done:     "测试完成",
-    failed:   "测试失败",
+    waiting: "测试中，请稍候…",
+    done: "测试完成",
+    failed: "测试失败",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ function fmtLatency(ms: number | null): string {
 
 function latencyColor(ms: number | null): string {
     if (ms === null) return "text-gray-400";
-    if (ms < 1000)  return "text-green-600 font-medium";
+    if (ms < 1000) return "text-green-600 font-medium";
     return "text-yellow-600 font-medium";
 }
 
@@ -104,20 +104,20 @@ function ConnCell({ r }: { r: ConnResult | null }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NetworkTestPage() {
-    const [phase,      setPhase]      = useState<TestPhase>("idle");
-    const [output,     setOutput]     = useState<NetworkTestOutput | null>(null);
-    const [taskError,  setTaskError]  = useState<string | null>(null);
-    const [taskId,     setTaskId]     = useState<string | null>(null);
+    const [phase, setPhase] = useState<TestPhase>("idle");
+    const [output, setOutput] = useState<NetworkTestOutput | null>(null);
+    const [taskError, setTaskError] = useState<string | null>(null);
+    const [taskId, setTaskId] = useState<string | null>(null);
     const [pipelineId, setPipelineId] = useState<string | null>(null);
     const [continuous, setContinuous] = useState(false);
-    const [round,      setRound]      = useState(0);
+    const [round, setRound] = useState(0);
 
-    const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null);
-    const retriggerRef  = useRef<ReturnType<typeof setTimeout>  | null>(null);
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const retriggerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { apiFetch } = useAppFetch();
 
     const stopPolling = () => {
-        if (pollRef.current)      { clearInterval(pollRef.current);   pollRef.current = null; }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         if (retriggerRef.current) { clearTimeout(retriggerRef.current); retriggerRef.current = null; }
     };
     useEffect(() => () => stopPolling(), []);
@@ -132,12 +132,11 @@ export default function NetworkTestPage() {
         try {
             const { data } = await apiFetch("/api/v1/NetworkTestRoute", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
                 body: "{}",
             });
 
             const newPipelineId = (data as any).pipeline_id as string;
-            const newTaskId     = (data as any).task_id     as string;
+            const newTaskId = (data as any).task_id as string;
             setPipelineId(newPipelineId);
             setTaskId(newTaskId);
             setPhase("waiting");
@@ -186,7 +185,7 @@ export default function NetworkTestPage() {
     const handleReset = () => {
         stopPolling();
         setPhase("idle"); setOutput(null); setTaskError(null);
-        setTaskId(null);  setPipelineId(null); setRound(0);
+        setTaskId(null); setPipelineId(null); setRound(0);
     };
 
     const isRunning = phase === "creating" || phase === "waiting";
@@ -222,11 +221,10 @@ export default function NetworkTestPage() {
                         </div>
                         {/* 代理状态徽章 */}
                         {output && (
-                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                                output.proxy_configured
-                                    ? "bg-blue-100 text-blue-700"
-                                    : "bg-gray-100 text-gray-500"
-                            }`}>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${output.proxy_configured
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-gray-100 text-gray-500"
+                                }`}>
                                 {output.proxy_configured ? "代理已配置" : "无代理"}
                             </span>
                         )}
@@ -256,7 +254,7 @@ export default function NetworkTestPage() {
                             >
                                 {isRunning
                                     ? <Loader className="w-4 h-4 animate-spin" />
-                                    : <Play   className="w-4 h-4" />
+                                    : <Play className="w-4 h-4" />
                                 }
                                 {isRunning ? PHASE_LABEL[phase] : (round === 0 ? "开始测试" : "再次测试")}
                             </button>
@@ -278,21 +276,19 @@ export default function NetworkTestPage() {
                                 <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs font-medium">
                                     <button
                                         onClick={() => setContinuous(false)}
-                                        className={`px-2.5 py-1 transition-colors ${
-                                            !continuous
-                                                ? "bg-gray-100 text-gray-700"
-                                                : "bg-white text-gray-400 hover:bg-gray-50"
-                                        }`}
+                                        className={`px-2.5 py-1 transition-colors ${!continuous
+                                            ? "bg-gray-100 text-gray-700"
+                                            : "bg-white text-gray-400 hover:bg-gray-50"
+                                            }`}
                                     >
                                         关
                                     </button>
                                     <button
                                         onClick={() => setContinuous(true)}
-                                        className={`px-2.5 py-1 transition-colors border-l border-gray-200 ${
-                                            continuous
-                                                ? "bg-blue-600 text-white"
-                                                : "bg-white text-gray-400 hover:bg-gray-50"
-                                        }`}
+                                        className={`px-2.5 py-1 transition-colors border-l border-gray-200 ${continuous
+                                            ? "bg-blue-600 text-white"
+                                            : "bg-white text-gray-400 hover:bg-gray-50"
+                                            }`}
                                     >
                                         开
                                     </button>

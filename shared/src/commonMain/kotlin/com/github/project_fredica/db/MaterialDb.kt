@@ -32,20 +32,23 @@ class MaterialDb(private val db: Database) : MaterialRepo {
                     stmt.execute(
                         """
                         CREATE TABLE IF NOT EXISTS material (
-                            id              TEXT PRIMARY KEY,
-                            type            TEXT NOT NULL,
-                            title           TEXT NOT NULL DEFAULT '',
-                            source_type     TEXT NOT NULL DEFAULT '',
-                            source_id       TEXT NOT NULL DEFAULT '',
-                            cover_url       TEXT NOT NULL DEFAULT '',
-                            description     TEXT NOT NULL DEFAULT '',
-                            pipeline_status TEXT NOT NULL DEFAULT 'pending',
-                            extra           TEXT NOT NULL DEFAULT '{}',
-                            created_at      INTEGER NOT NULL,
-                            updated_at      INTEGER NOT NULL
+                            id          TEXT PRIMARY KEY,
+                            type        TEXT NOT NULL,
+                            title       TEXT NOT NULL DEFAULT '',
+                            source_type TEXT NOT NULL DEFAULT '',
+                            source_id   TEXT NOT NULL DEFAULT '',
+                            cover_url   TEXT NOT NULL DEFAULT '',
+                            description TEXT NOT NULL DEFAULT '',
+                            extra       TEXT NOT NULL DEFAULT '{}',
+                            created_at  INTEGER NOT NULL,
+                            updated_at  INTEGER NOT NULL
                         )
                         """.trimIndent()
                     )
+                    // Migration: drop legacy pipeline_status column if it still exists
+                    try {
+                        stmt.execute("ALTER TABLE material DROP COLUMN pipeline_status")
+                    } catch (_: Exception) { /* already removed or never existed */ }
 
                     // ── Audio detail (type = 'audio') ──────────────────────────────
                     stmt.execute(
@@ -94,7 +97,7 @@ class MaterialDb(private val db: Database) : MaterialRepo {
             conn.prepareStatement(
                 """
                 SELECT m.id, m.type, m.title, m.source_type, m.source_id, m.cover_url,
-                       m.description, m.pipeline_status, m.extra, m.created_at, m.updated_at,
+                       m.description, m.extra, m.created_at, m.updated_at,
                        GROUP_CONCAT(mcr.category_id) AS cat_ids
                 FROM material m
                 LEFT JOIN material_category_rel mcr ON m.id = mcr.material_id
@@ -115,7 +118,6 @@ class MaterialDb(private val db: Database) : MaterialRepo {
                                 sourceId = rs.getString("source_id"),
                                 coverUrl = rs.getString("cover_url"),
                                 description = rs.getString("description"),
-                                pipelineStatus = rs.getString("pipeline_status"),
                                 extra = rs.getString("extra"),
                                 createdAt = rs.getLong("created_at"),
                                 updatedAt = rs.getLong("updated_at"),

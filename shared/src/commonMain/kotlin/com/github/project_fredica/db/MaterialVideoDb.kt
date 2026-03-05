@@ -61,17 +61,16 @@ class MaterialVideoDb(private val db: Database) : MaterialVideoRepo {
                 """
                 INSERT INTO material (
                     id, type, title, source_type, source_id, cover_url,
-                    description, pipeline_status, extra, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    description, extra, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
-                    title           = excluded.title,
-                    source_type     = excluded.source_type,
-                    source_id       = excluded.source_id,
-                    cover_url       = excluded.cover_url,
-                    description     = excluded.description,
-                    pipeline_status = excluded.pipeline_status,
-                    extra           = excluded.extra,
-                    updated_at      = excluded.updated_at
+                    title       = excluded.title,
+                    source_type = excluded.source_type,
+                    source_id   = excluded.source_id,
+                    cover_url   = excluded.cover_url,
+                    description = excluded.description,
+                    extra       = excluded.extra,
+                    updated_at  = excluded.updated_at
                 """.trimIndent()
             ).use { ps ->
                 for (v in videos) {
@@ -82,10 +81,9 @@ class MaterialVideoDb(private val db: Database) : MaterialVideoRepo {
                     ps.setString(5, v.sourceId)
                     ps.setString(6, v.coverUrl)
                     ps.setString(7, v.description)
-                    ps.setString(8, v.pipelineStatus)
-                    ps.setString(9, v.extra)
-                    ps.setLong(10, v.createdAt)
-                    ps.setLong(11, v.updatedAt)
+                    ps.setString(8, v.extra)
+                    ps.setLong(9, v.createdAt)
+                    ps.setLong(10, v.updatedAt)
                     ps.executeUpdate()
                 }
             }
@@ -127,7 +125,7 @@ class MaterialVideoDb(private val db: Database) : MaterialVideoRepo {
                 """
                 SELECT
                     m.id, m.type, m.title, m.source_type, m.source_id, m.cover_url,
-                    m.description, m.pipeline_status, m.extra, m.created_at, m.updated_at,
+                    m.description, m.extra, m.created_at, m.updated_at,
                     mv.duration, mv.local_video_path, mv.local_audio_path, mv.transcript_path,
                     GROUP_CONCAT(mcr.category_id) AS cat_ids
                 FROM material m
@@ -151,7 +149,6 @@ class MaterialVideoDb(private val db: Database) : MaterialVideoRepo {
                                 sourceId = rs.getString("source_id"),
                                 coverUrl = rs.getString("cover_url"),
                                 description = rs.getString("description"),
-                                pipelineStatus = rs.getString("pipeline_status"),
                                 extra = rs.getString("extra"),
                                 createdAt = rs.getLong("created_at"),
                                 updatedAt = rs.getLong("updated_at"),
@@ -161,6 +158,55 @@ class MaterialVideoDb(private val db: Database) : MaterialVideoRepo {
                                 transcriptPath = rs.getString("transcript_path"),
                                 categoryIds = catIds,
                             )
+                        )
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /**
+     * Returns a single video material by ID, or null if not found.
+     */
+    override suspend fun findById(id: String): MaterialVideo? = withContext(Dispatchers.IO) {
+        var result: MaterialVideo? = null
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT
+                    m.id, m.type, m.title, m.source_type, m.source_id, m.cover_url,
+                    m.description, m.extra, m.created_at, m.updated_at,
+                    mv.duration, mv.local_video_path, mv.local_audio_path, mv.transcript_path,
+                    GROUP_CONCAT(mcr.category_id) AS cat_ids
+                FROM material m
+                JOIN material_video mv ON m.id = mv.material_id
+                LEFT JOIN material_category_rel mcr ON m.id = mcr.material_id
+                WHERE m.type = 'video' AND m.id = ?
+                GROUP BY m.id
+                """.trimIndent()
+            ).use { ps ->
+                ps.setString(1, id)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val catIds = rs.getString("cat_ids")
+                            ?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+                        result = MaterialVideo(
+                            id = rs.getString("id"),
+                            type = rs.getString("type"),
+                            title = rs.getString("title"),
+                            sourceType = rs.getString("source_type"),
+                            sourceId = rs.getString("source_id"),
+                            coverUrl = rs.getString("cover_url"),
+                            description = rs.getString("description"),
+                            extra = rs.getString("extra"),
+                            createdAt = rs.getLong("created_at"),
+                            updatedAt = rs.getLong("updated_at"),
+                            duration = rs.getInt("duration"),
+                            localVideoPath = rs.getString("local_video_path"),
+                            localAudioPath = rs.getString("local_audio_path"),
+                            transcriptPath = rs.getString("transcript_path"),
+                            categoryIds = catIds,
                         )
                     }
                 }

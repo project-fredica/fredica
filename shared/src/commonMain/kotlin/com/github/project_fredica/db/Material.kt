@@ -26,13 +26,6 @@ data class Material(
     @SerialName("source_id")       val sourceId: String,
     @SerialName("cover_url")       val coverUrl: String,
     val description: String,
-    /**
-     * File-completeness status (not AI-processing status):
-     *  - pending     : metadata only, no local file
-     *  - local_ready : local file downloaded and verified
-     *  - local_error : download failed or file corrupted (retryable)
-     */
-    @SerialName("pipeline_status") val pipelineStatus: String,
     /** JSON blob for source-specific metadata (e.g. bilibili UP name, play count). */
     val extra: String,
     @SerialName("created_at")      val createdAt: Long,
