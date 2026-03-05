@@ -19,6 +19,7 @@ import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
 import com.github.project_fredica.worker.executors.DownloadBilibiliVideoExecutor
+import com.github.project_fredica.worker.executors.TranscodeMp4Executor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
@@ -39,9 +40,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.ktorm.database.Database
 
 
@@ -173,9 +178,15 @@ object FredicaApiJvmService {
             scope = engineScope,
             executors = listOf(
                 DownloadBilibiliVideoExecutor,
+                TranscodeMp4Executor,
             ),
         )
         logger.debug("WorkerEngine started")
+
+        // 启动后异步触发设备检测（不阻塞启动流程）
+        engineScope.launch {
+            _runStartupDeviceDetect()
+        }
 
         // 注册前置清理：关闭 Python 服务 / 数据库等 shutdown hook 之前，
         // 先取消所有正在运行的任务，等它们离开 running 状态后再释放锁。
@@ -202,6 +213,50 @@ object FredicaApiJvmService {
         }
     }
 
+
+    @Suppress("FunctionName")
+    private suspend fun _runStartupDeviceDetect() {
+        val logger = createLogger()
+
+        // 等待 Python 服务就绪（最多 60 秒，每 3 秒重试）
+        val deadlineMs = System.currentTimeMillis() + 60_000L
+        while (System.currentTimeMillis() < deadlineMs) {
+            try {
+                PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Get, "/ping")
+                break
+            } catch (_: Throwable) {
+                delay(3000)
+            }
+        }
+        try {
+            val resultText = PythonUtil.Py314Embed.PyUtilServer.requestText(
+                HttpMethod.Post, "/device/detect", requestTimeoutMs = 120_000L
+            )
+            val parsed = AppUtil.GlobalVars.json.parseToJsonElement(resultText).jsonObject
+            val deviceInfoJson = parsed["device_info_json"]?.toString() ?: ""
+            val ffmpegProbeJson = parsed["ffmpeg_probe_json"]?.toString() ?: ""
+
+            val ffmpegProbeElement = parsed["ffmpeg_probe_json"]?.jsonObject
+            val probeFound = ffmpegProbeElement?.get("found")?.jsonPrimitive?.booleanOrNull ?: false
+            val probePath = ffmpegProbeElement?.get("path")?.jsonPrimitive?.content ?: ""
+
+            val config = AppConfigService.repo.getConfig()
+            val autoFillPath = config.ffmpegPath.isEmpty() && probeFound && probePath.isNotEmpty()
+            AppConfigService.repo.updateConfig(
+                config.copy(
+                    deviceInfoJson = deviceInfoJson,
+                    ffmpegProbeJson = ffmpegProbeJson,
+                    ffmpegPath = if (autoFillPath) probePath else config.ffmpegPath,
+                )
+            )
+            if (autoFillPath) {
+                logger.info("[startup] ffmpegPath auto-filled: $probePath")
+            }
+            logger.info("[startup] device detect complete, ffmpegProbeJson saved")
+        } catch (e: Throwable) {
+            logger.warn("[startup] device detect failed: ${e.message}")
+        }
+    }
 
     @OptIn(ExperimentalSerializationApi::class)
     private suspend fun Application.initModule(

@@ -1,17 +1,21 @@
 package com.github.project_fredica.appwebview.messages
 
+import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.CaseFormat
 import com.github.project_fredica.apputil.CreateJsonUtil
 import com.github.project_fredica.apputil.asT
 import com.github.project_fredica.apputil.convertCase
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.jsonPretty
 import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.multiplatform.webview.jsbridge.IJsMessageHandler
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
 abstract class MyJsMessageHandler : IJsMessageHandler {
     protected val logger = createLogger()
@@ -36,8 +40,13 @@ abstract class MyJsMessageHandler : IJsMessageHandler {
         callback: (String) -> Unit
     ) {
         logger.debug("[${this.javaClass.simpleName}] handle js message: $message")
-        runBlocking(Dispatchers.IO) {
-            handle2(message, navigator, callback)
+        CoroutineScope(Dispatchers.IO).launch {
+            handle2(message, navigator) {
+                callback(
+                    // Fixed kmpJsBridge BUG
+                    it.replace("\\", "\\\\")
+                )
+            }
         }
     }
 

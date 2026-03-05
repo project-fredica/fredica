@@ -37,16 +37,16 @@ shared/src/
 ├── jvmMain/kotlin/.../
 │   ├── api/FredicaApi.jvm.kt  # Ktor 启动、认证、DB/Worker 初始化
 │   ├── python/PythonUtil.kt   # Python 服务 HTTP/WebSocket 客户端
-│   └── worker/executors/      # JVM 专属 Executor（目前只有 DownloadBilibiliVideoExecutor）
+│   └── worker/executors/      # JVM 专属 Executor（DownloadBilibiliVideoExecutor、TranscodeMp4Executor）
 └── jvmTest/kotlin/            # 所有单元测试（SQLite 临时文件隔离）
 commonTest/kotlin/             # 平台无关测试（JsonsTest）
 
 fredica-webui/                          # React 前端
 desktop_assets/common/fredica-pyutil/   # Python 服务源代码
 └── fredica_pyutil_server/
-    ├── routes/         # 自动扫描加载的 API 路由（bilibili_*, ping）
-    ├── subprocess/     # 子进程封装（transcribe）
-    └── util/           # TaskEndpoint 基类（WebSocket 长任务框架）
+    ├── routes/         # 自动扫描加载的 API 路由（bilibili_*, device, transcode, ping）
+    ├── subprocess/     # 子进程封装（transcribe, transcode）
+    └── util/           # TaskEndpoint 基类 + device_util + ffmpeg_util
 ```
 
 ---
@@ -57,7 +57,7 @@ desktop_assets/common/fredica-pyutil/   # Python 服务源代码
 # 运行桌面应用（开发入口）
 ./gradlew :composeApp:run
 
-# 构建 shared 模块（修改 API 模型后必须执行）
+# 构建 shared 模块（修改 kotlin 代码后必须执行）
 ./gradlew :shared:build
 
 # 运行全部单元测试
@@ -156,6 +156,12 @@ cd fredica-webui && npm install && npm run dev
 | Python 路由     | `routes/bilibili_video.py`（GET /bilibili/video/get-pages + WS /bilibili/video/download-task）· `routes/bilibili_subtitle.py` · `routes/bilibili_favorite.py` · `routes/ping.py`                                                          |
 | PythonUtil    | 新增 `PyUtilServer.websocketTask()` API（WebSocket 通道，支持 cancel/pause/resume 信号传递）                                                                                                                                                        |
 | 素材导入 Pipeline | `MaterialImportRoute` 导入后自动创建 bilibili 任务流水线；`DownloadBilibiliVideoExecutor` 通过 WebSocket 下载                                                                                                                                          |
+| 设备检测与 GPU 加速  | `util/device_util.py`（CUDA/ROCm/QSV/VideoToolbox/D3D11VA/VAAPI 检测）· `util/ffmpeg_util.py`（多路径搜索 + 能力探测 + `TranscodeCommandBuilder`）· `routes/device.py`（GET /device/info · POST /device/detect）· `routes/transcode.py`（WS /transcode/mp4-task）· `subprocess/transcode.py`（FFmpeg 子进程 + 进度解析） |
+| AppConfig 扩展  | 新增 5 字段：`ffmpegPath` · `ffmpegHwAccel` · `ffmpegAutoDetect` · `deviceInfoJson` · `ffmpegProbeJson`；`AppConfigDb` 同步                                                                                                                    |
+| 启动自动检测        | `FredicaApi.jvm.kt` 启动后等待 Python ping 通，异步调用 `/device/detect` 写入 AppConfig；若 `ffmpegPath` 为空且探测到有效路径则自动填充                                                                                                                             |
+| JS Bridge     | `GetDeviceInfoJsMessageHandler` · `RunFfmpegDetectJsMessageHandler` 注册到 `AppWebViewMessages.all`；`MyJsMessageHandler.handle()` 改用 `CoroutineScope(Dispatchers.IO).launch`（修复 UI 线程阻塞）                                               |
+| TranscodeMp4  | `TranscodeMp4Executor`（jvmMain）：WebSocket 转码 executor，读 `ffmpegProbeJson` 自动解析最优加速方案；`MaterialRunTaskRoute` 支持 TRANSCODE_MP4 payload 构建                                                                                               |
+| 硬件加速设置页       | `app-desktop-setting.tsx` 新增：GPU 能力全量展示（支持彩色/不支持灰色）· FFmpeg 最优加速 GPU 着色 + 优先级说明 · FFmpeg 路径竖排单选列表（含 `all_paths`）                                                                                                                    |
 
 ---
 

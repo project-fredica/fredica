@@ -15,6 +15,13 @@ data class AppConfig(
     @SerialName("proxy_enabled") val proxyEnabled: Boolean = false,
     @SerialName("proxy_url") val proxyUrl: String = "",
     @SerialName("rsshub_url") val rsshubUrl: String = "",
+    // FFmpeg 配置
+    @SerialName("ffmpeg_path") val ffmpegPath: String = "",
+    @SerialName("ffmpeg_hw_accel") val ffmpegHwAccel: String = "auto",
+    @SerialName("ffmpeg_auto_detect") val ffmpegAutoDetect: Boolean = true,
+    // 设备检测结果（只读，启动时写入）
+    @SerialName("device_info_json") val deviceInfoJson: String = "",
+    @SerialName("ffmpeg_probe_json") val ffmpegProbeJson: String = "",
 )
 
 interface AppConfigRepo {

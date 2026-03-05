@@ -29,6 +29,11 @@ private val defaultKv: Map<String, String> = mapOf(
     "proxy_enabled" to "false",
     "proxy_url" to "",
     "rsshub_url" to "",
+    "ffmpeg_path" to "",
+    "ffmpeg_hw_accel" to "auto",
+    "ffmpeg_auto_detect" to "true",
+    "device_info_json" to "",
+    "ffmpeg_probe_json" to "",
 )
 
 private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
@@ -42,6 +47,11 @@ private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
     "proxy_enabled" to proxyEnabled.toString(),
     "proxy_url" to proxyUrl,
     "rsshub_url" to rsshubUrl,
+    "ffmpeg_path" to ffmpegPath,
+    "ffmpeg_hw_accel" to ffmpegHwAccel,
+    "ffmpeg_auto_detect" to ffmpegAutoDetect.toString(),
+    "device_info_json" to deviceInfoJson,
+    "ffmpeg_probe_json" to ffmpegProbeJson,
 )
 
 private fun Map<String, String>.toAppConfig() = AppConfig(
@@ -55,6 +65,11 @@ private fun Map<String, String>.toAppConfig() = AppConfig(
     proxyEnabled = get("proxy_enabled")?.toBooleanStrictOrNull() ?: false,
     proxyUrl = get("proxy_url") ?: "",
     rsshubUrl = get("rsshub_url") ?: "",
+    ffmpegPath = get("ffmpeg_path") ?: "",
+    ffmpegHwAccel = get("ffmpeg_hw_accel") ?: "auto",
+    ffmpegAutoDetect = get("ffmpeg_auto_detect")?.toBooleanStrictOrNull() ?: true,
+    deviceInfoJson = get("device_info_json") ?: "",
+    ffmpegProbeJson = get("ffmpeg_probe_json") ?: "",
 )
 
 class AppConfigDb(private val db: Database) : AppConfigRepo {

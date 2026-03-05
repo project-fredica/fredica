@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, RefreshCw, Save } from "lucide-react";
 import type { Route } from "./+types/app-desktop-setting";
 
 export function meta({ }: Route.MetaArgs) {
@@ -131,6 +131,34 @@ const settingSections: SettingSection[] = [
     //         },
     //     ],
     // },
+    {
+        title: "硬件加速",
+        items: [
+            {
+                type: "text",
+                key: "ffmpeg_path",
+                label: "FFmpeg 路径",
+                description: "FFmpeg 可执行文件的绝对路径。留空则自动搜索系统路径。",
+                defaultValue: "",
+                placeholder: "留空则自动发现（PATH、常见安装目录等）",
+            },
+            {
+                type: "select",
+                key: "ffmpeg_hw_accel",
+                label: "硬件加速方案",
+                description: "视频转码时使用的硬件加速器。自动模式使用检测到的最优方案。",
+                defaultValue: "auto",
+                options: [
+                    { label: "自动（推荐）", value: "auto" },
+                    { label: "NVIDIA CUDA", value: "cuda" },
+                    { label: "AMD AMF", value: "amf" },
+                    { label: "Intel QSV", value: "qsv" },
+                    { label: "Apple VideoToolbox", value: "videotoolbox" },
+                    { label: "CPU (libx264)", value: "cpu" },
+                ],
+            },
+        ],
+    },
 ];
 
 function buildInitialValues(): Record<string, string | number | boolean> {
@@ -152,6 +180,9 @@ export default function Component({ }: Route.ComponentProps) {
     const [values, setValues] = useState<Record<string, string | number | boolean>>(buildInitialValues);
     const [saved, setSaved] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [deviceInfo, setDeviceInfo] = useState<any>(null);
+    const [ffmpegProbe, setFfmpegProbe] = useState<any>(null);
+    const [detecting, setDetecting] = useState(false);
 
     useEffect(() => {
         const bridge = getKmpJsBridge();
@@ -166,12 +197,27 @@ export default function Component({ }: Route.ComponentProps) {
                     setValues(prev => ({ ...prev, ...config }));
                     setLoadError(null);
                 } catch (e) {
-                    setLoadError("解析配置失败：" + e);
+                    setLoadError("解析配置失败：" + e + "  ---  result is : " + result);
                 }
             });
         } catch (e) {
             setLoadError("调用 kmpJsBridge 失败：" + e);
         }
+        try {
+            bridge.callNative("get_device_info", "{}", (result: string) => {
+                try {
+                    const info = JSON.parse(result);
+                    if (info.device_info_json) {
+                        setDeviceInfo(typeof info.device_info_json === "string"
+                            ? JSON.parse(info.device_info_json) : info.device_info_json);
+                    }
+                    if (info.ffmpeg_probe_json) {
+                        setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
+                            ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+                    }
+                } catch (_) { /* device info optional */ }
+            });
+        } catch (_) { /* device info optional */ }
     }, []);
 
     const handleChange = (key: string, value: string | number | boolean) => {
@@ -199,6 +245,32 @@ export default function Component({ }: Route.ComponentProps) {
         } catch (e) {
             console.error("调用 kmpJsBridge 保存配置失败：", e);
             alert("保存失败：" + e);
+        }
+    };
+
+    const handleDetect = () => {
+        const bridge = getKmpJsBridge();
+        if (!bridge) return;
+        setDetecting(true);
+        try {
+            bridge.callNative("run_ffmpeg_detect", "{}", (result: string) => {
+                setDetecting(false);
+                try {
+                    const info = JSON.parse(result);
+                    if (info.error) { console.error("device detect error:", info.error); return; }
+                    if (info.device_info_json) {
+                        setDeviceInfo(typeof info.device_info_json === "string"
+                            ? JSON.parse(info.device_info_json) : info.device_info_json);
+                    }
+                    if (info.ffmpeg_probe_json) {
+                        setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
+                            ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+                    }
+                } catch (_) { /* ignore parse errors */ }
+            });
+        } catch (e) {
+            setDetecting(false);
+            console.error("detect failed:", e);
         }
     };
 
@@ -286,18 +358,115 @@ export default function Component({ }: Route.ComponentProps) {
                             padding: "14px 20px",
                             borderBottom: "1px solid #f3f4f6",
                             backgroundColor: "#f9fafb",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
                         }}>
                             <h2 style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                                 {section.title}
                             </h2>
+                            {section.title === "硬件加速" && (
+                                <button
+                                    onClick={handleDetect}
+                                    disabled={detecting}
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: "4px",
+                                        padding: "4px 10px", fontSize: "12px",
+                                        color: detecting ? "#9ca3af" : "#2563eb",
+                                        backgroundColor: "transparent",
+                                        border: `1px solid ${detecting ? "#d1d5db" : "#bfdbfe"}`,
+                                        borderRadius: "6px", cursor: detecting ? "not-allowed" : "pointer",
+                                    }}
+                                >
+                                    <RefreshCw size={12} style={{ animation: detecting ? "spin 1s linear infinite" : "none" }} />
+                                    {detecting ? "检测中..." : "刷新检测"}
+                                </button>
+                            )}
                         </div>
+                        {section.title === "硬件加速" && (deviceInfo || ffmpegProbe) && (
+                            <div style={{ padding: "16px 20px", borderBottom: "1px solid #f3f4f6", backgroundColor: "#fafafa" }}>
+                                {deviceInfo && (() => {
+                                    const GPU_CAPS: Array<{
+                                        key: string;
+                                        label: string;
+                                        detail?: string;
+                                        activeColor: string;
+                                        activeText: string;
+                                    }> = [
+                                        {
+                                            key: "cuda",
+                                            label: "CUDA (NVIDIA)",
+                                            detail: deviceInfo.gpu?.cuda?.devices?.[0]?.name,
+                                            activeColor: "#dcfce7", activeText: "#166534",
+                                        },
+                                        { key: "rocm", label: "ROCm (AMD)", activeColor: "#fce7f3", activeText: "#9d174d" },
+                                        { key: "qsv", label: "Intel QSV", activeColor: "#dbeafe", activeText: "#1e40af" },
+                                        { key: "d3d11va", label: "D3D11VA", activeColor: "#f3e8ff", activeText: "#7e22ce" },
+                                        { key: "videotoolbox", label: "VideoToolbox", activeColor: "#fee2e2", activeText: "#991b1b" },
+                                        { key: "vaapi", label: "VAAPI", activeColor: "#fef9c3", activeText: "#713f12" },
+                                    ];
+                                    return (
+                                        <div style={{ marginBottom: "12px" }}>
+                                            <p style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: 600, color: "#374151" }}>设备 GPU 能力</p>
+                                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                                                {GPU_CAPS.map(({ key, label, detail, activeColor, activeText }) => {
+                                                    const available = !!deviceInfo.gpu?.[key]?.available;
+                                                    return (
+                                                        <span
+                                                            key={key}
+                                                            style={{
+                                                                padding: "2px 8px",
+                                                                fontSize: "12px",
+                                                                backgroundColor: available ? activeColor : "#f3f4f6",
+                                                                color: available ? activeText : "#9ca3af",
+                                                                borderRadius: "4px",
+                                                            }}
+                                                        >
+                                                            {available ? "✓" : "✗"} {label}{detail ? ` · ${detail}` : ""}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                {ffmpegProbe && (
+                                    <div>
+                                        <p style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: 600, color: "#374151" }}>FFmpeg</p>
+                                        {ffmpegProbe.found ? (
+                                            <div style={{ fontSize: "12px", color: "#6b7280", display: "flex", flexDirection: "column", gap: "3px" }}>
+                                                <span>版本：{ffmpegProbe.version}</span>
+                                                <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                    当前最优加速：
+                                                    <strong style={{
+                                                        color: ffmpegProbe.selected_accel && ffmpegProbe.selected_accel !== "cpu" ? "#059669" : "#d97706",
+                                                        fontSize: "13px",
+                                                    }}>
+                                                        {ffmpegProbe.selected_accel === "cuda" ? "CUDA (GPU)" :
+                                                         ffmpegProbe.selected_accel === "amf" ? "AMF (GPU)" :
+                                                         ffmpegProbe.selected_accel === "qsv" ? "QSV (GPU)" :
+                                                         ffmpegProbe.selected_accel === "videotoolbox" ? "VideoToolbox (GPU)" :
+                                                         ffmpegProbe.selected_accel === "cpu" ? "CPU (无 GPU 加速)" :
+                                                         ffmpegProbe.selected_accel ?? "未知"}
+                                                    </strong>
+                                                </span>
+                                                <span style={{ color: "#9ca3af" }}>优先级：CUDA &gt; AMF &gt; QSV &gt; VideoToolbox &gt; CPU</span>
+                                            </div>
+                                        ) : (
+                                            <span style={{ fontSize: "12px", color: "#ef4444" }}>未找到 FFmpeg，请安装后点击刷新检测</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         <div>
                             {section.items.map((item, idx) => (
                                 <div key={item.key} style={{
                                     display: "flex",
-                                    alignItems: "center",
+                                    flexDirection: item.key === "ffmpeg_path" ? "column" : "row",
+                                    alignItems: item.key === "ffmpeg_path" ? "stretch" : "center",
                                     justifyContent: "space-between",
-                                    gap: "16px",
+                                    gap: item.key === "ffmpeg_path" ? "10px" : "16px",
                                     padding: "16px 20px",
                                     borderBottom: idx < section.items.length - 1 ? "1px solid #f3f4f6" : "none",
                                 }}>
@@ -377,7 +546,65 @@ export default function Component({ }: Route.ComponentProps) {
                                                 }}
                                             />
                                         )}
-                                        {item.type === "text" && (
+                                        {item.type === "text" && item.key === "ffmpeg_path" ? (() => {
+                                            const allPaths: string[] = ffmpegProbe?.all_paths ?? [];
+                                            const currentVal = values[item.key] as string;
+                                            if (allPaths.length === 0) {
+                                                return (
+                                                    <input
+                                                        type="text"
+                                                        value={currentVal}
+                                                        placeholder={item.placeholder}
+                                                        onChange={(e) => handleChange(item.key, e.target.value)}
+                                                        style={{
+                                                            padding: "6px 10px",
+                                                            fontSize: "13px",
+                                                            color: "#374151",
+                                                            border: "1px solid #d1d5db",
+                                                            borderRadius: "6px",
+                                                            width: "100%",
+                                                            boxSizing: "border-box",
+                                                        }}
+                                                    />
+                                                );
+                                            }
+                                            return (
+                                                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                                    {allPaths.map(p => {
+                                                        const active = currentVal === p;
+                                                        return (
+                                                            <button
+                                                                key={p}
+                                                                onClick={() => handleChange(item.key, p)}
+                                                                style={{
+                                                                    display: "flex",
+                                                                    alignItems: "center",
+                                                                    gap: "8px",
+                                                                    padding: "7px 10px",
+                                                                    fontSize: "12px",
+                                                                    textAlign: "left",
+                                                                    backgroundColor: active ? "#eff6ff" : "#fff",
+                                                                    color: active ? "#1d4ed8" : "#374151",
+                                                                    border: `1px solid ${active ? "#bfdbfe" : "#e5e7eb"}`,
+                                                                    borderRadius: "6px",
+                                                                    cursor: "pointer",
+                                                                    wordBreak: "break-all",
+                                                                }}
+                                                            >
+                                                                <span style={{
+                                                                    flexShrink: 0,
+                                                                    width: "12px", height: "12px",
+                                                                    borderRadius: "50%",
+                                                                    border: `2px solid ${active ? "#2563eb" : "#d1d5db"}`,
+                                                                    backgroundColor: active ? "#2563eb" : "transparent",
+                                                                }} />
+                                                                {p}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })() : item.type === "text" && (
                                             <input
                                                 type="text"
                                                 value={values[item.key] as string}

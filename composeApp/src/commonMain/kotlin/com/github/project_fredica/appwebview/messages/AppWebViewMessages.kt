@@ -6,6 +6,8 @@ object AppWebViewMessages {
             OpenBrowserJsMessageHandler(),
             GetAppConfigJsMessageHandler(),
             SaveAppConfigJsMessageHandler(),
+            GetDeviceInfoJsMessageHandler(),
+            RunFfmpegDetectJsMessageHandler(),
         )
     }
 }

@@ -51,6 +51,20 @@ object MaterialRunTaskRoute : FredicaApi.Route {
                 kv("page",        1)
                 kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
             } }.toString()
+            "TRANSCODE_MP4" -> createJson { obj {
+                // Prefer .m4s pair (DASH); fall back to .flv for older downloads
+                val videoM4s = mediaDir.resolve("video.m4s")
+                val audioM4s = mediaDir.resolve("audio.m4s")
+                val videoFlv = mediaDir.resolve("video.flv")
+                if (videoM4s.exists() && audioM4s.exists()) {
+                    kv("input_video",  videoM4s.absolutePath)
+                    kv("input_audio",  audioM4s.absolutePath)
+                } else {
+                    kv("input_video",  videoFlv.absolutePath)
+                }
+                kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
+                kv("hw_accel",    "auto")
+            } }.toString()
             else -> "{}"
         }
 
