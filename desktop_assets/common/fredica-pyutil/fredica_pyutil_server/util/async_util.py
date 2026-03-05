@@ -6,6 +6,7 @@ from typing import Any, Callable, TypeVar
 T = TypeVar('T')
 
 
+# noinspection PyTypeChecker
 async def run_blocking(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     """
     在默认线程池（ThreadPoolExecutor）中执行阻塞函数，避免阻塞 asyncio 事件循环。
