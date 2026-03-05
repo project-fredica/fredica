@@ -8,6 +8,8 @@ from typing import *
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from fredica_pyutil_server.util.async_util import run_blocking
+
 _valid_command_name = ("cancel", "pause", "resume", "status", "init_param_and_run")
 TaskEndpointCommandName = Literal["cancel", "pause", "resume", "status", "init_param_and_run"]
 
@@ -433,7 +435,8 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
             args=(param, self._status_queue, self._cancel_mp_event, self._resume_mp_event),
             daemon=True,
         )
-        self._process.start()
+        # process.start() 以 spawn 模式启动新 Python 解释器，会阻塞数百毫秒
+        await run_blocking(self._process.start)
         logger.info("[{}] subprocess started, pid={}", self.tag, self._process.pid)
         self._queue_reader_task = asyncio.create_task(self._run_queue_reader())
 
@@ -465,10 +468,11 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
         if self._process is None:
             return False
         if self._cancel_flag and self._process.is_alive():
-            self._cancel_mp_event.set()
+            # multiprocessing.Event.set() 和 process.terminate() 均为阻塞系统调用
+            await run_blocking(self._cancel_mp_event.set)
             # 解除子进程可能的 wait() 暂停，确保其能检查到 cancel_event
-            self._resume_mp_event.set()
-            self._process.terminate()
+            await run_blocking(self._resume_mp_event.set)
+            await run_blocking(self._process.terminate)
             logger.info("[{}] subprocess terminated, pid={}", self.tag, self._process.pid)
         if not self._process.is_alive():
             if self._queue_reader_task and not self._queue_reader_task.done():
@@ -485,11 +489,11 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
 
     async def _call_pause(self):
         """清除 resume_event；子进程调用 resume_event.wait() 时将挂起。"""
-        self._resume_mp_event.clear()
+        await run_blocking(self._resume_mp_event.clear)
 
     async def _call_resume(self):
         """设置 resume_event，唤醒子进程。"""
-        self._resume_mp_event.set()
+        await run_blocking(self._resume_mp_event.set)
 
 
 if __name__ == '__main__':
