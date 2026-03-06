@@ -118,7 +118,7 @@ llm_models_json  TEXT NOT NULL DEFAULT '[]'   -- List<LlmModelConfig> 序列化
 {
   "model_id": "gpt-4o-mini-work",
   "system_prompt": "你是一个视频内容分析助手。",
-  "user_prompt": "请分析以下转录文本：\n{{context.transcribe.text}}",
+  "user_prompt": "请分析以下转录文本：\n%context.transcribe.text%",
   "response_format": {
     "type": "json_schema",
     "json_schema": { "...": "..." }
@@ -268,7 +268,7 @@ private fun extractDeltaContent(dataJson: String): String? = runCatching {
         "type": "object",
         "properties": {
           "summary":  { "type": "string" },
-          "topics":   { "type": "array", "items": { "type": "string" } },
+          "topics":   { "type": "array", "items": { "type": "string" }},
           "chapters": {
             "type": "array",
             "items": {

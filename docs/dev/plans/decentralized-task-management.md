@@ -965,10 +965,10 @@ hardware_modifier = 0  // 云端不受本地硬件影响
 ```
 
 **LLM 硬件评分 prompt：**
-```
+```text
 你是一个 AI 推理性能专家。请评估以下 GPU 用于本地 AI 推理任务（语音转文字、目标检测、图像生成等）
 的综合性能，给出 0–100 的整数分数。100 = RTX 4090 水平，50 = RTX 3060 水平，25 = GTX 1070 水平。
-GPU: {{gpu_name}}，VRAM: {{vram_gb}}GB
+GPU: %gpu_name%，VRAM: %vram_gb%GB
 只需返回一个整数，不要任何解释。
 ```
 

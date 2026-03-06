@@ -1,7 +1,8 @@
 import { DefaultTheme, defineConfig } from "vitepress";
 import { generateSidebar } from "vitepress-sidebar";
 import { withMermaid } from "vitepress-plugin-mermaid";
-import taskCheckbox from "markdown-it-task-checkbox"; // ts ignore
+// @ts-ignore
+import taskCheckbox from "markdown-it-task-checkbox";
 
 function create_sidebar_item(): DefaultTheme.SidebarItem[] {
   /* @ts-ignore */
