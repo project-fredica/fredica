@@ -13,8 +13,8 @@ package com.github.project_fredica.db
 //      SQLite 的 UPDATE ... WHERE id=(SELECT ...) RETURNING id 在单进程内天然原子，
 //      多节点时需配合 HTTP 乐观锁（Phase 3 实现，此处无需额外处理）。
 //
-//   3. recalculate() 不在此类实现：它要写 pipeline_instance 表，
-//      职责属于 PipelineDb，不应让 TaskDb 跨表依赖。
+//   3. recalculate() 不在此类实现：它要写 workflow_run 表，
+//      职责属于 WorkflowRunDb，不应让 TaskDb 跨表依赖。
 // =============================================================================
 
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +38,7 @@ class TaskDb(private val db: Database) : TaskRepo {
                         CREATE TABLE IF NOT EXISTS task (
                             id                  TEXT PRIMARY KEY,
                             type                TEXT NOT NULL,
-                            pipeline_id         TEXT NOT NULL,
+                            workflow_run_id     TEXT NOT NULL,
                             material_id         TEXT NOT NULL,
                             status              TEXT NOT NULL DEFAULT 'pending',
                             priority            INTEGER NOT NULL DEFAULT 0,
@@ -247,17 +247,17 @@ class TaskDb(private val db: Database) : TaskRepo {
         }
     }
 
-    // ── listByPipeline / listAll：查询 ────────────────────────────────────────
+    // ── listByWorkflowRun / listAll：查询 ────────────────────────────────────
 
-    /** 返回指定流水线的所有任务，按优先级 DESC、创建时间 ASC 排序。 */
-    override suspend fun listByPipeline(pipelineId: String): List<Task> =
+    /** 返回指定工作流运行实例的所有任务，按优先级 DESC、创建时间 ASC 排序。 */
+    override suspend fun listByWorkflowRun(workflowRunId: String): List<Task> =
         withContext(Dispatchers.IO) {
             val result = mutableListOf<Task>()
             db.useConnection { conn ->
                 conn.prepareStatement(
-                    "SELECT * FROM task WHERE pipeline_id = ? ORDER BY priority DESC, created_at ASC"
+                    "SELECT * FROM task WHERE workflow_run_id = ? ORDER BY priority DESC, created_at ASC"
                 ).use { ps ->
-                    ps.setString(1, pipelineId)
+                    ps.setString(1, workflowRunId)
                     ps.executeQuery().use { rs ->
                         while (rs.next()) result.add(rowToTask(rs))
                     }
@@ -273,7 +273,7 @@ class TaskDb(private val db: Database) : TaskRepo {
      */
     override suspend fun listAll(
         taskId: String?,
-        pipelineId: String?,
+        workflowRunId: String?,
         status: String?,
         materialId: String?,
         categoryId: String?,
@@ -284,7 +284,7 @@ class TaskDb(private val db: Database) : TaskRepo {
         // Build (sql, params) pairs in order — params must match '?' placeholders
         val conditions = mutableListOf<Pair<String, List<String>>>()
         if (taskId     != null) conditions.add("t.id = ?" to listOf(taskId))
-        if (pipelineId != null) conditions.add("t.pipeline_id = ?" to listOf(pipelineId))
+        if (workflowRunId != null) conditions.add("t.workflow_run_id = ?" to listOf(workflowRunId))
         if (materialId != null) conditions.add("t.material_id = ?" to listOf(materialId))
         if (categoryId != null) conditions.add(
             "EXISTS (SELECT 1 FROM material_category_rel mcr WHERE mcr.material_id = t.material_id AND mcr.category_id = ?)" to listOf(categoryId)
@@ -359,7 +359,7 @@ class TaskDb(private val db: Database) : TaskRepo {
             conn.prepareStatement(
                 """
                 INSERT OR IGNORE INTO task (
-                    id, type, pipeline_id, material_id, status, priority,
+                    id, type, workflow_run_id, material_id, status, priority,
                     depends_on, cache_policy, payload, idempotency_key,
                     max_retries, created_by, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -368,7 +368,7 @@ class TaskDb(private val db: Database) : TaskRepo {
                 for (t in tasks) {
                     ps.setString(1,  t.id)
                     ps.setString(2,  t.type)
-                    ps.setString(3,  t.pipelineId)
+                    ps.setString(3,  t.workflowRunId)
                     ps.setString(4,  t.materialId)
                     ps.setString(5,  t.status)
                     ps.setInt(6,     t.priority)
@@ -394,7 +394,7 @@ class TaskDb(private val db: Database) : TaskRepo {
     private fun rowToTask(rs: java.sql.ResultSet): Task = Task(
         id                = rs.getString("id"),
         type              = rs.getString("type"),
-        pipelineId        = rs.getString("pipeline_id"),
+        workflowRunId     = rs.getString("workflow_run_id"),
         materialId        = rs.getString("material_id"),
         status            = rs.getString("status"),
         priority          = rs.getInt("priority"),

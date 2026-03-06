@@ -22,6 +22,13 @@ data class AppConfig(
     // 设备检测结果（只读，启动时写入）
     @SerialName("device_info_json") val deviceInfoJson: String = "",
     @SerialName("ffmpeg_probe_json") val ffmpegProbeJson: String = "",
+    // LLM 模型配置
+    @SerialName("llm_models_json") val llmModelsJson: String = "[]",
+    @SerialName("llm_default_roles_json") val llmDefaultRolesJson: String = "{}",
+    // LLM 测试令牌（仅用于开发阶段验证 SSE 客户端）
+    @SerialName("llm_test_api_key") val llmTestApiKey: String = "",
+    @SerialName("llm_test_base_url") val llmTestBaseUrl: String = "",
+    @SerialName("llm_test_model") val llmTestModel: String = "",
 )
 
 interface AppConfigRepo {

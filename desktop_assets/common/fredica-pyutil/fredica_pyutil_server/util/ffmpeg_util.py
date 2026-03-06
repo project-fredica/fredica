@@ -66,16 +66,16 @@ def _find_ffmpeg_candidates() -> List[str]:
     candidates: List[str] = []
     seen: set = set()
 
-    def add(p: str) -> None:
-        p = os.path.normpath(p)
-        if not p or not os.path.isfile(p):
+    def add(_p: str) -> None:
+        _p = os.path.normpath(_p)
+        if not _p or not os.path.isfile(_p):
             return
         # 用 realpath 解析符号链接，Windows 大小写不敏感
-        real = os.path.realpath(p)
+        real = os.path.realpath(_p)
         key = real.lower() if platform.system() == "Windows" else real
         if key not in seen:
             seen.add(key)
-            candidates.append(p)
+            candidates.append(_p)
 
     # 1. PATH via shutil.which
     w = shutil.which("ffmpeg")
@@ -385,8 +385,12 @@ class TranscodeCommandBuilder:
         return [ffmpeg_path] + inputs + ["-c:v"] + enc + self._COMMON_SUFFIX + [output_path]
 
 
-if __name__ == "__main__":
+def _test():
     import json
 
     result = find_best_ffmpeg()
     print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    _test()

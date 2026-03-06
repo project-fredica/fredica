@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 // 生命周期：
 //   pending → claimed → running → completed
 //                              ↘ failed（retry_count < max_retries → 回到 pending）
-//   pending/running → cancelled（用户取消流水线）
+//   pending/running → cancelled（用户主动取消）
 //
 // depends_on 是 JSON 数组，存放前置任务 ID，如 `["task-a","task-b"]`。
 // claimNext() 只会认领"所有前置任务都已 completed"的任务，从而实现 DAG 调度。
@@ -24,8 +24,8 @@ data class Task(
     /** 任务类型，对应一个 TaskExecutor 实现，如 DOWNLOAD_VIDEO、EXTRACT_AUDIO 等 */
     val type: String,
 
-    /** 所属流水线 ID，与 pipeline_instance.id 对应 */
-    @SerialName("pipeline_id") val pipelineId: String,
+    /** 所属工作流运行实例 ID，与 workflow_run.id 对应 */
+    @SerialName("workflow_run_id") val workflowRunId: String,
 
     /** 所属素材 ID，与 material.id 对应 */
     @SerialName("material_id") val materialId: String,
@@ -66,8 +66,13 @@ data class Task(
     /** 已重试次数（首次执行不计入） */
     @SerialName("retry_count") val retryCount: Int = 0,
 
-    /** 最大重试次数；超过后永久 failed */
-    @SerialName("max_retries") val maxRetries: Int = 3,
+    /**
+     * 最大重试次数；超过后永久 failed。
+     * 默认 0（不重试）：音视频任务均有副作用（写磁盘/消耗 API 额度），应由
+     * WorkflowDefinition.NodeDef.max_retries 显式声明。
+     * 例外：无副作用的系统任务（如 NetworkTestExecutor）可在创建 Task 时将此值设为 3。
+     */
+    @SerialName("max_retries") val maxRetries: Int = 0,
 
     /** 创建来源，单节点模式固定为 "local" */
     @SerialName("created_by") val createdBy: String = "local",
@@ -116,8 +121,8 @@ data class Task(
 // TaskRepo —— 任务数据访问接口
 // =============================================================================
 //
-// 注意：recalculate（重新计算流水线进度）不在 TaskRepo 里，
-//       因为它需要写 pipeline_instance 表，属于 PipelineRepo 的职责。
+// 注意：recalculate（重新计算运行实例进度）不在 TaskRepo 里，
+//       因为它需要写 workflow_run 表，属于 WorkflowRunRepo 的职责。
 // =============================================================================
 
 // =============================================================================
@@ -159,14 +164,14 @@ interface TaskRepo {
      */
     suspend fun incrementRetry(id: String)
 
-    /** 按 pipeline_id 查询所有任务，按 priority DESC、created_at ASC 排序。 */
-    suspend fun listByPipeline(pipelineId: String): List<Task>
+    /** 按 workflow_run_id 查询所有任务，按 priority DESC、created_at ASC 排序。 */
+    suspend fun listByWorkflowRun(workflowRunId: String): List<Task>
 
     /**
      * 查询所有任务，支持可选过滤 + 分页 + 排序，返回 [TaskListResult]。
      *
      * @param taskId     为 null 时不按 id 过滤
-     * @param pipelineId 为 null 时不过滤 pipeline
+     * @param workflowRunId 为 null 时不过滤工作流运行实例
      * @param status     特殊值：`pending`=等待(pending+claimed)，`running`=运行中(running且未暂停)，
      *                   `paused`=已暂停(running且is_paused=1)；其他值精确匹配
      * @param materialId 为 null 时不过滤素材
@@ -177,7 +182,7 @@ interface TaskRepo {
      */
     suspend fun listAll(
         taskId: String? = null,
-        pipelineId: String? = null,
+        workflowRunId: String? = null,
         status: String? = null,
         materialId: String? = null,
         categoryId: String? = null,

@@ -7,8 +7,8 @@ import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialVideoService
-import com.github.project_fredica.db.PipelineInstance
-import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.WorkflowRun
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
 import kotlinx.serialization.SerialName
@@ -40,10 +40,10 @@ object MaterialRunTaskRoute : FredicaApi.Route {
             return buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
         }
 
-        val nowSec     = System.currentTimeMillis() / 1000L
-        val mediaDir   = AppUtil.Paths.materialMediaDir(material.id)
-        val pipelineId = UUID.randomUUID().toString()
-        val taskId     = UUID.randomUUID().toString()
+        val nowSec        = System.currentTimeMillis() / 1000L
+        val mediaDir      = AppUtil.Paths.materialMediaDir(material.id)
+        val workflowRunId = UUID.randomUUID().toString()
+        val taskId        = UUID.randomUUID().toString()
 
         val payload = when (taskType) {
             "DOWNLOAD_BILIBILI_VIDEO" -> createJson { obj {
@@ -70,9 +70,9 @@ object MaterialRunTaskRoute : FredicaApi.Route {
 
         val maxRetries = 3
 
-        PipelineService.repo.create(
-            PipelineInstance(
-                id         = pipelineId,
+        WorkflowRunService.repo.create(
+            WorkflowRun(
+                id         = workflowRunId,
                 materialId = material.id,
                 template   = "manual_${taskType.lowercase()}",
                 status     = "pending",
@@ -85,7 +85,7 @@ object MaterialRunTaskRoute : FredicaApi.Route {
             Task(
                 id         = taskId,
                 type       = taskType,
-                pipelineId = pipelineId,
+                workflowRunId = workflowRunId,
                 materialId = material.id,
                 payload    = payload,
                 maxRetries = maxRetries,
@@ -94,7 +94,7 @@ object MaterialRunTaskRoute : FredicaApi.Route {
         )
 
         return buildValidJson {
-            kv("pipeline_id", pipelineId)
+            kv("workflow_run_id", workflowRunId)
             kv("task_id",     taskId)
         }
     }

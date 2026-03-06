@@ -34,6 +34,11 @@ private val defaultKv: Map<String, String> = mapOf(
     "ffmpeg_auto_detect" to "true",
     "device_info_json" to "",
     "ffmpeg_probe_json" to "",
+    "llm_models_json" to "[]",
+    "llm_default_roles_json" to "{}",
+    "llm_test_api_key" to "",
+    "llm_test_base_url" to "",
+    "llm_test_model" to "",
 )
 
 private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
@@ -52,6 +57,11 @@ private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
     "ffmpeg_auto_detect" to ffmpegAutoDetect.toString(),
     "device_info_json" to deviceInfoJson,
     "ffmpeg_probe_json" to ffmpegProbeJson,
+    "llm_models_json" to llmModelsJson,
+    "llm_default_roles_json" to llmDefaultRolesJson,
+    "llm_test_api_key" to llmTestApiKey,
+    "llm_test_base_url" to llmTestBaseUrl,
+    "llm_test_model" to llmTestModel,
 )
 
 private fun Map<String, String>.toAppConfig() = AppConfig(
@@ -70,6 +80,11 @@ private fun Map<String, String>.toAppConfig() = AppConfig(
     ffmpegAutoDetect = get("ffmpeg_auto_detect")?.toBooleanStrictOrNull() ?: true,
     deviceInfoJson = get("device_info_json") ?: "",
     ffmpegProbeJson = get("ffmpeg_probe_json") ?: "",
+    llmModelsJson = get("llm_models_json") ?: "[]",
+    llmDefaultRolesJson = get("llm_default_roles_json") ?: "{}",
+    llmTestApiKey = get("llm_test_api_key") ?: "",
+    llmTestBaseUrl = get("llm_test_base_url") ?: "",
+    llmTestModel = get("llm_test_model") ?: "",
 )
 
 class AppConfigDb(private val db: Database) : AppConfigRepo {

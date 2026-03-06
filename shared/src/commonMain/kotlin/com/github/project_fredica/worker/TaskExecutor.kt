@@ -29,7 +29,7 @@ import kotlinx.serialization.Serializable
  *   - 执行失败：返回 ExecuteResult(error = "...", errorType = "...")，**不要抛出异常**
  *     （WorkerEngine 也会 catch 异常，但主动返回失败比抛异常更明确）
  *   - 执行结果 result 字段内容由 WorkerEngine 写入 task.result 列，
- *     下游任务可通过 TaskService.repo.listByPipeline() 读取前置任务的 result 获取输出路径等信息
+ *     下游任务可通过 TaskService.repo.listByWorkflowRun() 读取前置任务的 result 获取输出路径等信息
  */
 interface TaskExecutor {
     /** 与 task.type 字段对应的类型标识符，如 "DOWNLOAD_VIDEO"。 */

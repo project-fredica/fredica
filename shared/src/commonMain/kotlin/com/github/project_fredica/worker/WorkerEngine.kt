@@ -27,7 +27,7 @@ package com.github.project_fredica.worker
 
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
-import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
 import kotlinx.coroutines.CoroutineScope
@@ -136,7 +136,7 @@ object WorkerEngine {
         if (executor == null) {
             logger.error("WorkerEngine: 找不到 type=${task.type} 的 Executor，任务 ${task.id} 将永久失败")
             finishFailed(task, "No executor registered for type=${task.type}", "NO_EXECUTOR")
-            afterTaskFinished(task.pipelineId)
+            afterTaskFinished(task.workflowRunId)
             return
         }
 
@@ -180,8 +180,8 @@ object WorkerEngine {
             }
         }
 
-        // 步骤 5：重新计算流水线进度（recalculate 属于 PipelineRepo 职责）
-        afterTaskFinished(task.pipelineId)
+        // 步骤 5：重新计算工作流运行实例进度（recalculate 属于 WorkflowRunRepo 职责）
+        afterTaskFinished(task.workflowRunId)
     }
 
     /** 将任务标记为永久失败并记录日志。 */
@@ -194,11 +194,11 @@ object WorkerEngine {
      * 任务状态变更后重新计算流水线进度。
      * 失败不致命（下次有任务完成时会再次触发），仅记录日志。
      */
-    private suspend fun afterTaskFinished(pipelineId: String) {
+    private suspend fun afterTaskFinished(workflowRunId: String) {
         try {
-            PipelineService.repo.recalculate(pipelineId)
+            WorkflowRunService.repo.recalculate(workflowRunId)
         } catch (e: Throwable) {
-            logger.error("WorkerEngine: 重新计算流水线 $pipelineId 进度失败", e)
+            logger.error("WorkerEngine: 重新计算工作流运行实例 $workflowRunId 进度失败", e)
         }
     }
 }

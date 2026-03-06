@@ -21,9 +21,9 @@ package com.github.project_fredica.worker
 // 测试环境：每个测试用例独立的 SQLite 临时文件。
 // =============================================================================
 
-import com.github.project_fredica.db.PipelineDb
-import com.github.project_fredica.db.PipelineInstance
-import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.WorkflowRunDb
+import com.github.project_fredica.db.WorkflowRun
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskDb
 import com.github.project_fredica.db.TaskService
@@ -40,10 +40,10 @@ class DagEngineTest {
 
     private lateinit var db: Database
     private lateinit var taskDb: TaskDb
-    private lateinit var pipelineDb: PipelineDb
+    private lateinit var workflowRunDb: WorkflowRunDb
 
     /**
-     * 每个测试前重建干净的临时文件数据库，并预创建宿主流水线 "pipeline-dag"。
+     * 每个测试前重建干净的临时文件数据库，并预创建宿主工作流运行实例 "wr-dag"。
      * 所有测试任务都属于这条流水线。
      */
     @BeforeTest
@@ -53,16 +53,16 @@ class DagEngineTest {
             url    = "jdbc:sqlite:${tmpFile.absolutePath}",
             driver = "org.sqlite.JDBC",
         )
-        pipelineDb = PipelineDb(db)
+        workflowRunDb = WorkflowRunDb(db)
         taskDb     = TaskDb(db)
-        pipelineDb.initialize()
+        workflowRunDb.initialize()
         taskDb.initialize()
         TaskService.initialize(taskDb)
-        PipelineService.initialize(pipelineDb)
+        WorkflowRunService.initialize(workflowRunDb)
 
-        pipelineDb.create(
-            PipelineInstance(
-                id = "pipeline-dag", materialId = "mat-1",
+        workflowRunDb.create(
+            WorkflowRun(
+                id = "wr-dag", materialId = "mat-1",
                 template = "DAG_TEST", status = "pending",
                 totalTasks = 0, doneTasks = 0,
                 createdAt = nowSec(),
@@ -210,9 +210,9 @@ class DagEngineTest {
 
     /**
      * 证明目的：任务不能依赖自身（自环），且 depends_on 中引用的 ID 必须存在于
-     *           同批次提交的任务列表中。这两条规则由 PipelineCreateRoute 在写库前验证。
+     *           同批次提交的任务列表中。这两条规则由 WorkflowRunStartRoute 在写库前验证。
      *
-     * 证明过程（模拟 PipelineCreateRoute 的校验逻辑）：
+     * 证明过程（模拟 WorkflowRunStartRoute 的校验逻辑）：
      *
      *   场景 A — 有效的前向引用（B 依赖 A，A 在同批次中存在）：
      *     ids = [cycle-a, cycle-b]
@@ -224,9 +224,9 @@ class DagEngineTest {
      *     A 的 depends_on = [cycle-a]，且 ids[0] = cycle-a
      *     检查 "cycle-a 是否等于自身 ID"，结果为 true → 检测到自环，应报错。
      *
-     * 说明：此测试直接内联了 PipelineCreateRoute 中的验证逻辑，
+     * 说明：此测试直接内联了 WorkflowRunStartRoute 中的验证逻辑，
      *       不需要启动 HTTP 服务器即可验证规则正确性。
-     *       真实的 API 层面校验见 PipelineCreateRoute。
+     *       真实的 API 层面校验见 WorkflowRunStartRoute。
      */
     @Test
     fun testCycleRejected() {
@@ -247,10 +247,10 @@ class DagEngineTest {
 
     private fun nowSec() = System.currentTimeMillis() / 1000L
 
-    /** 快速构造属于 "pipeline-dag" 的测试任务。 */
+    /** 快速构造属于 "wr-dag" 的测试任务。 */
     private fun task(id: String, dependsOn: String = "[]") = Task(
         id = id, type = "DOWNLOAD_VIDEO",
-        pipelineId = "pipeline-dag", materialId = "mat-1",
+        workflowRunId = "wr-dag", materialId = "mat-1",
         dependsOn = dependsOn,
         createdAt = nowSec(),
     )

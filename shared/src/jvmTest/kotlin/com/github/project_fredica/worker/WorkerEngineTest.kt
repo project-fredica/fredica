@@ -8,15 +8,15 @@ package com.github.project_fredica.worker
 //
 // 测试策略：
 //   - 使用 FakeExecutor（可控的假执行器）替代真实 Executor，避免依赖 ffmpeg/Python。
-//   - WorkerEngine 是全局单例，每个测试通过独立的 scope + taskDb + pipelineDb 隔离。
-//   - 测试属于集成测试：WorkerEngine + TaskDb + PipelineDb 联动运行，
+//   - WorkerEngine 是全局单例，每个测试通过独立的 scope + taskDb + workflowRunDb 隔离。
+//   - 测试属于集成测试：WorkerEngine + TaskDb + WorkflowRunDb 联动运行，
 //     通过轮询数据库状态来断言最终结果（"最终一致"断言模式）。
 //   - waitUntil() 以最长超时（10~20s）等待异步状态变化，避免硬 sleep。
 //
 // 测试矩阵：
-//   1. testSuccessFlow        — 正常执行路径：任务完成，pipeline 联动更新
+//   1. testSuccessFlow        — 正常执行路径：任务完成，运行实例联动更新
 //   2. testRetryOnFailure     — 失败后重试：retry_count 递增，最终成功
-//   3. testMaxRetriesExhausted— 重试耗尽：任务永久失败，pipeline 联动失败
+//   3. testMaxRetriesExhausted— 重试耗尽：任务永久失败，运行实例联动失败
 //   4. testPriorityOrder      — 优先级调度：高优先级任务先被认领
 //   5. testConcurrencyLimit   — 并发上限：Semaphore 限制同时执行数量
 //
@@ -25,13 +25,13 @@ package com.github.project_fredica.worker
 // 注意事项：
 //   WorkerEngine.start() 每次调用都会在传入的 scope 内启动新的轮询协程。
 //   测试结束后 scope 被 GC 回收，协程自然停止。多次调用 start() 会叠加 registry，
-//   但由于每个测试用的是独立临时库和新的 TaskService/PipelineService 实例，
+//   但由于每个测试用的是独立临时库和新的 TaskService/WorkflowRunService 实例，
 //   旧协程读到的依然是当前测试的数据，不会互相干扰。
 // =============================================================================
 
-import com.github.project_fredica.db.PipelineDb
-import com.github.project_fredica.db.PipelineInstance
-import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.WorkflowRunDb
+import com.github.project_fredica.db.WorkflowRun
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskDb
 import com.github.project_fredica.db.TaskService
@@ -55,11 +55,11 @@ class WorkerEngineTest {
 
     private lateinit var db: Database
     private lateinit var taskDb: TaskDb
-    private lateinit var pipelineDb: PipelineDb
+    private lateinit var workflowRunDb: WorkflowRunDb
 
     // 记录本轮测试启动的所有引擎 scope，在 @AfterTest 中统一取消。
     // 目的：WorkerEngine 是全局单例，每次 start() 都会在 scope 内新增轮询协程。
-    // 若不取消，上一个测试的协程在 @BeforeTest 重置 TaskService/PipelineService 后，
+    // 若不取消，上一个测试的协程在 @BeforeTest 重置 TaskService/WorkflowRunService 后，
     // 仍会访问新数据库并抢先认领任务——导致并发数超出当前测试的 maxWorkers 限制。
     private val activeScopes = mutableListOf<CoroutineScope>()
 
@@ -85,21 +85,21 @@ class WorkerEngineTest {
             url    = "jdbc:sqlite:${tmpFile.absolutePath}",
             driver = "org.sqlite.JDBC",
         )
-        pipelineDb = PipelineDb(db)
+        workflowRunDb = WorkflowRunDb(db)
         taskDb     = TaskDb(db)
-        pipelineDb.initialize()
+        workflowRunDb.initialize()
         taskDb.initialize()
         TaskService.initialize(taskDb)
-        PipelineService.initialize(pipelineDb)
+        WorkflowRunService.initialize(workflowRunDb)
     }
 
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L
 
-    private suspend fun createPipeline(id: String, total: Int = 1) {
-        pipelineDb.create(
-            PipelineInstance(
+    private suspend fun createWorkflowRun(id: String, total: Int = 1) {
+        workflowRunDb.create(
+            WorkflowRun(
                 id = id, materialId = "mat-1", template = "T",
                 status = "pending", totalTasks = total, doneTasks = 0,
                 createdAt = nowSec(),
@@ -109,14 +109,14 @@ class WorkerEngineTest {
 
     private suspend fun createTask(
         id: String,
-        pipelineId: String,
+        workflowRunId: String,
         priority: Int = 0,
         dependsOn: String = "[]",
         maxRetries: Int = 3,
     ) {
         taskDb.create(
             Task(
-                id = id, type = "FAKE", pipelineId = pipelineId,
+                id = id, type = "FAKE", workflowRunId = workflowRunId,
                 materialId = "mat-1", priority = priority,
                 dependsOn = dependsOn, createdAt = nowSec(),
                 maxRetries = maxRetries,
@@ -145,18 +145,18 @@ class WorkerEngineTest {
 
     /**
      * 证明目的：当 Executor 执行成功时，任务状态变为 completed，
-     *           且 pipeline 的状态也联动变为 completed。
+     *           且工作流运行实例的状态也联动变为 completed。
      *
      * 证明过程：
      *   1. 启动引擎，使用 FakeExecutor（50ms 后返回成功）。
      *   2. 创建 1 个任务的流水线，并插入任务。
      *   3. 等待（最多 10s）任务状态变为 "completed"。
-     *   4. 等待（最多 10s）pipeline 状态变为 "completed"。
+     *   4. 等待（最多 10s）运行实例状态变为 "completed"。
      *   5. 最终断言两者状态均为 "completed"。
      *
      * 这验证了完整的数据流：
      *   claimNext() → status=claimed → execute() → updateStatus(completed)
-     *   → recalculate() → pipeline.status=completed
+     *   → recalculate() → workflowRun.status=completed
      */
     @Test
     fun testSuccessFlow() = runBlocking {
@@ -166,16 +166,16 @@ class WorkerEngineTest {
             executors = listOf(FakeExecutor(succeedAfterMs = 50)),
         )
 
-        createPipeline("pl-success", total = 1)
+        createWorkflowRun("pl-success", total = 1)
         createTask("t-success", "pl-success")
 
-        waitUntil { taskDb.listByPipeline("pl-success").first().status == "completed" }
-        waitUntil { pipelineDb.getById("pl-success")?.status == "completed" }
+        waitUntil { taskDb.listByWorkflowRun("pl-success").first().status == "completed" }
+        waitUntil { workflowRunDb.getById("pl-success")?.status == "completed" }
 
-        assertEquals("completed", taskDb.listByPipeline("pl-success").first().status,
+        assertEquals("completed", taskDb.listByWorkflowRun("pl-success").first().status,
             "任务应已完成")
-        assertEquals("completed", pipelineDb.getById("pl-success")?.status,
-            "pipeline 应联动变为 completed")
+        assertEquals("completed", workflowRunDb.getById("pl-success")?.status,
+            "运行实例应联动变为 completed")
     }
 
     // ── 测试 2：失败后重试，最终成功 ─────────────────────────────────────────
@@ -204,14 +204,14 @@ class WorkerEngineTest {
             executors = listOf(FakeExecutor(failTimes = 1, succeedAfterMs = 30)),
         )
 
-        createPipeline("pl-retry", total = 1)
+        createWorkflowRun("pl-retry", total = 1)
         createTask("t-retry", "pl-retry")
 
         waitUntil(12_000) {
-            taskDb.listByPipeline("pl-retry").first().status == "completed"
+            taskDb.listByWorkflowRun("pl-retry").first().status == "completed"
         }
 
-        val task = taskDb.listByPipeline("pl-retry").first()
+        val task = taskDb.listByWorkflowRun("pl-retry").first()
         assertEquals("completed", task.status, "经过重试后任务最终应成功")
         assertTrue(task.retryCount >= 1, "retryCount 应记录至少 1 次重试")
     }
@@ -220,7 +220,7 @@ class WorkerEngineTest {
 
     /**
      * 证明目的：当 retryCount 达到 maxRetries 后，任务不再重试，
-     *           永久保持 failed 状态，且 pipeline 联动变为 failed。
+     *           永久保持 failed 状态，且运行实例联动变为 failed。
      *
      * 证明过程：
      *   1. 使用 FakeExecutor(failTimes=Int.MAX_VALUE)：永远返回失败。
@@ -228,7 +228,7 @@ class WorkerEngineTest {
      *   3. 等待（最多 20s）任务状态变为 "failed"。
      *      （需要等待：失败→重试→失败→重试→失败→永久失败，约 3 轮执行 + 退避时间）
      *   4. 断言任务 status = "failed"。
-     *   5. 等待并断言 pipeline status = "failed"（recalculate 联动）。
+     *   5. 等待并断言运行实例 status = "failed"（recalculate 联动）。
      *
      * 验证的终止条件：
      *   WorkerEngine 中的判断：if (task.retryCount >= task.maxRetries) → finishFailed()
@@ -242,18 +242,18 @@ class WorkerEngineTest {
             executors = listOf(FakeExecutor(failTimes = Int.MAX_VALUE)),
         )
 
-        createPipeline("pl-exhaust", total = 1)
+        createWorkflowRun("pl-exhaust", total = 1)
         createTask("t-exhaust", "pl-exhaust", maxRetries = 2)
 
         waitUntil(20_000) {
-            taskDb.listByPipeline("pl-exhaust").first().status == "failed"
+            taskDb.listByWorkflowRun("pl-exhaust").first().status == "failed"
         }
 
-        assertEquals("failed", taskDb.listByPipeline("pl-exhaust").first().status,
+        assertEquals("failed", taskDb.listByWorkflowRun("pl-exhaust").first().status,
             "重试次数耗尽后任务应永久失败")
-        waitUntil { pipelineDb.getById("pl-exhaust")?.status == "failed" }
-        assertEquals("failed", pipelineDb.getById("pl-exhaust")?.status,
-            "pipeline 应联动变为 failed")
+        waitUntil { workflowRunDb.getById("pl-exhaust")?.status == "failed" }
+        assertEquals("failed", workflowRunDb.getById("pl-exhaust")?.status,
+            "运行实例应联动变为 failed")
     }
 
     // ── 测试 4：优先级调度顺序 ────────────────────────────────────────────────
@@ -289,13 +289,13 @@ class WorkerEngineTest {
         // maxWorkers=1 确保任务串行执行，执行顺序 = 认领顺序
         WorkerEngine.start(maxWorkers = 1, scope = engineScope(), executors = listOf(trackingExec))
 
-        createPipeline("pl-priority", total = 3)
+        createWorkflowRun("pl-priority", total = 3)
         createTask("t-low",  "pl-priority", priority = 3)
         createTask("t-high", "pl-priority", priority = 8)
         createTask("t-mid",  "pl-priority", priority = 5)
 
         waitUntil(15_000) {
-            taskDb.listByPipeline("pl-priority").all { it.status == "completed" }
+            taskDb.listByWorkflowRun("pl-priority").all { it.status == "completed" }
         }
 
         assertEquals("t-high", claimOrder.firstOrNull(),
@@ -341,11 +341,11 @@ class WorkerEngineTest {
 
         WorkerEngine.start(maxWorkers = 2, scope = engineScope(), executors = listOf(monitorExec))
 
-        createPipeline("pl-concurrency", total = 5)
+        createWorkflowRun("pl-concurrency", total = 5)
         (1..5).forEach { i -> createTask("t-conc-$i", "pl-concurrency") }
 
         waitUntil(20_000) {
-            taskDb.listByPipeline("pl-concurrency").all { it.status == "completed" }
+            taskDb.listByWorkflowRun("pl-concurrency").all { it.status == "completed" }
         }
 
         assertTrue(

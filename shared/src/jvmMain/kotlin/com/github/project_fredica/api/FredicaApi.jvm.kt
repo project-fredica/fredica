@@ -11,8 +11,8 @@ import com.github.project_fredica.db.MaterialTaskDb
 import com.github.project_fredica.db.MaterialTaskService
 import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
-import com.github.project_fredica.db.PipelineDb
-import com.github.project_fredica.db.PipelineService
+import com.github.project_fredica.db.WorkflowRunDb
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.TaskDb
 import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.python.PythonUtil
@@ -23,6 +23,7 @@ import com.github.project_fredica.worker.executors.TranscodeMp4Executor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
+import com.github.project_fredica.api.routes.LlmProxyChatRoute
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -158,7 +159,7 @@ object FredicaApiJvmService {
                 { initialize() }) { MaterialTaskService.initialize(it) }
             // 5. Async worker task queue (pipeline_instance + task + task_event tables)
             boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
-            boot("PipelineService", PipelineDb(database), { initialize() }) { PipelineService.initialize(it) }
+            boot("WorkflowRunService", WorkflowRunDb(database), { initialize() }) { WorkflowRunService.initialize(it) }
         }
 
         CurrentInstanceHandler.server = embeddedServer(
@@ -317,6 +318,15 @@ object FredicaApiJvmService {
                         "message" to "Connect success", "addr" to call.request.local.toString()
                     )
                 )
+            }
+
+            // LLM 代理聊天（SSE 流式转发，需鉴权，单独注册绕过通用路由框架）
+            post("/api/v1/LlmProxyChatRoute") {
+                if (!checkAuth()) {
+                    logger.debug("check auth failed ?")
+                    return@post
+                }
+                LlmProxyChatRoute.handle(this)
             }
 
             for (route in allRoutes) {

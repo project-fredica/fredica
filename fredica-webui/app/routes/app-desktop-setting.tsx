@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, RefreshCw, Save } from "lucide-react";
 import type { Route } from "./+types/app-desktop-setting";
+import { getBridge } from "../util/bridge";
 
 export function meta({ }: Route.MetaArgs) {
     return [
@@ -171,10 +172,6 @@ function buildInitialValues(): Record<string, string | number | boolean> {
     return values;
 }
 
-function getKmpJsBridge(): any | undefined {
-    return typeof window !== "undefined" ? (window as any).kmpJsBridge : undefined;
-}
-
 export default function Component({ }: Route.ComponentProps) {
     const navigate = useNavigate();
     const [values, setValues] = useState<Record<string, string | number | boolean>>(buildInitialValues);
@@ -185,7 +182,7 @@ export default function Component({ }: Route.ComponentProps) {
     const [detecting, setDetecting] = useState(false);
 
     useEffect(() => {
-        const bridge = getKmpJsBridge();
+        const bridge = getBridge();
         if (!bridge) {
             setLoadError("kmpJsBridge 不可用，请在桌面端环境中使用。当前显示默认值。");
             return;
@@ -226,7 +223,7 @@ export default function Component({ }: Route.ComponentProps) {
     };
 
     const handleSave = () => {
-        const bridge = getKmpJsBridge();
+        const bridge = getBridge();
         if (!bridge) {
             alert("kmpJsBridge 不可用，无法保存设置。");
             return;
@@ -249,7 +246,7 @@ export default function Component({ }: Route.ComponentProps) {
     };
 
     const handleDetect = () => {
-        const bridge = getKmpJsBridge();
+        const bridge = getBridge();
         if (!bridge) return;
         setDetecting(true);
         try {
@@ -626,6 +623,40 @@ export default function Component({ }: Route.ComponentProps) {
                         </div>
                     </div>
                 ))}
+
+                {/* LLM 模型配置入口 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    padding: "20px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                }}>
+                    <div>
+                        <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: 600, color: "#111827" }}>LLM 模型配置</p>
+                        <p style={{ margin: 0, fontSize: "13px", color: "#9ca3af" }}>管理 AI 模型连接信息、能力标签及默认角色分配。</p>
+                    </div>
+                    <button
+                        onClick={() => navigate("/app-common-setting-llm-model-config")}
+                        style={{
+                            flexShrink: 0,
+                            padding: "8px 16px",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            color: "#2563eb",
+                            backgroundColor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        进入配置 →
+                    </button>
+                </div>
 
                 <p style={{ textAlign: "center", fontSize: "12px", color: "#9ca3af", marginTop: "8px" }}>
                     部分设置需要重启应用后生效

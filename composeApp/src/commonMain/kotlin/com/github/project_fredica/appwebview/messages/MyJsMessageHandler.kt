@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 abstract class MyJsMessageHandler : IJsMessageHandler {
-    protected val logger = createLogger()
+    protected open val logger = createLogger()
 
     override fun toString(): String {
         return this.javaClass.simpleName

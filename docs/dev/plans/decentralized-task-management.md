@@ -1074,7 +1074,7 @@ load_modifier = -load_ratio × scheduling.load_penalty.max_penalty × quality_we
 
 ### 3.1 DOWNLOAD_* — 文件下载
 
-*① `DOWNLOAD_BILIBILI` — 哔哩哔哩下载*
+*① `DOWNLOAD_BILIBILI_VIDEO` — 哔哩哔哩视频下载*
 
 | 后端 | 工具依赖 | 说明 |
 |------|---------|------|
@@ -1085,7 +1085,7 @@ load_modifier = -load_ratio × scheduling.load_penalty.max_penalty × quality_we
 > - **Server / NAS 节点**：需从源码目录手动启动 `fredica-pyutil` 服务（`uvicorn fredica_pyutil_server.app:app --port 7632`），并在 `worker.yaml` 中通过 `pyutil_path` 指定服务地址；未运行则不声明此能力。
 > - GFW：Bilibili 对 CN 网络无限制，`network_region = "CN"` 节点可正常使用。
 
-*② `DOWNLOAD_YOUTUBE` — YouTube 及通用视频平台下载*
+*② `DOWNLOAD_YOUTUBE_VIDEO` — YouTube 及通用视频平台下载*
 
 | 后端 | 工具依赖 | GFW | 说明 |
 |------|---------|-----|------|

@@ -6,8 +6,16 @@ object AppWebViewMessages {
             OpenBrowserJsMessageHandler(),
             GetAppConfigJsMessageHandler(),
             SaveAppConfigJsMessageHandler(),
+            GetServerInfoJsMessageHandler(),
             GetDeviceInfoJsMessageHandler(),
             RunFfmpegDetectJsMessageHandler(),
+            GetLlmModelsJsMessageHandler(),
+            SaveLlmModelJsMessageHandler(),
+            DeleteLlmModelJsMessageHandler(),
+            ReorderLlmModelsJsMessageHandler(),
+            GetLlmDefaultRolesJsMessageHandler(),
+            SaveLlmDefaultRolesJsMessageHandler(),
+            LlmProxyChatJsMessageHandler(),
         )
     }
 }

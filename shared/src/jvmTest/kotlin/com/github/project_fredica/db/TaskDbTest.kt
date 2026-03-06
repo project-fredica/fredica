@@ -5,11 +5,11 @@ package com.github.project_fredica.db
 // =============================================================================
 //
 // 测试范围：TaskDb 的五个核心行为
-//   1. createAll / listAll   — 批量写入与全量读取
-//   2. idempotency_key 去重  — 相同幂等键只保留一条记录
-//   3. claimNext 原子性       — 并发情况下每个任务最多被认领一次
-//   4. updateStatus 持久化    — 状态、结果、时间戳均正确落库
-//   5. listByPipeline 隔离性  — 按流水线 ID 过滤，不同流水线数据不干扰
+//   1. createAll / listAll      — 批量写入与全量读取
+//   2. idempotency_key 去重     — 相同幂等键只保留一条记录
+//   3. claimNext 原子性          — 并发情况下每个任务最多被认领一次
+//   4. updateStatus 持久化       — 状态、结果、时间戳均正确落库
+//   5. listByWorkflowRun 隔离性 — 按工作流运行实例 ID 过滤，不同实例数据不干扰
 //
 // 测试环境：每个测试用例独立的 SQLite 临时文件（@BeforeTest 重新创建）。
 //
@@ -35,11 +35,11 @@ class TaskDbTest {
 
     private lateinit var db: Database
     private lateinit var taskDb: TaskDb
-    private lateinit var pipelineDb: PipelineDb
+    private lateinit var workflowRunDb: WorkflowRunDb
 
     /**
      * 每个测试前重新创建一个干净的 SQLite 临时文件数据库，保证测试互不干扰。
-     * pipeline-1 是所有任务的宿主流水线（task 表有外键约束检查时需要它存在）。
+     * wr-1 是所有任务的宿主工作流运行实例。
      */
     @BeforeTest
     fun setup() = runBlocking {
@@ -48,16 +48,16 @@ class TaskDbTest {
             url    = "jdbc:sqlite:${tmpFile.absolutePath}",
             driver = "org.sqlite.JDBC",
         )
-        pipelineDb = PipelineDb(db)
-        taskDb     = TaskDb(db)
-        pipelineDb.initialize()
+        workflowRunDb = WorkflowRunDb(db)
+        taskDb        = TaskDb(db)
+        workflowRunDb.initialize()
         taskDb.initialize()
         TaskService.initialize(taskDb)
-        PipelineService.initialize(pipelineDb)
+        WorkflowRunService.initialize(workflowRunDb)
 
-        pipelineDb.create(
-            PipelineInstance(
-                id = "pipeline-1", materialId = "material-1",
+        workflowRunDb.create(
+            WorkflowRun(
+                id = "wr-1", materialId = "material-1",
                 template = "TEST", status = "pending",
                 totalTasks = 0, doneTasks = 0,
                 createdAt = nowSec(),
@@ -82,7 +82,7 @@ class TaskDbTest {
         val tasks = (1..3).map { i ->
             Task(
                 id = "task-$i", type = "DOWNLOAD_VIDEO",
-                pipelineId = "pipeline-1", materialId = "material-1",
+                workflowRunId = "wr-1", materialId = "material-1",
                 createdAt = nowSec(),
             )
         }
@@ -112,7 +112,7 @@ class TaskDbTest {
     fun testIdempotencyKey() = runBlocking {
         val t1 = Task(
             id = "idem-1", type = "EXTRACT_AUDIO",
-            pipelineId = "pipeline-1", materialId = "material-1",
+            workflowRunId = "wr-1", materialId = "material-1",
             idempotencyKey = "unique-key-abc",
             createdAt = nowSec(),
         )
@@ -150,7 +150,7 @@ class TaskDbTest {
         val tasks = (1..3).map { i ->
             Task(
                 id = "atomic-$i", type = "SPLIT_AUDIO",
-                pipelineId = "pipeline-1", materialId = "material-1",
+                workflowRunId = "wr-1", materialId = "material-1",
                 createdAt = nowSec() + i, // 时间戳递增确保排序稳定
             )
         }
@@ -191,16 +191,12 @@ class TaskDbTest {
      *      a. status 已变为 "completed"
      *      b. result 字段与写入内容完全一致
      *      c. completed_at 不为 null（说明时间戳被自动记录）
-     *
-     * 覆盖的边界：
-     *   - result 字段包含 JSON 特殊字符（花括号、冒号、引号），验证不会被转义破坏。
-     *   - completed_at 的自动填充逻辑（在 updateStatus 内部根据 status 决定是否写入）。
      */
     @Test
     fun testStatusUpdatePersisted() = runBlocking {
         val t = Task(
             id = "upd-1", type = "MERGE_TRANSCRIPTION",
-            pipelineId = "pipeline-1", materialId = "material-1",
+            workflowRunId = "wr-1", materialId = "material-1",
             createdAt = nowSec(),
         )
         taskDb.create(t)
@@ -213,45 +209,43 @@ class TaskDbTest {
         assertTrue(updated.completedAt != null, "completed_at 应在进入终态时自动记录")
     }
 
-    // ── 测试 5：listByPipeline 隔离性 ────────────────────────────────────────
+    // ── 测试 5：listByWorkflowRun 隔离性 ─────────────────────────────────────
 
     /**
-     * 证明目的：listByPipeline() 只返回属于指定 pipeline 的任务，不同流水线数据互不干扰。
+     * 证明目的：listByWorkflowRun() 只返回属于指定运行实例的任务，不同实例数据互不干扰。
      *
      * 证明过程：
-     *   1. 创建两条流水线（pipeline-1 在 setup() 已存在，新建 pipeline-2）。
-     *   2. 分别向两条流水线写入任务：pipeline-1 有 2 个，pipeline-2 有 1 个。
-     *   3. 查询 pipeline-1 的任务，断言数量为 2 且每条记录的 pipelineId 正确。
-     *   4. 查询 pipeline-2 的任务，断言数量为 1 且 ID 为 p2t1。
+     *   1. 创建两个运行实例（wr-1 在 setup() 已存在，新建 wr-2）。
+     *   2. 分别向两个实例写入任务：wr-1 有 2 个，wr-2 有 1 个。
+     *   3. 查询 wr-1 的任务，断言数量为 2 且每条记录的 workflowRunId 正确。
+     *   4. 查询 wr-2 的任务，断言数量为 1 且 ID 为 wr2t1。
      *
-     * 覆盖的边界：
-     *   - WHERE pipeline_id = ? 过滤条件正确生效。
-     *   - 两个流水线的任务在同一张表里，过滤不会混淆。
+     * 覆盖的边界：WHERE workflow_run_id = ? 过滤条件正确生效。
      */
     @Test
-    fun testListByPipeline() = runBlocking {
-        pipelineDb.create(
-            PipelineInstance(
-                id = "pipeline-2", materialId = "material-2",
+    fun testListByWorkflowRun() = runBlocking {
+        workflowRunDb.create(
+            WorkflowRun(
+                id = "wr-2", materialId = "material-2",
                 template = "OTHER", status = "pending",
                 totalTasks = 0, doneTasks = 0,
                 createdAt = nowSec(),
             )
         )
 
-        // pipeline-1 的 2 个任务
-        taskDb.create(Task(id = "p1t1", type = "DOWNLOAD_VIDEO", pipelineId = "pipeline-1", materialId = "material-1", createdAt = nowSec()))
-        taskDb.create(Task(id = "p1t2", type = "EXTRACT_AUDIO",  pipelineId = "pipeline-1", materialId = "material-1", createdAt = nowSec()))
-        // pipeline-2 的 1 个任务
-        taskDb.create(Task(id = "p2t1", type = "DOWNLOAD_VIDEO", pipelineId = "pipeline-2", materialId = "material-2", createdAt = nowSec()))
+        // wr-1 的 2 个任务
+        taskDb.create(Task(id = "wr1t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()))
+        taskDb.create(Task(id = "wr1t2", type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()))
+        // wr-2 的 1 个任务
+        taskDb.create(Task(id = "wr2t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-2", materialId = "material-2", createdAt = nowSec()))
 
-        val pl1Tasks = taskDb.listByPipeline("pipeline-1")
-        assertEquals(2, pl1Tasks.size, "pipeline-1 应返回 2 个任务")
-        assertTrue(pl1Tasks.all { it.pipelineId == "pipeline-1" }, "所有任务的 pipelineId 必须是 pipeline-1")
+        val wr1Tasks = taskDb.listByWorkflowRun("wr-1")
+        assertEquals(2, wr1Tasks.size, "wr-1 应返回 2 个任务")
+        assertTrue(wr1Tasks.all { it.workflowRunId == "wr-1" }, "所有任务的 workflowRunId 必须是 wr-1")
 
-        val pl2Tasks = taskDb.listByPipeline("pipeline-2")
-        assertEquals(1, pl2Tasks.size, "pipeline-2 应返回 1 个任务")
-        assertEquals("p2t1", pl2Tasks.first().id, "pipeline-2 的任务 ID 必须是 p2t1")
+        val wr2Tasks = taskDb.listByWorkflowRun("wr-2")
+        assertEquals(1, wr2Tasks.size, "wr-2 应返回 1 个任务")
+        assertEquals("wr2t1", wr2Tasks.first().id, "wr-2 的任务 ID 必须是 wr2t1")
     }
 
     // ── 辅助方法 ──────────────────────────────────────────────────────────────

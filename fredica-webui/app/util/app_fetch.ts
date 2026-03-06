@@ -17,7 +17,7 @@ function getAppHost(
     return `${s}://${d}:${p}`;
 }
 
-function buildAuthHeaders(token?: string | null): Record<string, string> {
+export function buildAuthHeaders(token?: string | null): Record<string, string> {
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
 }
