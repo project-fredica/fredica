@@ -5,6 +5,8 @@ import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { print_error, reportHttpError } from "~/util/error_handler";
+import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
+import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,35 @@ function formatCount(n: number): string {
     return String(n);
 }
 
+// ─── InfoTab ──────────────────────────────────────────────────────────────────
+
+function InfoTab({ actionTarget, onOpenModal }: { actionTarget: MaterialVideo; onOpenModal: (bvid: string) => void }) {
+    const bvid = actionTarget.source_type === 'bilibili'
+        ? ((() => { try { return (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid; } catch { return null; } })() ?? actionTarget.source_id)
+        : null;
+
+    if (!bvid) {
+        return <p className="text-sm text-gray-400 py-4 text-center">暂无可拉取的信息</p>;
+    }
+
+    return (
+        <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 py-1.5">
+                <div className="min-w-0">
+                    <span className="text-sm text-gray-700">B站 AI 总结</span>
+                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的 B 站 AI 总结内容</p>
+                </div>
+                <button
+                    onClick={() => onOpenModal(bvid)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+                >
+                    查询
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LibraryPage() {
@@ -140,6 +171,8 @@ export default function LibraryPage() {
 
     // Action modal state
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
+    const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
+    const [actionTab, setActionTab] = useState<'workflow' | 'info'>('workflow');
     const [modalWorkerTasks, setModalWorkerTasks] = useState<WorkerTask[]>([]);
     const [modalTasksLoading, setModalTasksLoading] = useState(false);
     const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
@@ -332,6 +365,7 @@ export default function LibraryPage() {
 
     const handleCloseAction = () => {
         setActionTarget(null);
+        setActionTab('workflow');
         setRunningTaskType(null);
         setCancellingPipelineId(null);
         setPausingTaskId(null);
@@ -454,6 +488,15 @@ export default function LibraryPage() {
 
     return (
         <>
+            {/* ── AI conclusion modal ── */}
+            {aiConclusionTarget && (
+                <BilibiliAiConclusionModal
+                    bvid={aiConclusionTarget.bvid}
+                    pageIndex={aiConclusionTarget.pageIndex}
+                    onClose={() => setAiConclusionTarget(null)}
+                />
+            )}
+
             {/* ── Action modal ── */}
             {actionTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -476,11 +519,25 @@ export default function LibraryPage() {
                             </button>
                         </div>
 
-                        <div className="border-b border-gray-200" />
+                        {/* Tabs */}
+                        <div className="flex border-b border-gray-200 px-5">
+                            {(['workflow', 'info'] as const).map(tab => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActionTab(tab)}
+                                    className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${actionTab === tab
+                                        ? 'border-purple-500 text-purple-700'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                                    }`}
+                                >
+                                    {tab === 'workflow' ? '一键流程' : '信息拉取'}
+                                </button>
+                            ))}
+                        </div>
 
                         {/* Body */}
                         <div className="px-5 py-4">
-                            {modalTasksLoading ? (
+                            {actionTab === 'workflow' && (modalTasksLoading ? (
                                 <div className="flex justify-center py-6">
                                     <Loader className="w-5 h-5 animate-spin text-gray-400" />
                                 </div>
@@ -644,6 +701,10 @@ export default function LibraryPage() {
                                         </button>
                                     </div>
                                 </div>
+                            ))}
+
+                            {actionTab === 'info' && (
+                                <InfoTab actionTarget={actionTarget} onOpenModal={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })} />
                             )}
                         </div>
                     </div>
@@ -922,6 +983,13 @@ export default function LibraryPage() {
                                                     <ExternalLink className="w-3.5 h-3.5" />
                                                     打开
                                                 </button>
+                                            )}
+                                            {video.source_type === 'bilibili' && (
+                                                <BilibiliAiConclusionButton
+                                                    bvid={video.source_id}
+                                                    pageIndex={bilibiliPage - 1}
+                                                    onClick={() => setAiConclusionTarget({ bvid: video.source_id, pageIndex: bilibiliPage - 1 })}
+                                                />
                                             )}
                                             <button
                                                 onClick={() => handleOpenAction(video)}

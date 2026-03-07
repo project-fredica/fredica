@@ -2,15 +2,40 @@
 import datetime
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Optional
 
 from loguru import logger
 import bilibili_api
+from bilibili_api import Credential
 from bilibili_api.video import VideoDownloadURLDataDetecter
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
 from starlette.websockets import WebSocket
 
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInEventLoopThread
+
+
+def _make_credential(
+    sessdata: Optional[str] = None,
+    bili_jct: Optional[str] = None,
+    buvid3: Optional[str] = None,
+    buvid4: Optional[str] = None,
+    dedeuserid: Optional[str] = None,
+    ac_time_value: Optional[str] = None,
+    proxy: Optional[str] = None,
+) -> Optional[Credential]:
+    """有任意字段非空时构建 Credential，否则返回 None（匿名请求）。"""
+    if any([sessdata, bili_jct, buvid3, buvid4, dedeuserid, ac_time_value]):
+        return Credential(
+            sessdata=sessdata or None,
+            bili_jct=bili_jct or None,
+            buvid3=buvid3 or None,
+            buvid4=buvid4 or None,
+            dedeuserid=dedeuserid or None,
+            ac_time_value=ac_time_value or None,
+            proxy=proxy or None,
+        )
+    return None
 
 _BILIBILI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -20,10 +45,53 @@ _BILIBILI_HEADERS = {
 _router = APIRouter(prefix="/" + Path(__file__).stem.replace("_", "/"))
 
 
-@_router.get("/get-pages/{bvid}")
-async def get_pages(bvid: str):
-    v = bilibili_api.video.Video(bvid=bvid)
+class _CredentialBody(BaseModel):
+    sessdata: Optional[str] = None
+    bili_jct: Optional[str] = None
+    buvid3: Optional[str] = None
+    buvid4: Optional[str] = None
+    dedeuserid: Optional[str] = None
+    ac_time_value: Optional[str] = None
+    proxy: Optional[str] = None
+
+
+_CredQ = Annotated[Optional[str], Query(default=None)]
+
+
+class _BvidBody(BaseModel):
+    sessdata: Optional[str] = None
+    bili_jct: Optional[str] = None
+    buvid3: Optional[str] = None
+    buvid4: Optional[str] = None
+    dedeuserid: Optional[str] = None
+    ac_time_value: Optional[str] = None
+    proxy: Optional[str] = None
+
+
+@_router.post("/get-pages/{bvid}")
+async def get_pages(bvid: str, body: _BvidBody):
+    credential = _make_credential(
+        body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
+        body.dedeuserid, body.ac_time_value, body.proxy,
+    )
+    v = bilibili_api.video.Video(bvid=bvid, credential=credential)
     return await v.get_pages()
+
+
+@_router.post("/ai-conclusion/{bvid}/{page_index}")
+async def get_ai_conclusion(bvid: str, page_index: int, body: _CredentialBody):
+    try:
+        credential = _make_credential(
+            body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
+            body.dedeuserid, body.ac_time_value, body.proxy,
+        )
+        v = bilibili_api.video.Video(bvid=bvid, credential=credential)
+        return await v.get_ai_conclusion(page_index=page_index)
+    except bilibili_api.exceptions.ResponseCodeException as e:
+        return e.raw
+    except Exception as e:
+        logger.warning("[bilibili] get_ai_conclusion failed bvid={} page_index={}: {}", bvid, page_index, e)
+        return {"code": -1, "message": repr(e), "model_result": None}
 
 
 @_router.websocket("/download-task/{bvid}/{page}")

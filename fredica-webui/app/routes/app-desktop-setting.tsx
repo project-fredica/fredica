@@ -1,8 +1,55 @@
 import { useEffect, useState } from "react";
+import type React from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, RefreshCw, Save, Eye, EyeOff } from "lucide-react";
 import type { Route } from "./+types/app-desktop-setting";
-import { getBridge } from "../util/bridge";
+import { getBridge, openExternalUrl } from "../util/bridge";
+
+function PasswordInput({ value, placeholder, onChange, style }: {
+    value: string;
+    placeholder?: string;
+    onChange: (v: string) => void;
+    style?: React.CSSProperties;
+}) {
+    const [show, setShow] = useState(false);
+    return (
+        <div style={{ position: "relative", flex: 1 }}>
+            <style>{`.pw-input::placeholder { color: #d1d5db; }`}</style>
+            <input
+                className="pw-input"
+                type={show ? "text" : "password"}
+                value={value}
+                placeholder={placeholder}
+                onChange={(e) => onChange(e.target.value)}
+                style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    paddingRight: "32px",
+                    ...style,
+                }}
+            />
+            <button
+                type="button"
+                onClick={() => setShow(v => !v)}
+                style={{
+                    position: "absolute",
+                    right: "8px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    color: "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                }}
+            >
+                {show ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+        </div>
+    );
+}
 
 export function meta({ }: Route.MetaArgs) {
     return [
@@ -168,6 +215,11 @@ function buildInitialValues(): Record<string, string | number | boolean> {
         for (const item of section.items) {
             values[item.key] = item.defaultValue;
         }
+    }
+    // B站账号字段（不在 settingSections 中，单独初始化）
+    for (const key of ["bilibili_sessdata", "bilibili_bili_jct", "bilibili_buvid3", "bilibili_buvid4",
+                        "bilibili_dedeuserid", "bilibili_ac_time_value", "bilibili_proxy"]) {
+        values[key] = "";
     }
     return values;
 }
@@ -623,6 +675,68 @@ export default function Component({ }: Route.ComponentProps) {
                         </div>
                     </div>
                 ))}
+
+                {/* B站账号配置 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    overflow: "hidden",
+                }}>
+                    <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", backgroundColor: "#f9fafb" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                            <h2 style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                B站账号
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => openExternalUrl("https://nemo2011.github.io/bilibili-api/#/get-credential")}
+                                style={{ fontSize: "12px", color: "#6366f1", background: "none", border: "none", cursor: "pointer", padding: "2px 0", textDecoration: "underline" }}
+                            >
+                                查看教程 ↗
+                            </button>
+                        </div>
+                        <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#9ca3af" }}>
+                            留空则匿名请求。仅当出现"账号未登录"错误时才需要配置。从浏览器 Cookie 中获取对应字段值。
+                        </p>
+                    </div>
+                    {([
+                        { key: "bilibili_sessdata", label: "SESSDATA", placeholder: "浏览器 Cookie 中的 SESSDATA" },
+                        { key: "bilibili_bili_jct", label: "bili_jct", placeholder: "浏览器 Cookie 中的 bili_jct" },
+                        { key: "bilibili_buvid3", label: "buvid3", placeholder: "浏览器 Cookie 中的 buvid3" },
+                        { key: "bilibili_buvid4", label: "buvid4", placeholder: "浏览器 Cookie 中的 buvid4（可选）" },
+                        { key: "bilibili_dedeuserid", label: "DedeUserID", placeholder: "浏览器 Cookie 中的 DedeUserID" },
+                        { key: "bilibili_ac_time_value", label: "ac_time_value", placeholder: "浏览器 Cookie 中的 ac_time_value" },
+                        { key: "bilibili_proxy", label: "B站专用代理", placeholder: "http://127.0.0.1:7890（可选，留空则不使用）" },
+                    ] as const).map(({ key, label, placeholder }, idx, arr) => (
+                        <div key={key} style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "16px",
+                            padding: "12px 20px",
+                            borderBottom: idx < arr.length - 1 ? "1px solid #f3f4f6" : "none",
+                        }}>
+                            <p style={{ margin: 0, fontSize: "14px", fontWeight: 500, color: "#374151", minWidth: "140px" }}>
+                                {label}
+                            </p>
+                            <PasswordInput
+                                value={(values[key] as string) ?? ""}
+                                placeholder={placeholder}
+                                onChange={(v) => handleChange(key, v)}
+                                style={{
+                                    padding: "6px 10px",
+                                    fontSize: "13px",
+                                    color: "#374151",
+                                    border: "1px solid #d1d5db",
+                                    borderRadius: "8px",
+                                    fontFamily: "monospace",
+                                }}
+                            />
+                        </div>
+                    ))}
+                </div>
 
                 {/* LLM 模型配置入口 */}
                 <div style={{

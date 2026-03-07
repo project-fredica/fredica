@@ -1,11 +1,11 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
-import com.github.project_fredica.api.get
+import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
 
 object BilibiliFavoriteGetVideoListRoute : FredicaApi.Route {
     override val mode: FredicaApi.Route.Mode
@@ -15,7 +15,8 @@ object BilibiliFavoriteGetVideoListRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<BilibiliFavoriteGetVideoListParam>().getOrThrow()
-        return ValidJsonString(FredicaApi.PyUtil.get("/bilibili/favorite/get-video-list/${p.fid}"))
+        val body = buildValidJson { kv("fid", p.fid) }
+        return ValidJsonString(FredicaApi.PyUtil.post("/bilibili/favorite/get-video-list", body.str))
     }
 }
 

@@ -1,8 +1,9 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
-import com.github.project_fredica.api.get
+import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.Serializable
 
@@ -14,7 +15,8 @@ object BilibiliFavoriteGetPageRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<BilibiliFavoriteGetPageParam>().getOrThrow()
-        return ValidJsonString(FredicaApi.PyUtil.get("/bilibili/favorite/get-page/${p.fid}/${p.page}"))
+        val body = buildValidJson { kv("fid", p.fid); kv("page", p.page) }
+        return ValidJsonString(FredicaApi.PyUtil.post("/bilibili/favorite/get-page", body.str))
     }
 }
 

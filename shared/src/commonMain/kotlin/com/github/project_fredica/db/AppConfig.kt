@@ -29,6 +29,14 @@ data class AppConfig(
     @SerialName("llm_test_api_key") val llmTestApiKey: String = "",
     @SerialName("llm_test_base_url") val llmTestBaseUrl: String = "",
     @SerialName("llm_test_model") val llmTestModel: String = "",
+    // Bilibili 登录态（留空则匿名请求；仅当出现"账号未登录"类错误时才需要配置）
+    @SerialName("bilibili_sessdata") val bilibiliSessdata: String = "",
+    @SerialName("bilibili_bili_jct") val bilibiliBiliJct: String = "",
+    @SerialName("bilibili_buvid3") val bilibiliBuvid3: String = "",
+    @SerialName("bilibili_dedeuserid") val bilibiliDedeuserid: String = "",
+    @SerialName("bilibili_ac_time_value") val bilibiliAcTimeValue: String = "",
+    @SerialName("bilibili_buvid4") val bilibiliBuvid4: String = "",
+    @SerialName("bilibili_proxy") val bilibiliProxy: String = "",
 )
 
 interface AppConfigRepo {

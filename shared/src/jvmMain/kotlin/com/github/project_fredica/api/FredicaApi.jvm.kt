@@ -11,6 +11,8 @@ import com.github.project_fredica.db.MaterialTaskDb
 import com.github.project_fredica.db.MaterialTaskService
 import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
+import com.github.project_fredica.db.BilibiliAiConclusionCacheDb
+import com.github.project_fredica.db.BilibiliAiConclusionCacheService
 import com.github.project_fredica.db.WorkflowRunDb
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.TaskDb
@@ -108,6 +110,10 @@ actual suspend fun FredicaApi.PyUtil.get(path: String): String {
     return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Get, path)
 }
 
+actual suspend fun FredicaApi.PyUtil.post(path: String, body: String): String {
+    return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Post, path, body)
+}
+
 object FredicaApiJvmService {
 
     object CurrentInstanceHandler {
@@ -160,6 +166,7 @@ object FredicaApiJvmService {
             // 5. Async worker task queue (pipeline_instance + task + task_event tables)
             boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
             boot("WorkflowRunService", WorkflowRunDb(database), { initialize() }) { WorkflowRunService.initialize(it) }
+            boot("BilibiliAiConclusionCacheService", BilibiliAiConclusionCacheDb(database), { initialize() }) { BilibiliAiConclusionCacheService.initialize(it) }
         }
 
         CurrentInstanceHandler.server = embeddedServer(

@@ -7,6 +7,7 @@ import com.github.project_fredica.api.FredicaApi
 fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     BilibiliFavoriteGetPageRoute,
     BilibiliFavoriteGetVideoListRoute,
+    BilibiliVideoAiConclusionRoute,
     BilibiliVideoGetPagesRoute,
     ImageProxyRoute,
     MaterialActiveTasksRoute,

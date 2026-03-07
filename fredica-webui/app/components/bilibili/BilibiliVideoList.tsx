@@ -1,7 +1,9 @@
 import { type ReactNode, useState, useEffect } from "react";
-import { ExternalLink, Download, Eye, Heart, MessageSquare, Loader, Pencil, ChevronDown, Braces, X } from "lucide-react";
+import { ExternalLink, Download, Eye, Heart, MessageSquare, Loader, Pencil, ChevronDown, Braces, X, Sparkles } from "lucide-react";
 import { useImageProxyUrl, useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
+import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
+import { useAiConclusionStatus } from "~/components/bilibili/useAiConclusionStatus";
 import { formatDuration, formatCount, formatFavDate, buildPageWindows } from "~/util/bilibili";
 import { print_error, reportHttpError } from "~/util/error_handler";
 
@@ -68,6 +70,177 @@ function computeDbId(media: MediaItem): string {
 
 const PAGE_SIZE = 20;
 
+// ─── VideoRow ───────────────────────────────────────────────────────────────
+
+function VideoRow({
+    media,
+    selected,
+    isImporting,
+    inLibrary,
+    isMultiPage,
+    isExpanding,
+    pageAnchorId,
+    buildProxyUrl,
+    onToggle,
+    onOpenPicker,
+    onExpandPages,
+    onSetRawData,
+    onOpenAiConclusion,
+}: {
+    media: MediaItem;
+    selected: boolean;
+    isImporting: boolean;
+    inLibrary: boolean;
+    isMultiPage: boolean;
+    isExpanding: boolean;
+    pageAnchorId?: string;
+    buildProxyUrl: (url: string) => string;
+    onToggle: () => void;
+    onOpenPicker: () => void;
+    onExpandPages: () => void;
+    onSetRawData: () => void;
+    onOpenAiConclusion: () => void;
+}) {
+    const pageIndex = media.page > 1 ? media.page - 1 : 0;
+    const { hasSuccess: hasAiConclusion, setRef } = useAiConclusionStatus(media.bvid, pageIndex);
+
+    return (
+        <div
+            ref={setRef as React.RefCallback<HTMLDivElement>}
+            id={pageAnchorId}
+            className={`flex flex-wrap gap-2 sm:gap-3 p-3 sm:p-4 transition-colors ${selected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+        >
+            {/* Checkbox */}
+            <div className="flex-shrink-0 pt-1">
+                <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={onToggle}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+            </div>
+
+            {/* Cover */}
+            <div className="relative flex-shrink-0 self-start">
+                <img
+                    src={buildProxyUrl(media.cover)}
+                    alt={"收藏夹 - " + media.title}
+                    className="w-24 sm:w-40 h-[54px] sm:h-[90px] object-cover rounded-lg bg-gray-100"
+                />
+                <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1 py-0.5 rounded font-mono leading-none">
+                    {formatDuration(media.duration)}
+                </span>
+                {media.page > 1 && (
+                    <span className="absolute top-1 left-1 bg-blue-600/90 text-white text-xs px-1.5 py-0.5 rounded leading-none">
+                        {media.page}P
+                    </span>
+                )}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0 flex flex-col justify-between gap-1">
+                <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
+                    {media.title}
+                </h3>
+                <div className="flex items-center gap-1.5">
+                    <img
+                        src={buildProxyUrl(media.upper.face)}
+                        alt={media.upper.name}
+                        className="w-4 h-4 rounded-full flex-shrink-0"
+                    />
+                    <span className="text-xs text-gray-500 truncate">{media.upper.name}</span>
+                </div>
+                {media.intro && (
+                    <p className="text-xs text-gray-400 truncate whitespace-nowrap">{media.intro}</p>
+                )}
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                    <span className="flex items-center gap-0.5">
+                        <Eye className="w-3 h-3" />
+                        {media.cnt_info.view_text_1 || formatCount(media.cnt_info.play)}
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                        <Heart className="w-3 h-3" />
+                        {formatCount(media.cnt_info.collect)}
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                        <MessageSquare className="w-3 h-3" />
+                        {formatCount(media.cnt_info.danmaku)}
+                    </span>
+                </div>
+                <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400 font-mono">{media.bvid}</span>
+                    <span className="text-xs text-gray-400 hidden sm:block">
+                        收藏于 {formatFavDate(media.fav_time)}
+                    </span>
+                </div>
+            </div>
+
+            {/* Actions */}
+            <div className="w-full sm:w-auto sm:flex-shrink-0 grid grid-cols-2 sm:flex sm:flex-col gap-1.5 sm:justify-center">
+                <button
+                    onClick={() => window.open(`https://www.bilibili.com/video/${media.bvid}${media.page <= 1 ? "" : "?p=" + media.page}`, '_blank')}
+                    className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                    <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
+                    打开
+                </button>
+
+                <button
+                    onClick={onSetRawData}
+                    className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                    <Braces className="w-3.5 h-3.5 flex-shrink-0" />
+                    原始数据
+                </button>
+
+                {hasAiConclusion && (
+                    <button
+                        onClick={onOpenAiConclusion}
+                        className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+                    >
+                        <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                        B站AI总结
+                    </button>
+                )}
+
+                {isMultiPage && (
+                    <button
+                        onClick={onExpandPages}
+                        disabled={isExpanding}
+                        className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isExpanding
+                            ? <Loader className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                            : <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
+                        }
+                        展开 {media.page}P
+                    </button>
+                )}
+
+                {!isMultiPage && (
+                    <button
+                        onClick={() => !isImporting && onOpenPicker()}
+                        disabled={isImporting}
+                        className={`w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${inLibrary
+                            ? 'text-green-700 bg-green-100 hover:bg-green-200'
+                            : 'text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed'
+                        }`}
+                    >
+                        {isImporting ? (
+                            <Loader className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                        ) : inLibrary ? (
+                            <Pencil className="w-3.5 h-3.5 flex-shrink-0" />
+                        ) : (
+                            <Download className="w-3.5 h-3.5 flex-shrink-0" />
+                        )}
+                        {inLibrary ? '已加入' : '加入素材库'}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 export function BilibiliVideoList(param: {
@@ -86,6 +259,9 @@ export function BilibiliVideoList(param: {
 
     // Raw data modal
     const [rawDataMedia, setRawDataMedia] = useState<MediaItem | null>(null);
+
+    // AI conclusion modal
+    const [aiConclusionMedia, setAiConclusionMedia] = useState<MediaItem | null>(null);
 
     // All selection/loading/expansion sets are keyed by dbId
     const [selectedDbIds, setSelectedDbIds] = useState<Set<string>>(new Set());
@@ -334,6 +510,15 @@ export function BilibiliVideoList(param: {
                 </div>
             )}
 
+            {/* AI conclusion modal */}
+            {aiConclusionMedia && (
+                <BilibiliAiConclusionModal
+                    bvid={aiConclusionMedia.bvid}
+                    pageIndex={aiConclusionMedia.page > 1 ? aiConclusionMedia.page - 1 : 0}
+                    onClose={() => setAiConclusionMedia(null)}
+                />
+            )}
+
             {/* Category picker modal */}
             {pickerMode && (
                 <CategoryPickerModal
@@ -432,139 +617,26 @@ export function BilibiliVideoList(param: {
                 <div className="divide-y divide-gray-100" role="list" style={{ maxWidth: "92vw" }}>
                     {effectiveMedias.map((media, index) => {
                         const dbId = computeDbId(media);
-                        const selected = selectedDbIds.has(dbId);
-                        const isImporting = importingDbIds.has(dbId);
-                        const inLibrary = libraryMap.has(dbId);
-                        // Show expand button only for original multi-page items that haven't been expanded yet
-                        const isMultiPage = media.dbId === undefined && media.page > 1 && !expandedPages.has(dbId);
-                        const isExpanding = expandingDbIds.has(dbId);
                         const pageAnchorId = index % PAGE_SIZE === 0
                             ? `bilibili-video-page-${Math.floor(index / PAGE_SIZE) + 1}`
                             : undefined;
                         return (
-                            <div
+                            <VideoRow
                                 key={dbId}
-                                id={pageAnchorId}
-                                className={`flex flex-wrap gap-2 sm:gap-3 p-3 sm:p-4 transition-colors ${selected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                            >
-                                {/* Checkbox */}
-                                <div className="flex-shrink-0 pt-1">
-                                    <input
-                                        type="checkbox"
-                                        checked={selected}
-                                        onChange={() => toggle(dbId)}
-                                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                </div>
-
-                                {/* Cover */}
-                                <div className="relative flex-shrink-0 self-start">
-                                    <img
-                                        src={buildProxyUrl(media.cover)}
-                                        alt={"收藏夹 - " + media.title}
-                                        className="w-24 sm:w-40 h-[54px] sm:h-[90px] object-cover rounded-lg bg-gray-100"
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1 py-0.5 rounded font-mono leading-none">
-                                        {formatDuration(media.duration)}
-                                    </span>
-                                    {media.page > 1 && (
-                                        <span className="absolute top-1 left-1 bg-blue-600/90 text-white text-xs px-1.5 py-0.5 rounded leading-none">
-                                            {media.page}P
-                                        </span>
-                                    )}
-                                </div>
-
-                                {/* Content */}
-                                <div className="flex-1 min-w-0 flex flex-col justify-between gap-1">
-                                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
-                                        {media.title}
-                                    </h3>
-                                    <div className="flex items-center gap-1.5">
-                                        <img
-                                            src={buildProxyUrl(media.upper.face)}
-                                            alt={media.upper.name}
-                                            className="w-4 h-4 rounded-full flex-shrink-0"
-                                        />
-                                        <span className="text-xs text-gray-500 truncate">{media.upper.name}</span>
-                                    </div>
-                                    {media.intro && (
-                                        <p className="text-xs text-gray-400 truncate whitespace-nowrap">{media.intro}</p>
-                                    )}
-                                    <div className="flex items-center gap-3 text-xs text-gray-400">
-                                        <span className="flex items-center gap-0.5">
-                                            <Eye className="w-3 h-3" />
-                                            {media.cnt_info.view_text_1 || formatCount(media.cnt_info.play)}
-                                        </span>
-                                        <span className="flex items-center gap-0.5">
-                                            <Heart className="w-3 h-3" />
-                                            {formatCount(media.cnt_info.collect)}
-                                        </span>
-                                        <span className="flex items-center gap-0.5">
-                                            <MessageSquare className="w-3 h-3" />
-                                            {formatCount(media.cnt_info.danmaku)}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs text-gray-400 font-mono">{media.bvid}</span>
-                                        <span className="text-xs text-gray-400 hidden sm:block">
-                                            收藏于 {formatFavDate(media.fav_time)}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* Actions — 2-col grid on mobile, fixed-width column on sm+ */}
-                                <div className="w-full sm:w-auto sm:flex-shrink-0 grid grid-cols-2 sm:flex sm:flex-col gap-1.5 sm:justify-center">
-                                    <button
-                                        onClick={() => window.open(`https://www.bilibili.com/video/${media.bvid}${media.page <= 1 ? "" : "?p=" + media.page}`, '_blank')}
-                                        className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
-                                    >
-                                        <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
-                                        打开
-                                    </button>
-
-                                    <button
-                                        onClick={() => setRawDataMedia(media)}
-                                        className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                                    >
-                                        <Braces className="w-3.5 h-3.5 flex-shrink-0" />
-                                        原始数据
-                                    </button>
-
-                                    {/* 展开全部分P（仅多P视频且尚未展开） */}
-                                    {isMultiPage && (
-                                        <button
-                                            onClick={() => expandPages(media)}
-                                            disabled={isExpanding}
-                                            className="w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {isExpanding
-                                                ? <Loader className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
-                                                : <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
-                                            }
-                                            展开 {media.page}P
-                                        </button>
-                                    )}
-
-                                    {/* 加入素材库 / 已加入（可修改分类） */}
-                                    {!isMultiPage && <button
-                                        onClick={() => !isImporting && openPicker(media)}
-                                        disabled={isImporting}
-                                        className={`w-full sm:w-28 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${inLibrary
-                                            ? 'text-green-700 bg-green-100 hover:bg-green-200'
-                                            : 'text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed'
-                                            }`}
-                                    >
-                                        {isImporting ? (
-                                            <Loader className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
-                                        ) : inLibrary ? (
-                                            <Pencil className="w-3.5 h-3.5 flex-shrink-0" />
-                                        ) : (
-                                            <Download className="w-3.5 h-3.5 flex-shrink-0" />
-                                        )}
-                                        {inLibrary ? '已加入' : '加入素材库'}
-                                    </button>}
-                                </div>
-                            </div>
+                                media={media}
+                                selected={selectedDbIds.has(dbId)}
+                                isImporting={importingDbIds.has(dbId)}
+                                inLibrary={libraryMap.has(dbId)}
+                                isMultiPage={media.dbId === undefined && media.page > 1 && !expandedPages.has(dbId)}
+                                isExpanding={expandingDbIds.has(dbId)}
+                                pageAnchorId={pageAnchorId}
+                                buildProxyUrl={buildProxyUrl}
+                                onToggle={() => toggle(dbId)}
+                                onOpenPicker={() => openPicker(media)}
+                                onExpandPages={() => expandPages(media)}
+                                onSetRawData={() => setRawDataMedia(media)}
+                                onOpenAiConclusion={() => setAiConclusionMedia(media)}
+                            />
                         );
                     })}
                 </div>

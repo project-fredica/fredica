@@ -39,6 +39,13 @@ private val defaultKv: Map<String, String> = mapOf(
     "llm_test_api_key" to "",
     "llm_test_base_url" to "",
     "llm_test_model" to "",
+    "bilibili_sessdata" to "",
+    "bilibili_bili_jct" to "",
+    "bilibili_buvid3" to "",
+    "bilibili_dedeuserid" to "",
+    "bilibili_ac_time_value" to "",
+    "bilibili_buvid4" to "",
+    "bilibili_proxy" to "",
 )
 
 private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
@@ -62,6 +69,13 @@ private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
     "llm_test_api_key" to llmTestApiKey,
     "llm_test_base_url" to llmTestBaseUrl,
     "llm_test_model" to llmTestModel,
+    "bilibili_sessdata" to bilibiliSessdata,
+    "bilibili_bili_jct" to bilibiliBiliJct,
+    "bilibili_buvid3" to bilibiliBuvid3,
+    "bilibili_dedeuserid" to bilibiliDedeuserid,
+    "bilibili_ac_time_value" to bilibiliAcTimeValue,
+    "bilibili_buvid4" to bilibiliBuvid4,
+    "bilibili_proxy" to bilibiliProxy,
 )
 
 private fun Map<String, String>.toAppConfig() = AppConfig(
@@ -85,6 +99,13 @@ private fun Map<String, String>.toAppConfig() = AppConfig(
     llmTestApiKey = get("llm_test_api_key") ?: "",
     llmTestBaseUrl = get("llm_test_base_url") ?: "",
     llmTestModel = get("llm_test_model") ?: "",
+    bilibiliSessdata = get("bilibili_sessdata") ?: "",
+    bilibiliBiliJct = get("bilibili_bili_jct") ?: "",
+    bilibiliBuvid3 = get("bilibili_buvid3") ?: "",
+    bilibiliDedeuserid = get("bilibili_dedeuserid") ?: "",
+    bilibiliAcTimeValue = get("bilibili_ac_time_value") ?: "",
+    bilibiliBuvid4 = get("bilibili_buvid4") ?: "",
+    bilibiliProxy = get("bilibili_proxy") ?: "",
 )
 
 class AppConfigDb(private val db: Database) : AppConfigRepo {

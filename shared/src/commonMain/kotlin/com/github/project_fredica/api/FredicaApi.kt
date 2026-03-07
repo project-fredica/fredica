@@ -41,3 +41,5 @@ expect suspend fun FredicaApi.Companion.getNativeWebServerLocalDomainAndPort(): 
 
 expect suspend fun FredicaApi.PyUtil.get(path: String): String
 
+expect suspend fun FredicaApi.PyUtil.post(path: String, body: String): String
+
