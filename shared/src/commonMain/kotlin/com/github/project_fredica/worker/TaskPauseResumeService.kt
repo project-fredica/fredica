@@ -10,11 +10,23 @@ data class TaskPauseResumeChannels(
 )
 
 /**
- * 运行中任务的暂停/恢复信号注册表。
+ * 运行中任务的暂停/恢复信号注册表（内存级，进程内有效）。
  *
- * Executor 在启动 WebSocket 任务前调用 [register] 注册一对 Channel；
- * [TaskPauseRoute] / [TaskResumeRoute] 通过 [pause] / [resume] 向 Channel 投递信号，
- * websocketTask 内的协程监听后向 Python 端发送相应命令。
+ * ## 工作流程
+ * 1. Executor 在调用 `PythonUtil.websocketTask()` 之前调用 [register]，
+ *    拿到一对 Channel（pause / resume），传给 websocketTask。
+ * 2. websocketTask 内部 `select` 同时监听 pauseChannel 和 resumeChannel：
+ *    - 收到 pause 信号 → 向 Python 发送 `{"type":"pause"}` → Python 清除 resume_event
+ *    - 收到 resume 信号 → 向 Python 发送 `{"type":"resume"}` → Python 设置 resume_event
+ * 3. `TaskPauseRoute` / `TaskResumeRoute` 分别调用 [pause] / [resume] 投递信号。
+ * 4. Executor 的 finally 块调用 [unregister] 关闭 Channel 并清理注册表。
+ *
+ * ## 与 TaskCancelService 的区别
+ * - 取消：用 CompletableDeferred（一次性，完成后不可重置）
+ * - 暂停/恢复：用 Channel（可多次投递，支持反复暂停/恢复）
+ *
+ * ## 线程安全
+ * 所有操作通过 [Mutex] 串行化，可在任意协程上下文中安全调用。
  */
 object TaskPauseResumeService {
     private val map = mutableMapOf<String, TaskPauseResumeChannels>()

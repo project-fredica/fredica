@@ -9,3 +9,4 @@ bilibili-api-python
 faster-whisper
 aiohttp
 pydantic
+psutil

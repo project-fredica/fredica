@@ -137,11 +137,13 @@ class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
             client = bilibili_api.get_client()
             dwn_id = await client.download_create(url, bilibili_api.HEADERS)
             total: int = client.download_content_length(dwn_id)
+            logger.debug("[{}] _download_stream start: stage={} total={} out_path={}", self.tag, stage, total, out_path)
             done = 0
             _last_log_time = 0
             with open(out_path, "wb") as f:
                 while True:
                     if self._cancel_flag:
+                        logger.debug("[{}] _download_stream cancelled before chunk", self.tag)
                         return False
                     await self.wait_if_paused()
                     chunk: bytes = await client.download_chunk(dwn_id)
@@ -150,15 +152,17 @@ class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
                     self.report_status({"stage": stage, "bytes_done": done, "total_bytes": total})
                     percent_in_task = percent_start + percent
                     self.report_progress(percent_in_task)
+                    _pausable = await self.is_pausable()
                     await self.send_json({
                         "type": "progress",
                         "stage": stage,
                         "bytes_done": done,
                         "total_bytes": total,
                         "percent": percent_in_task,
+                        "pausable": _pausable,
                     })
                     _now = datetime.datetime.now().timestamp()
-                    if _now - _last_log_time >= 5 or done >= total:
+                    if _now - _last_log_time >= 3 or done >= total:
                         _last_log_time = _now
                         logger.debug("[{}] {} [{}/{}] {}% - {}",
                                      self.tag, stage, done, total, percent_in_task, out_path)

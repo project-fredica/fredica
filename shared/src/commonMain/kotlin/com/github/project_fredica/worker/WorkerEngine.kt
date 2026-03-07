@@ -36,6 +36,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 object WorkerEngine {
     private val logger = createLogger()
@@ -121,14 +124,18 @@ object WorkerEngine {
      * 将认领到的任务分发给对应的 Executor 执行，并处理执行结果。
      *
      * 执行流程：
-     * 1. 根据 task.type 从 registry 查找 Executor
-     * 2. 将任务状态改为 running
-     * 3. 调用 Executor.execute()（可能抛出异常）
-     * 4. 根据结果更新状态：
+     * 1. 根据 task.type 从 registry 查找 Executor；找不到则永久失败
+     * 2. check_skip 检查：payload 含 check_skip=true 且 executor.canSkip() 为真时，
+     *    直接标记 completed（result={"skipped":true}），跳过实际执行
+     * 3. 将任务状态改为 running
+     * 4. 调用 Executor.execute()（捕获所有异常，防止协程崩溃）
+     * 5. 根据结果更新状态：
+     *    - CANCELLED → cancelled（不重试）
      *    - 成功 → completed
-     *    - 失败 + 可重试 → retry_count++ → 回到 pending
-     *    - 失败 + 无重试 → failed
-     * 5. 触发 pipeline recalculate（更新流水线整体进度）
+     *    - 失败 + 可重试（retryCount < maxRetries，且非 AWAITING_CREDENTIAL）
+     *        → retry_count++ → 回到 pending（等待下次 claimNext 认领）
+     *    - 失败 + 无重试 → failed（永久）
+     * 6. 触发 WorkflowRun recalculate（更新整体进度和状态）
      */
     private suspend fun dispatch(task: Task) {
         // 步骤 1：查找 Executor
@@ -140,43 +147,65 @@ object WorkerEngine {
             return
         }
 
+        // 步骤 1.5：check_skip 跳过检查
+        // payload 中 check_skip=true 时，询问 executor 是否可跳过（前置结果已存在）。
+        // 跳过时直接标记 completed，不进入 running 状态，也不消耗重试次数。
+        // 典型场景：WorkflowRun 重新触发时，已下载/已转码的任务自动跳过。
+        val checkSkip = runCatching {
+            Json.parseToJsonElement(task.payload).jsonObject["check_skip"]?.jsonPrimitive?.content == "true"
+        }.getOrDefault(false)
+        if (checkSkip && executor.canSkip(task)) {
+            logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）已跳过 — 前置结果已存在，直接标记 completed")
+            TaskService.repo.updateStatus(task.id, "completed", result = """{"skipped":true}""")
+            afterTaskFinished(task.workflowRunId)
+            return
+        }
+
         // 步骤 2：标记为执行中
+        logger.debug("WorkerEngine: 任务 ${task.id}（${task.type}）开始执行，workflowRunId=${task.workflowRunId}")
         TaskService.repo.updateStatus(task.id, "running")
 
-        // 步骤 3：执行任务（捕获所有异常，防止协程崩溃）
+        // 步骤 3：执行任务（捕获所有异常，防止协程崩溃导致引擎停止）
+        // 信号注册/注销由 WebSocketTaskExecutor 基类统一处理，引擎层无需重复操作。
         val execResult = try {
             executor.execute(task)
         } catch (e: Throwable) {
-            logger.error("WorkerEngine: Executor 抛出异常，任务 ${task.id}", e)
+            logger.error("WorkerEngine: Executor 抛出未捕获异常，任务 ${task.id}", e)
             ExecuteResult(error = e.message ?: e::class.simpleName, errorType = "EXCEPTION")
         }
 
         // 步骤 4：根据结果更新状态
-        if (execResult.errorType == "CANCELLED") {
-            TaskService.repo.updateStatus(task.id, "cancelled", error = execResult.error, errorType = "CANCELLED")
-            logger.info("WorkerEngine: 任务 ${task.id} 已被用户取消")
-        } else if (execResult.isSuccess) {
-            TaskService.repo.updateStatus(task.id, "completed", result = execResult.result)
-            logger.info("WorkerEngine: 任务 ${task.id} 执行成功")
-        } else {
-            // AWAITING_CREDENTIAL：等待用户配置凭据，不自动重试（需用户手动跳过或重试）
-            val canRetry = task.retryCount < task.maxRetries &&
-                    execResult.errorType != "AWAITING_CREDENTIAL"
-            if (canRetry) {
-                // 记录重试次数 +1，然后重置回 pending（让 claimNext 再次认领）
-                TaskService.repo.incrementRetry(task.id)
-                TaskService.repo.updateStatus(
-                    id = task.id,
-                    status = "pending",
-                    error = execResult.error,
-                    errorType = execResult.errorType,
-                )
-                logger.warn(
-                    "WorkerEngine: 任务 ${task.id} 失败（第 ${task.retryCount + 1}/${task.maxRetries} 次重试）: ${execResult.error}"
-                )
-            } else {
-                // 重试次数耗尽，永久失败
-                finishFailed(task, execResult.error, execResult.errorType)
+        when {
+            execResult.errorType == "CANCELLED" -> {
+                // 用户主动取消：不触发重试，直接标记 cancelled
+                TaskService.repo.updateStatus(task.id, "cancelled", error = execResult.error, errorType = "CANCELLED")
+                logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）已被用户取消")
+            }
+            execResult.isSuccess -> {
+                TaskService.repo.updateStatus(task.id, "completed", result = execResult.result)
+                logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）执行成功")
+            }
+            else -> {
+                // AWAITING_CREDENTIAL：等待用户配置凭据，不自动重试（需用户手动干预）
+                val canRetry = task.retryCount < task.maxRetries &&
+                        execResult.errorType != "AWAITING_CREDENTIAL"
+                if (canRetry) {
+                    // 记录重试次数 +1，然后重置回 pending（让 claimNext 再次认领）
+                    TaskService.repo.incrementRetry(task.id)
+                    TaskService.repo.updateStatus(
+                        id = task.id,
+                        status = "pending",
+                        error = execResult.error,
+                        errorType = execResult.errorType,
+                    )
+                    logger.warn(
+                        "WorkerEngine: 任务 ${task.id}（${task.type}）失败，将重试" +
+                        "（第 ${task.retryCount + 1}/${task.maxRetries} 次）: ${execResult.error}"
+                    )
+                } else {
+                    // 重试次数耗尽或不可重试，永久失败
+                    finishFailed(task, execResult.error, execResult.errorType)
+                }
             }
         }
 
@@ -184,21 +213,28 @@ object WorkerEngine {
         afterTaskFinished(task.workflowRunId)
     }
 
-    /** 将任务标记为永久失败并记录日志。 */
+    /**
+     * 将任务标记为永久失败并记录日志。
+     * 调用时机：重试次数耗尽，或 errorType 为不可重试类型（如 AWAITING_CREDENTIAL）。
+     */
     private suspend fun finishFailed(task: Task, error: String?, errorType: String?) {
         TaskService.repo.updateStatus(task.id, "failed", error = error, errorType = errorType)
-        logger.error("WorkerEngine: 任务 ${task.id} 永久失败（重试耗尽）: $error")
+        logger.error("WorkerEngine: 任务 ${task.id}（${task.type}）永久失败（重试耗尽）: $error [errorType=$errorType]")
     }
 
     /**
-     * 任务状态变更后重新计算流水线进度。
+     * 任务状态变更后重新计算 WorkflowRun 整体进度。
+     *
+     * recalculate() 会统计同一 workflowRunId 下所有任务的状态，
+     * 更新 workflow_run.status / done_tasks / total_tasks。
      * 失败不致命（下次有任务完成时会再次触发），仅记录日志。
      */
     private suspend fun afterTaskFinished(workflowRunId: String) {
         try {
             WorkflowRunService.repo.recalculate(workflowRunId)
+            logger.debug("WorkerEngine: WorkflowRun $workflowRunId 进度已重新计算")
         } catch (e: Throwable) {
-            logger.error("WorkerEngine: 重新计算工作流运行实例 $workflowRunId 进度失败", e)
+            logger.error("WorkerEngine: 重新计算 WorkflowRun $workflowRunId 进度失败", e)
         }
     }
 }

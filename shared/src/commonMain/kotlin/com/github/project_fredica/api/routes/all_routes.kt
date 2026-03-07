@@ -27,4 +27,5 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     TaskPauseRoute,
     TaskResumeRoute,
     WorkerTaskListRoute,
+    WorkflowRunStartRoute,
 )

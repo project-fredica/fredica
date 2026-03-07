@@ -32,6 +32,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -280,6 +281,8 @@ object PythonUtil {
              * @param pth           WebSocket 路径
              * @param paramJson     init_param_and_run 命令的 data 字段（JSON 字符串）
              * @param onProgress    进度回调（0-100），每次收到 progress 消息时调用
+             * @param onPausable    可暂停状态回调；Python 端 progress 消息含 pausable 字段时调用，
+             *                      true = 当前可暂停，false = 不可暂停（前端据此禁用暂停按钮）
              * @param cancelSignal  取消信号；完成后会向 Python 端发送 {"command":"cancel"}
              * @param pauseChannel  暂停信号 Channel；收到 Unit 后发送 {"command":"pause"}
              * @param resumeChannel 恢复信号 Channel；收到 Unit 后发送 {"command":"resume"}
@@ -289,6 +292,7 @@ object PythonUtil {
                 pth: String,
                 paramJson: String,
                 onProgress: (suspend (Int) -> Unit)? = null,
+                onPausable: (suspend (Boolean) -> Unit)? = null,
                 cancelSignal: Deferred<Unit>? = null,
                 pauseChannel: ReceiveChannel<Unit>? = null,
                 resumeChannel: ReceiveChannel<Unit>? = null,
@@ -360,6 +364,14 @@ object PythonUtil {
                                     if (onProgress !== null && lastPct != pct) {
                                         onProgress(pct)
                                         lastPct = pct
+                                    }
+                                    // 透传 pausable 字段：Python 端每条 progress 消息携带此字段，
+                                    // 表示当前任务是否支持暂停（由 _does_support_pause() 决定）。
+                                    // 缺失时不调用回调（保持上次状态），避免旧端点兼容性问题。
+                                    val pausableRaw = json["pausable"]
+                                    pausableRaw?.jsonPrimitive?.let { prim ->
+                                        val pausable = runCatching { prim.boolean }.getOrNull()
+                                        pausable?.let { onPausable?.invoke(it) }
                                     }
                                 }
 

@@ -12,8 +12,10 @@ FFmpeg 转码子进程任务。
         await endpoint.start_and_wait()
 """
 
+import queue
 import re
 import subprocess
+import threading
 from typing import Any, Optional
 
 from loguru import logger
@@ -75,14 +77,23 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
             errors="replace",
         )
 
+        # 在独立线程中读取 stderr，避免 readline() 阻塞主循环，
+        # 使 cancel_event 能被立即响应。
+        stderr_queue: queue.Queue = queue.Queue()
+
+        def _stderr_reader():
+            try:
+                for line in proc.stderr:
+                    stderr_queue.put(line)
+            finally:
+                stderr_queue.put(None)  # 哨兵：表示 stderr 已读完
+
+        reader_thread = threading.Thread(target=_stderr_reader, daemon=True)
+        reader_thread.start()
+
         while True:
             if cancel_event.is_set():
-                # 发送 'q' 让 FFmpeg 优雅退出
-                try:
-                    proc.stdin.write("q\n")
-                    proc.stdin.flush()
-                except Exception:
-                    pass
+                # 立即终止 FFmpeg 进程，不等待 readline() 返回
                 try:
                     proc.terminate()
                 except Exception:
@@ -90,10 +101,22 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
                 status_queue.put({"type": "error", "message": "cancelled"})
                 return
 
-            resume_event.wait()
+            resume_event.wait(timeout=0.1)
+            if not resume_event.is_set():
+                # 仍处于暂停状态，继续等待（同时保持 cancel_event 可响应）
+                continue
 
-            line = proc.stderr.readline()
-            if not line:
+            # 非阻塞地取一行；若暂时没有则继续轮询
+            try:
+                line = stderr_queue.get(timeout=0.1)
+            except queue.Empty:
+                if proc.poll() is not None:
+                    # 进程已退出且队列为空，退出循环
+                    break
+                continue
+
+            if line is None:
+                # 哨兵：stderr 已读完
                 break
 
             # 解析进度行：frame=N fps=N.N time=HH:MM:SS.ms
@@ -120,6 +143,13 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
 
         proc.wait()
         if proc.returncode == 0:
+            # 写入 transcode.done 标志文件，供 Kotlin 侧 canSkip() 检测
+            try:
+                import os
+                done_path = os.path.join(os.path.dirname(output_path), "transcode.done")
+                open(done_path, "w").close()
+            except Exception:
+                pass
             status_queue.put({"type": "done", "output_path": output_path})
         elif not cancel_event.is_set():
             status_queue.put({"type": "error", "message": f"ffmpeg exited with code {proc.returncode}"})
@@ -185,8 +215,17 @@ class FfmpegTranscodeMp4TaskEndpoint(TaskEndpointInSubProcess):
     def _get_process_target(self):
         return _ffmpeg_transcode_worker
 
+    async def _does_support_pause(self):
+        # FFmpeg 子进程在 resume_event 上等待只是暂停了进度读取，
+        # FFmpeg 本身仍在后台持续编码，因此暂停无实际意义。
+        return "unsupported_always"
+
     async def _on_subprocess_message(self, msg: Any):
         self._current_status = msg
+        # 转码子进程不支持暂停（FFmpeg 子进程无法在 resume_event 上真正挂起），
+        # 在 progress 消息中透传 pausable=False，前端据此禁用暂停按钮。
+        if isinstance(msg, dict) and msg.get("type") == "progress":
+            msg = {**msg, "pausable": await self.is_pausable()}
         await self.send_json(msg)
 
 

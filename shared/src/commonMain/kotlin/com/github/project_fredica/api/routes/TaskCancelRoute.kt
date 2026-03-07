@@ -12,29 +12,51 @@ import kotlinx.serialization.Serializable
 /**
  * POST /api/v1/TaskCancelRoute
  *
- * 取消一个正在执行或等待中的任务：
- *  - 若任务正在执行（WebSocket 已注册取消信号）：发送信号，Python 端收到 cancel 命令后停止下载
+ * 取消一个任务，并级联取消同一 WorkflowRun 内所有其他活跃任务。
+ *
+ * 级联语义：WorkflowRun 是一个整体（DAG），取消其中任意一个任务意味着
+ * 整个运行实例应当停止，因此同一 workflow_run_id 下所有 pending/claimed/running
+ * 的任务都会被一并取消。
+ *
+ * 取消逻辑（对每个活跃任务）：
+ *  - 若任务正在执行（WebSocket 已注册取消信号）：发送信号，Python 端收到 cancel 命令后停止
  *  - 若任务仍在排队（pending / claimed，尚未注册信号）：直接将 DB 状态置为 cancelled
  */
 object TaskCancelRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
-    override val desc = "取消正在执行或等待中的任务"
+    override val desc = "取消任务并级联取消同一 WorkflowRun 内所有活跃任务"
+
+    private val activeStatuses = setOf("pending", "claimed", "running")
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<TaskCancelParam>().getOrThrow()
 
-        // 优先通过信号取消正在运行的 WebSocket 任务
-        val signalled = TaskCancelService.cancel(p.taskId)
+        // 查找目标任务，获取 workflowRunId 以便级联取消
+        val targetTask = TaskService.repo.findById(p.taskId)
+            ?: return buildValidJson { kv("signalled", false); kv("cancelled_count", 0) }
 
-        // 若信号未找到（任务还未进入 execute），直接更新 DB 中的 pending/claimed 任务
-        if (!signalled) {
-            val task = TaskService.repo.findById(p.taskId)
-            if (task != null && (task.status == "pending" || task.status == "claimed")) {
-                TaskService.repo.updateStatus(p.taskId, "cancelled", error = "用户已取消", errorType = "CANCELLED")
+        // 收集同一 WorkflowRun 内所有活跃任务（含目标任务本身）
+        val siblings = TaskService.repo.listByWorkflowRun(targetTask.workflowRunId)
+            .filter { it.status in activeStatuses }
+
+        var signalled = false
+        var cancelledCount = 0
+
+        for (task in siblings) {
+            val sig = TaskCancelService.cancel(task.id)
+            if (task.id == p.taskId) signalled = sig
+            if (!sig && (task.status == "pending" || task.status == "claimed")) {
+                TaskService.repo.updateStatus(task.id, "cancelled", error = "用户已取消", errorType = "CANCELLED")
+                cancelledCount++
+            } else if (sig) {
+                cancelledCount++
             }
         }
 
-        return buildValidJson { kv("signalled", signalled) }
+        return buildValidJson {
+            kv("signalled", signalled)
+            kv("cancelled_count", cancelledCount)
+        }
     }
 }
 

@@ -32,7 +32,10 @@ value class ValidJsonString(val str: String) {
 
 /** 全局默认 JSON 实例（紧凑格式），延迟初始化。 */
 val AppUtil.GlobalVars.json by lazy {
-    Json.Default
+    Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
 }
 
 /** 全局美化打印 JSON 实例，用于调试输出，延迟初始化。 */

@@ -355,6 +355,11 @@ class TaskEndpointInEventLoopThread(TaskEndpoint, metaclass=abc.ABCMeta):
         "supported_always", "unsupported_always", "supported_current_time", "unsupported_current_time"]:
         return "supported_always"
 
+    async def is_pausable(self) -> bool:
+        """返回当前任务是否可暂停（供 progress 消息携带）。"""
+        level = await self._does_support_pause()
+        return level in ("supported_always", "supported_current_time")
+
     async def _call_pause(self):
         """清除事件，使 wait_if_paused() 陷入等待。"""
         self._not_paused_event.clear()
@@ -486,6 +491,11 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
     async def _does_support_pause(self) -> Literal[
         "supported_always", "unsupported_always", "supported_current_time", "unsupported_current_time"]:
         return "supported_always"
+
+    async def is_pausable(self) -> bool:
+        """返回当前任务是否可暂停（供 progress 消息携带）。"""
+        level = await self._does_support_pause()
+        return level in ("supported_always", "supported_current_time")
 
     async def _call_pause(self):
         """清除 resume_event；子进程调用 resume_event.wait() 时将挂起。"""

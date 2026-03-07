@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useEffect } from "react";
-import { ExternalLink, Download, Play, Eye, Heart, MessageSquare, Check, Loader, Pencil, ChevronDown, Braces, X } from "lucide-react";
+import { ExternalLink, Download, Eye, Heart, MessageSquare, Loader, Pencil, ChevronDown, Braces, X } from "lucide-react";
 import { useImageProxyUrl, useAppFetch } from "~/util/app_fetch";
 import { CategoryPickerModal } from "~/components/bilibili/CategoryPickerModal";
 import { formatDuration, formatCount, formatFavDate, buildPageWindows } from "~/util/bilibili";
@@ -374,9 +374,6 @@ export function BilibiliVideoList(param: {
                                 className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 批量加入素材库 ({selectedDbIds.size})
-                            </button>
-                            <button className="px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
-                                批量分析 ({selectedDbIds.size})
                             </button>
                         </div>
                     )}

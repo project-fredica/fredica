@@ -78,6 +78,11 @@ class TaskDb(private val db: Database) : TaskRepo {
                     try {
                         stmt.execute("ALTER TABLE task ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0")
                     } catch (_: Exception) { /* column already exists */ }
+                    // Schema migration: add is_pausable column if it doesn't exist yet
+                    @Suppress("SwallowedException")
+                    try {
+                        stmt.execute("ALTER TABLE task ADD COLUMN is_pausable INTEGER NOT NULL DEFAULT 1")
+                    } catch (_: Exception) { /* column already exists */ }
                 }
             }
         }
@@ -224,6 +229,18 @@ class TaskDb(private val db: Database) : TaskRepo {
         db.useConnection { conn ->
             conn.prepareStatement("UPDATE task SET is_paused = ? WHERE id = ?").use { ps ->
                 ps.setInt(1, if (paused) 1 else 0)
+                ps.setString(2, id)
+                ps.executeUpdate()
+            }
+        }
+    }
+
+    // ── updatePausable：更新可暂停标志 ────────────────────────────────────────
+
+    override suspend fun updatePausable(id: String, pausable: Boolean): Unit = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement("UPDATE task SET is_pausable = ? WHERE id = ?").use { ps ->
+                ps.setInt(1, if (pausable) 1 else 0)
                 ps.setString(2, id)
                 ps.executeUpdate()
             }
@@ -423,5 +440,6 @@ class TaskDb(private val db: Database) : TaskRepo {
         reclaimedAt       = rs.getLong("reclaimed_at").takeIf     { !rs.wasNull() },
         progress          = rs.getInt("progress"),
         isPaused          = rs.getInt("is_paused") != 0,
+        isPausable        = rs.getInt("is_pausable") != 0,
     )
 }

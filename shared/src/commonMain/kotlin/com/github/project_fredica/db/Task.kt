@@ -115,6 +115,9 @@ data class Task(
 
     /** 任务是否处于暂停状态；仅在 status=running 时有意义 */
     @SerialName("is_paused") val isPaused: Boolean = false,
+
+    /** 任务是否支持暂停；由 Python 端 _does_support_pause() 透传，false 时前端禁用暂停按钮 */
+    @SerialName("is_pausable") val isPausable: Boolean = true,
 )
 
 // =============================================================================
@@ -194,8 +197,11 @@ interface TaskRepo {
     /** 更新任务执行进度（0–100）。 */
     suspend fun updateProgress(id: String, progress: Int)
 
-    /** 更新任务暂停状态。 */
+    /** 更新任务暂停状态（is_paused）。 */
     suspend fun updatePaused(id: String, paused: Boolean)
+
+    /** 更新任务可暂停标志（is_pausable），由 Python progress 消息透传。 */
+    suspend fun updatePausable(id: String, pausable: Boolean)
 
     /** 按 ID 查询单个任务，不存在时返回 null。 */
     suspend fun findById(id: String): Task?

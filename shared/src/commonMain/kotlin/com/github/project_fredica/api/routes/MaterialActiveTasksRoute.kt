@@ -8,6 +8,7 @@ import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.TaskService
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.jsonObject
 
 /**
  * GET /api/v1/MaterialActiveTasksRoute?material_id=<id>
@@ -32,6 +33,18 @@ object MaterialActiveTasksRoute : FredicaApi.Route {
             .values
             .sortedBy { it.type }
 
-        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(latest))
+        // Strip sensitive fields (payload, result) before sending to frontend
+        val stripped = AppUtil.GlobalVars.json.encodeToString(latest).let { raw ->
+            AppUtil.GlobalVars.json.parseToJsonElement(raw).let { arr ->
+                kotlinx.serialization.json.JsonArray(
+                    (arr as kotlinx.serialization.json.JsonArray).map { el ->
+                        kotlinx.serialization.json.JsonObject(
+                            el.jsonObject.filterKeys { it != "payload" && it != "result" }
+                        )
+                    }
+                )
+            }
+        }
+        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(stripped))
     }
 }

@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useEffect, useCallback } from "react";
-import { Trash2, ExternalLink, Plus, X, Loader, Settings, Download, RefreshCw, Pause, Play } from "lucide-react";
+import { Trash2, ExternalLink, Plus, X, Loader, Settings, Download, RefreshCw, Pause, Play, Clapperboard } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
@@ -62,10 +62,13 @@ interface WorkerTask {
     material_id: string;
     pipeline_id: string;
     status: string;
+    result: string | null;
     error: string | null;
     error_type: string | null;
     progress: number;
     is_paused: boolean;
+    /** 任务是否支持暂停；false 时禁用暂停按钮（如 FFmpeg 子进程转码）。默认 true。 */
+    is_pausable: boolean;
     created_at: number;
 }
 
@@ -80,10 +83,6 @@ const SOURCE_BADGE: Record<string, { label: string; className: string }> = {
     local: { label: '本地', className: 'bg-gray-100 text-gray-600' },
 };
 
-const MODAL_TABS = [
-    { key: 'basics' as const, label: '初级功能' },
-    { key: 'pipeline' as const, label: '一键流程' },
-];
 
 const WORKER_TASK_STATUS: Record<string, { label: string; className: string }> = {
     pending: { label: '排队中', className: 'bg-yellow-100 text-yellow-700' },
@@ -96,6 +95,7 @@ const WORKER_TASK_STATUS: Record<string, { label: string; className: string }> =
 
 const TASK_TYPE_LABELS: Record<string, string> = {
     DOWNLOAD_BILIBILI_VIDEO: '下载视频',
+    TRANSCODE_MP4: '转码 MP4',
 };
 
 const MODAL_TASK_POLL_MS = 2_000;
@@ -127,12 +127,12 @@ export default function LibraryPage() {
     const [refreshing, setRefreshing] = useState(false);
 
     // ── List data (kept across polls — never reset to null mid-flight) ───────
-    const [videos,           setVideos]           = useState<MaterialVideo[] | null>(null);
-    const [categories,       setCategories]       = useState<MaterialCategory[] | null>(null);
-    const [downloadStatusMap,setDownloadStatusMap]= useState<Record<string, boolean>>({});
-    const [videosLoading,    setVideosLoading]    = useState(true);
-    const [categoriesLoading,setCategoriesLoading]= useState(true);
-    const [videosError,      setVideosError]      = useState<Error | null>(null);
+    const [videos, setVideos] = useState<MaterialVideo[] | null>(null);
+    const [categories, setCategories] = useState<MaterialCategory[] | null>(null);
+    const [downloadStatusMap, setDownloadStatusMap] = useState<Record<string, boolean>>({});
+    const [videosLoading, setVideosLoading] = useState(true);
+    const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [videosError, setVideosError] = useState<Error | null>(null);
 
     // Deletion state
     const [deletingVideoIds, setDeletingVideoIds] = useState<Set<string>>(new Set());
@@ -140,12 +140,11 @@ export default function LibraryPage() {
 
     // Action modal state
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
-    const [modalTab, setModalTab] = useState<'basics' | 'pipeline'>('basics');
     const [modalWorkerTasks, setModalWorkerTasks] = useState<WorkerTask[]>([]);
     const [modalTasksLoading, setModalTasksLoading] = useState(false);
     const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
     const [cancellingPipelineId, setCancellingPipelineId] = useState<string | null>(null);
-    const [pausingTaskId,        setPausingTaskId]        = useState<string | null>(null);
+    const [pausingTaskId, setPausingTaskId] = useState<string | null>(null);
 
     // New category creation
     const [newCategoryName, setNewCategoryName] = useState('');
@@ -326,7 +325,6 @@ export default function LibraryPage() {
 
     const handleOpenAction = (video: MaterialVideo) => {
         setActionTarget(video);
-        setModalTab('basics');
         setModalWorkerTasks([]);
         setRunningTaskType(null);
         // Polling is handled by the useEffect that watches actionTarget
@@ -411,6 +409,24 @@ export default function LibraryPage() {
         }
     };
 
+    const handleStartWorkflow = async (template: string) => {
+        if (!actionTarget || runningTaskType) return;
+        setRunningTaskType(template);
+        try {
+            const { resp } = await apiFetch('/api/v1/WorkflowRunStartRoute', {
+                method: 'POST',
+                body: JSON.stringify({ material_id: actionTarget.id, template }),
+            });
+            if (resp.ok) {
+                await fetchModalTasks(actionTarget.id);
+            } else {
+                reportHttpError('启动工作流失败', resp);
+            }
+        } finally {
+            setRunningTaskType(null);
+        }
+    };
+
     // ── Filtering ───────────────────────────────────────────────────────────
 
     const filtered = (videos ?? []).filter(v => {
@@ -460,164 +476,173 @@ export default function LibraryPage() {
                             </button>
                         </div>
 
-                        {/* Tab bar */}
-                        <div className="flex gap-1 border-b border-gray-200 px-4">
-                            {MODAL_TABS.map(tab => (
-                                <button
-                                    key={tab.key}
-                                    onClick={() => setModalTab(tab.key)}
-                                    className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${modalTab === tab.key
-                                        ? 'border-blue-600 text-blue-600'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                        }`}
-                                >
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
+                        <div className="border-b border-gray-200" />
 
                         {/* Body */}
                         <div className="px-5 py-4">
-                            {modalTab === 'basics' ? (
-                                modalTasksLoading ? (
-                                    <div className="flex justify-center py-6">
-                                        <Loader className="w-5 h-5 animate-spin text-gray-400" />
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {/* Bilibili: 仅下载 */}
-                                        {actionTarget.source_type === 'bilibili' && (() => {
-                                            const activeDownload = modalWorkerTasks.find(
-                                                t => t.type === 'DOWNLOAD_BILIBILI_VIDEO' &&
-                                                    ['pending', 'claimed', 'running'].includes(t.status)
-                                            );
-                                            const isDisabled = !!activeDownload || runningTaskType === 'DOWNLOAD_BILIBILI_VIDEO';
-                                            return (
-                                                <div className="flex items-center justify-between gap-3 py-1.5">
-                                                    <span className="text-sm text-gray-700">视频下载</span>
-                                                    <div className="flex items-center gap-2">
-                                                        {activeDownload && activeDownload.status === 'running' && (
-                                                            activeDownload.is_paused ? (
-                                                                <button
-                                                                    onClick={() => handleResumeTask(activeDownload.id)}
-                                                                    disabled={pausingTaskId === activeDownload.id}
-                                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                >
-                                                                    {pausingTaskId === activeDownload.id
-                                                                        ? <Loader className="w-3 h-3 animate-spin" />
-                                                                        : <Play className="w-3 h-3" />
-                                                                    }
-                                                                    恢复
-                                                                </button>
-                                                            ) : (
-                                                                <button
-                                                                    onClick={() => handlePauseTask(activeDownload.id)}
-                                                                    disabled={pausingTaskId === activeDownload.id}
-                                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                >
-                                                                    {pausingTaskId === activeDownload.id
-                                                                        ? <Loader className="w-3 h-3 animate-spin" />
-                                                                        : <Pause className="w-3 h-3" />
-                                                                    }
-                                                                    暂停
-                                                                </button>
-                                                            )
-                                                        )}
-                                                        {activeDownload && (
-                                                            <button
-                                                                onClick={() => handleCancelDownload(activeDownload.id)}
-                                                                disabled={cancellingPipelineId === activeDownload.id}
-                                                                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                            >
-                                                                {cancellingPipelineId === activeDownload.id
-                                                                    ? <Loader className="w-3 h-3 animate-spin" />
-                                                                    : <X className="w-3 h-3" />
-                                                                }
-                                                                取消
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => handleRunTask('DOWNLOAD_BILIBILI_VIDEO')}
-                                                            disabled={isDisabled}
-                                                            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            {isDisabled
-                                                                ? <Loader className="w-3 h-3 animate-spin" />
-                                                                : <Download className="w-3 h-3" />
-                                                            }
-                                                            {activeDownload ? '下载中…' : '仅下载'}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Task progress list — only show known task types */}
-                                        {modalWorkerTasks.some(t => t.type in TASK_TYPE_LABELS) && (
-                                            <div className="space-y-1.5 pt-1">
-                                                {modalWorkerTasks.filter(t => t.type in TASK_TYPE_LABELS).map(task => {
-                                                    const statusInfo = WORKER_TASK_STATUS[task.status]
-                                                        ?? { label: task.status, className: 'bg-gray-100 text-gray-600' };
-                                                    const typeLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
-                                                    const showBar = task.status === 'running' || task.status === 'claimed' || task.status === 'completed';
-                                                    const barPct = task.status === 'completed' ? 100 : task.progress;
-                                                    return (
-                                                        <div key={task.id} className="space-y-0.5">
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <span className="text-xs text-gray-600">{typeLabel}</span>
-                                                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${statusInfo.className}`}>
-                                                                    {statusInfo.label}{task.status === 'running' && task.progress > 0 ? ` ${task.progress}%` : ''}
-                                                                </span>
-                                                            </div>
-                                                            {showBar && (
-                                                                <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                                                                    <div
-                                                                        className={`h-full rounded-full transition-all ${task.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'}`}
-                                                                        style={{ width: `${barPct}%` }}
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                            {task.status === 'failed' && task.error && (
-                                                                <p className="text-[10px] text-red-500 truncate">{task.error}</p>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-
-                                        <div className="pt-3 border-t border-gray-100">
-                                            <Link
-                                                to={`/tasks?material_id=${encodeURIComponent(actionTarget.id)}`}
-                                                className="text-xs text-blue-600 hover:underline"
-                                                onClick={handleCloseAction}
-                                            >
-                                                前往任务中心查看详情 →
-                                            </Link>
-                                        </div>
-
-                                        {/* Danger zone */}
-                                        <div className="pt-3 border-t border-red-100">
-                                            <button
-                                                onClick={async () => {
-                                                    handleCloseAction();
-                                                    await handleDeleteVideo(actionTarget.id);
-                                                }}
-                                                disabled={deletingVideoIds.has(actionTarget.id)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                {deletingVideoIds.has(actionTarget.id)
-                                                    ? <Loader className="w-3 h-3 animate-spin" />
-                                                    : <Trash2 className="w-3 h-3" />
-                                                }
-                                                移除素材库（但不删除数据）
-                                            </button>
-                                        </div>
-                                    </div>
-                                )
+                            {modalTasksLoading ? (
+                                <div className="flex justify-center py-6">
+                                    <Loader className="w-5 h-5 animate-spin text-gray-400" />
+                                </div>
                             ) : (
-                                <div className="py-8 text-center text-sm text-gray-400">
-                                    一键流程功能即将推出
+                                <div className="space-y-2">
+                                    {/* Bilibili: 下载并转码 */}
+                                    {actionTarget.source_type === 'bilibili' && (() => {
+                                        const hasActive = modalWorkerTasks.some(
+                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
+                                                ['pending', 'claimed', 'running'].includes(t.status)
+                                        );
+                                        const isDisabled = hasActive || !!runningTaskType;
+                                        return (
+                                            <div className="flex items-center justify-between gap-3 py-1.5">
+                                                <div className="min-w-0">
+                                                    <span className="text-sm text-gray-700">视频转码</span>
+                                                    <p className="text-xs text-gray-400 mt-0.5">下载完成后自动转码，已下载则跳过</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleStartWorkflow('bilibili_download_transcode')}
+                                                    disabled={isDisabled}
+                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {isDisabled ? <Loader className="w-3 h-3 animate-spin" /> : <Clapperboard className="w-3 h-3" />}
+                                                    {hasActive ? '进行中…' : '下载并转码'}
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Bilibili: 仅下载 */}
+                                    {actionTarget.source_type === 'bilibili' && (() => {
+                                        const activeDownload = modalWorkerTasks.find(
+                                            t => t.type === 'DOWNLOAD_BILIBILI_VIDEO' &&
+                                                ['pending', 'claimed', 'running'].includes(t.status)
+                                        );
+                                        const isDisabled = !!activeDownload || !!runningTaskType;
+                                        return (
+                                            <div className="flex items-center justify-between gap-3 py-1.5">
+                                                <span className="text-sm text-gray-700">视频下载</span>
+                                                <button
+                                                    onClick={() => handleRunTask('DOWNLOAD_BILIBILI_VIDEO')}
+                                                    disabled={isDisabled}
+                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {isDisabled ? <Loader className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                                    {activeDownload ? '下载中…' : '仅下载'}
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* 统一控件区：有任何活跃任务时显示暂停/恢复/取消全部 */}
+                                    {actionTarget.source_type === 'bilibili' && (() => {
+                                        // 优先控制正在运行的任务（下载或转码），用于暂停/恢复
+                                        const runningTask = modalWorkerTasks.find(
+                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
+                                                t.status === 'running'
+                                        );
+                                        // 任意活跃任务（用于取消全部）
+                                        const anyActiveTask = modalWorkerTasks.find(
+                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
+                                                ['pending', 'claimed', 'running'].includes(t.status)
+                                        );
+                                        if (!anyActiveTask) return null;
+                                        return (
+                                            <div className="flex items-center justify-center gap-2 py-1 px-2 bg-gray-50 rounded-lg">
+                                                {runningTask && (
+                                                    runningTask.is_paused ? (
+                                                        <button
+                                                            onClick={() => handleResumeTask(runningTask.id)}
+                                                            disabled={!!pausingTaskId}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {pausingTaskId ? <Loader className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                                                            恢复
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handlePauseTask(runningTask.id)}
+                                                            disabled={!!pausingTaskId || !runningTask.is_pausable}
+                                                            title={!runningTask.is_pausable ? '此任务不支持暂停' : undefined}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {pausingTaskId ? <Loader className="w-3 h-3 animate-spin" /> : <Pause className="w-3 h-3" />}
+                                                            暂停
+                                                        </button>
+                                                    )
+                                                )}
+                                                <button
+                                                    onClick={() => handleCancelDownload(anyActiveTask.id)}
+                                                    disabled={!!cancellingPipelineId}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {cancellingPipelineId ? <Loader className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                                                    取消全部
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Task progress list */}
+                                    {modalWorkerTasks.some(t => t.type in TASK_TYPE_LABELS) && (
+                                        <div className="space-y-1.5 pt-1">
+                                            {modalWorkerTasks.filter(t => t.type in TASK_TYPE_LABELS).map(task => {
+                                                const isSkipped = task.status === 'completed' &&
+                                                    (() => { try { return (JSON.parse(task.result ?? '{}') as Record<string, unknown>).skipped === true; } catch { return false; } })();
+                                                const statusInfo = isSkipped
+                                                    ? { label: '已跳过（已完成）', className: 'bg-green-100 text-green-700' }
+                                                    : (WORKER_TASK_STATUS[task.status] ?? { label: task.status, className: 'bg-gray-100 text-gray-600' });
+                                                const typeLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
+                                                const showBar = !isSkipped && (task.status === 'running' || task.status === 'claimed' || task.status === 'completed');
+                                                const barPct = task.status === 'completed' ? 100 : task.progress;
+                                                return (
+                                                    <div key={task.id} className="space-y-0.5">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-xs text-gray-600">{typeLabel}</span>
+                                                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${statusInfo.className}`}>
+                                                                {statusInfo.label}{!isSkipped && task.status === 'running' && task.progress > 0 ? ` ${task.progress}%` : ''}
+                                                            </span>
+                                                        </div>
+                                                        {showBar && (
+                                                            <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className={`h-full rounded-full transition-all ${task.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'}`}
+                                                                    style={{ width: `${barPct}%` }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        {task.status === 'failed' && task.error && (
+                                                            <p className="text-[10px] text-red-500 truncate">{task.error}</p>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <div className="pt-3 border-t border-gray-100">
+                                        <Link
+                                            to={`/tasks?material_id=${encodeURIComponent(actionTarget.id)}`}
+                                            className="text-xs text-blue-600 hover:underline"
+                                            onClick={handleCloseAction}
+                                        >
+                                            前往任务中心查看详情 →
+                                        </Link>
+                                    </div>
+
+                                    {/* Danger zone */}
+                                    <div className="pt-3 border-t border-red-100">
+                                        <button
+                                            onClick={async () => {
+                                                handleCloseAction();
+                                                await handleDeleteVideo(actionTarget.id);
+                                            }}
+                                            disabled={deletingVideoIds.has(actionTarget.id)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {deletingVideoIds.has(actionTarget.id) ? <Loader className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                            移除素材库（但不删除数据）
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -853,11 +878,10 @@ export default function LibraryPage() {
                                                     {sourceBadge.label}
                                                 </span>
                                                 {video.source_type === 'bilibili' && video.id in downloadStatusMap && (
-                                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                                                        downloadStatusMap[video.id]
-                                                            ? 'bg-green-100 text-green-700'
-                                                            : 'bg-gray-100 text-gray-500'
-                                                    }`}>
+                                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${downloadStatusMap[video.id]
+                                                        ? 'bg-green-100 text-green-700'
+                                                        : 'bg-gray-100 text-gray-500'
+                                                        }`}>
                                                         {downloadStatusMap[video.id] ? '已下载' : '未下载'}
                                                     </span>
                                                 )}

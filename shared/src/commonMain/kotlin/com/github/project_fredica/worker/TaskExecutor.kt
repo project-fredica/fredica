@@ -42,6 +42,13 @@ interface TaskExecutor {
      * @return      ExecuteResult，成功时 error=null，失败时 error 非空
      */
     suspend fun execute(task: Task): ExecuteResult
+
+    /**
+     * 检查任务是否可跳过（前置结果已存在）。
+     * 仅当 payload 中 check_skip=true 时由 WorkerEngine 调用。
+     * 默认返回 false，子类按需覆写。
+     */
+    fun canSkip(task: Task): Boolean = false
 }
 
 /**

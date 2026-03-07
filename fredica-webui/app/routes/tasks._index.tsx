@@ -20,6 +20,7 @@ interface WorkerTask {
     error_type: string | null;
     progress: number;
     is_paused: boolean;
+    is_pausable: boolean;
     created_at: number;
     claimed_at: number | null;
     started_at: number | null;
@@ -321,7 +322,7 @@ export default function TasksPage() {
                                 : ts;
                             const typeLabel   = TASK_TYPE_LABELS[task.type] ?? task.type;
                             const canCancel   = ACTIVE_STATUSES.has(task.status);
-                            const canPause    = task.status === 'running' && !task.is_paused;
+                            const canPause    = task.status === 'running' && !task.is_paused && task.is_pausable;
                             const canResume   = task.status === 'running' && task.is_paused;
                             const isCancelling = cancellingIds.has(task.id);
                             const isPausing   = pausingIds.has(task.id);
