@@ -15,18 +15,18 @@ from starlette.websockets import WebSocket
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInEventLoopThread
 
 
-def _make_credential(
-    sessdata: Optional[str] = None,
-    bili_jct: Optional[str] = None,
-    buvid3: Optional[str] = None,
-    buvid4: Optional[str] = None,
-    dedeuserid: Optional[str] = None,
-    ac_time_value: Optional[str] = None,
-    proxy: Optional[str] = None,
+async def _make_credential(
+        sessdata: Optional[str] = None,
+        bili_jct: Optional[str] = None,
+        buvid3: Optional[str] = None,
+        buvid4: Optional[str] = None,
+        dedeuserid: Optional[str] = None,
+        ac_time_value: Optional[str] = None,
+        proxy: Optional[str] = None,
 ) -> Optional[Credential]:
     """有任意字段非空时构建 Credential，否则返回 None（匿名请求）。"""
     if any([sessdata, bili_jct, buvid3, buvid4, dedeuserid, ac_time_value]):
-        return Credential(
+        c = Credential(
             sessdata=sessdata or None,
             bili_jct=bili_jct or None,
             buvid3=buvid3 or None,
@@ -35,7 +35,17 @@ def _make_credential(
             ac_time_value=ac_time_value or None,
             proxy=proxy or None,
         )
+        # TODO: 这里以后应当让 kotlin 后端去管理实现，以避免频繁请求。
+        # if await c.check_refresh():
+        #     logger.info("credential refresh ... old value is {}", str(c))
+        #     await c.refresh()
+        #     logger.info("credential refresh success , new value is {}", str(c))
+        # if await c.check_valid():
+        #     logger.error("credential invalid , value is {}", str(c))
+        #     return None
+        return c
     return None
+
 
 _BILIBILI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -70,18 +80,19 @@ class _BvidBody(BaseModel):
 
 @_router.post("/get-pages/{bvid}")
 async def get_pages(bvid: str, body: _BvidBody):
-    credential = _make_credential(
+    credential = await _make_credential(
         body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
         body.dedeuserid, body.ac_time_value, body.proxy,
     )
     v = bilibili_api.video.Video(bvid=bvid, credential=credential)
+
     return await v.get_pages()
 
 
 @_router.post("/ai-conclusion/{bvid}/{page_index}")
 async def get_ai_conclusion(bvid: str, page_index: int, body: _CredentialBody):
     try:
-        credential = _make_credential(
+        credential = await _make_credential(
             body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
             body.dedeuserid, body.ac_time_value, body.proxy,
         )
@@ -92,6 +103,68 @@ async def get_ai_conclusion(bvid: str, page_index: int, body: _CredentialBody):
     except Exception as e:
         logger.warning("[bilibili] get_ai_conclusion failed bvid={} page_index={}: {}", bvid, page_index, e)
         return {"code": -1, "message": repr(e), "model_result": None}
+
+
+@_router.post("/subtitle-meta/{bvid}/{page_index}")
+async def get_subtitle_meta(bvid: str, page_index: int, body: _CredentialBody):
+    logger.debug("[bilibili] subtitle-meta start bvid={} page_index={} has_credential={}", bvid, page_index,
+                 bool(body.sessdata))
+    try:
+        credential = await _make_credential(
+            body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
+            body.dedeuserid, body.ac_time_value, body.proxy,
+        )
+        v = bilibili_api.video.Video(bvid=bvid, credential=credential)
+        cid = await v.get_cid(page_index=page_index)
+        logger.debug("[bilibili] subtitle-meta got cid={} bvid={} page_index={}", cid, bvid, page_index)
+        subtitle_info = await v.get_subtitle(cid=cid)
+        subtitles_meta = subtitle_info.get("subtitles", [])
+        logger.debug("[bilibili] subtitle-meta done bvid={} page_index={} tracks= allow_submit={}",
+                     bvid, page_index, len(subtitles_meta), subtitle_info.get("allow_submit"))
+        for item in subtitles_meta:
+            logger.debug("[bilibili]   track lan={} lan_doc={} type={} id={}",
+                         item.get("lan"), item.get("lan_doc"), item.get("type"), item.get("id"))
+        return {
+            "code": 0,
+            "message": "ok",
+            "allow_submit": subtitle_info.get("allow_submit", False),
+            "subtitles": subtitles_meta,
+        }
+    except bilibili_api.exceptions.ResponseCodeException as e:
+        logger.warning("[bilibili] subtitle-meta ResponseCodeException bvid={} page_index={} code={} msg={}", bvid,
+                       page_index, e.code, e.msg)
+        return {"code": e.code, "message": e.msg, "subtitles": None}
+    except Exception as e:
+        logger.warning("[bilibili] get_subtitle_meta failed bvid={} page_index={}: {}", bvid, page_index, e)
+        return {"code": -1, "message": repr(e), "subtitles": None}
+
+
+class _SubtitleBodyBody(BaseModel):
+    subtitle_url: str
+
+
+@_router.post("/subtitle-body")
+async def get_subtitle_body(body: _SubtitleBodyBody):
+    logger.debug("[bilibili] subtitle-body start url={}", body.subtitle_url)
+    try:
+        import httpx
+        url = body.subtitle_url
+        if url.startswith("//"):
+            url = "https:" + url
+        async with httpx.AsyncClient(headers=_BILIBILI_HEADERS, follow_redirects=True) as client:
+            resp = await client.get(url)
+            logger.debug("[bilibili] subtitle-body http status={} url={}", resp.status_code, url)
+            data = resp.json()
+            items = data.get("body", [])
+            result = [
+                {"from": s.get("from", 0), "to": s.get("to", 0), "content": s.get("content", "")}
+                for s in items
+            ]
+        logger.debug("[bilibili] subtitle-body done items={} url={}", len(result), url)
+        return {"code": 0, "message": "ok", "body": result}
+    except Exception as e:
+        logger.warning("[bilibili] get_subtitle_body failed url={}: {}", body.subtitle_url, e)
+        return {"code": -1, "message": repr(e), "body": None}
 
 
 @_router.websocket("/download-task/{bvid}/{page}")

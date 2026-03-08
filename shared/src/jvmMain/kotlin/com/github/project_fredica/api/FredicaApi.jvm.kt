@@ -26,6 +26,10 @@ import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
 import com.github.project_fredica.api.routes.LlmProxyChatRoute
+import com.github.project_fredica.db.BilibiliSubtitleMetaCacheDb
+import com.github.project_fredica.db.BilibiliSubtitleMetaCacheService
+import com.github.project_fredica.db.BilibiliSubtitleBodyCacheDb
+import com.github.project_fredica.db.BilibiliSubtitleBodyCacheService
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -167,6 +171,8 @@ object FredicaApiJvmService {
             boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
             boot("WorkflowRunService", WorkflowRunDb(database), { initialize() }) { WorkflowRunService.initialize(it) }
             boot("BilibiliAiConclusionCacheService", BilibiliAiConclusionCacheDb(database), { initialize() }) { BilibiliAiConclusionCacheService.initialize(it) }
+            boot("BilibiliSubtitleMetaCacheService", BilibiliSubtitleMetaCacheDb(database), { initialize() }) { BilibiliSubtitleMetaCacheService.initialize(it) }
+            boot("BilibiliSubtitleBodyCacheService", BilibiliSubtitleBodyCacheDb(database), { initialize() }) { BilibiliSubtitleBodyCacheService.initialize(it) }
         }
 
         CurrentInstanceHandler.server = embeddedServer(

@@ -7,9 +7,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import java.io.File
 import java.net.Proxy
+import java.util.concurrent.TimeUnit
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 import kotlin.time.Instant
@@ -77,6 +79,9 @@ object AppUtil {
         private fun OkHttpClient.Builder.useAppKtorClientCommonConfig() {
             followRedirects(true)
             followSslRedirects(true)
+            connectTimeout(10, TimeUnit.MINUTES)
+            callTimeout(10, TimeUnit.MINUTES)
+            writeTimeout(10, TimeUnit.MINUTES)
         }
 
         /**

@@ -7,6 +7,7 @@ import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
 import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
+import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,11 @@ function formatCount(n: number): string {
 
 // ─── InfoTab ──────────────────────────────────────────────────────────────────
 
-function InfoTab({ actionTarget, onOpenModal }: { actionTarget: MaterialVideo; onOpenModal: (bvid: string) => void }) {
+function InfoTab({ actionTarget, onOpenModal, onOpenSubtitleModal }: {
+    actionTarget: MaterialVideo;
+    onOpenModal: (bvid: string) => void;
+    onOpenSubtitleModal: (bvid: string) => void;
+}) {
     const bvid = actionTarget.source_type === 'bilibili'
         ? ((() => { try { return (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid; } catch { return null; } })() ?? actionTarget.source_id)
         : null;
@@ -134,11 +139,23 @@ function InfoTab({ actionTarget, onOpenModal }: { actionTarget: MaterialVideo; o
             <div className="flex items-center justify-between gap-3 py-1.5">
                 <div className="min-w-0">
                     <span className="text-sm text-gray-700">B站 AI 总结</span>
-                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的 B 站 AI 总结内容</p>
+                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的 B 站 AI 总结内容（需登录凭证）</p>
                 </div>
                 <button
                     onClick={() => onOpenModal(bvid)}
                     className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+                >
+                    查询
+                </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 py-1.5">
+                <div className="min-w-0">
+                    <span className="text-sm text-gray-700">B站字幕</span>
+                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的字幕内容（需登录凭证）</p>
+                </div>
+                <button
+                    onClick={() => onOpenSubtitleModal(bvid)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
                 >
                     查询
                 </button>
@@ -172,6 +189,7 @@ export default function LibraryPage() {
     // Action modal state
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
+    const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [actionTab, setActionTab] = useState<'workflow' | 'info'>('workflow');
     const [modalWorkerTasks, setModalWorkerTasks] = useState<WorkerTask[]>([]);
     const [modalTasksLoading, setModalTasksLoading] = useState(false);
@@ -497,6 +515,15 @@ export default function LibraryPage() {
                 />
             )}
 
+            {/* ── Subtitle modal ── */}
+            {subtitleTarget && (
+                <BilibiliSubtitleModal
+                    bvid={subtitleTarget.bvid}
+                    pageIndex={subtitleTarget.pageIndex}
+                    onClose={() => setSubtitleTarget(null)}
+                />
+            )}
+
             {/* ── Action modal ── */}
             {actionTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -704,7 +731,7 @@ export default function LibraryPage() {
                             ))}
 
                             {actionTab === 'info' && (
-                                <InfoTab actionTarget={actionTarget} onOpenModal={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })} />
+                                <InfoTab actionTarget={actionTarget} onOpenModal={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })} onOpenSubtitleModal={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })} />
                             )}
                         </div>
                     </div>
