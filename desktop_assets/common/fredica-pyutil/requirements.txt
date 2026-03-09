@@ -10,3 +10,4 @@ faster-whisper
 aiohttp
 pydantic
 psutil
+pynvml
