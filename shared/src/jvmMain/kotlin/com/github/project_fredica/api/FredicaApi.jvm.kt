@@ -30,6 +30,18 @@ import com.github.project_fredica.db.BilibiliSubtitleMetaCacheDb
 import com.github.project_fredica.db.BilibiliSubtitleMetaCacheService
 import com.github.project_fredica.db.BilibiliSubtitleBodyCacheDb
 import com.github.project_fredica.db.BilibiliSubtitleBodyCacheService
+import com.github.project_fredica.db.weben.WebenConceptDb
+import com.github.project_fredica.db.weben.WebenConceptService
+import com.github.project_fredica.db.weben.WebenFlashcardDb
+import com.github.project_fredica.db.weben.WebenFlashcardService
+import com.github.project_fredica.db.weben.WebenNoteDb
+import com.github.project_fredica.db.weben.WebenNoteService
+import com.github.project_fredica.db.weben.WebenRelationDb
+import com.github.project_fredica.db.weben.WebenRelationService
+import com.github.project_fredica.db.weben.WebenSegmentDb
+import com.github.project_fredica.db.weben.WebenSegmentService
+import com.github.project_fredica.db.weben.WebenSourceDb
+import com.github.project_fredica.db.weben.WebenSourceService
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -173,6 +185,13 @@ object FredicaApiJvmService {
             boot("BilibiliAiConclusionCacheService", BilibiliAiConclusionCacheDb(database), { initialize() }) { BilibiliAiConclusionCacheService.initialize(it) }
             boot("BilibiliSubtitleMetaCacheService", BilibiliSubtitleMetaCacheDb(database), { initialize() }) { BilibiliSubtitleMetaCacheService.initialize(it) }
             boot("BilibiliSubtitleBodyCacheService", BilibiliSubtitleBodyCacheDb(database), { initialize() }) { BilibiliSubtitleBodyCacheService.initialize(it) }
+            // 6. Weben 知识图谱表（顺序无强依赖，但 flashcard 依赖 concept 表存在）
+            boot("WebenSourceService",    WebenSourceDb(database),    { initialize() }) { WebenSourceService.initialize(it) }
+            boot("WebenConceptService",   WebenConceptDb(database),   { initialize() }) { WebenConceptService.initialize(it) }
+            boot("WebenRelationService",  WebenRelationDb(database),  { initialize() }) { WebenRelationService.initialize(it) }
+            boot("WebenSegmentService",   WebenSegmentDb(database),   { initialize() }) { WebenSegmentService.initialize(it) }
+            boot("WebenFlashcardService", WebenFlashcardDb(database), { initialize() }) { WebenFlashcardService.initialize(it) }
+            boot("WebenNoteService",      WebenNoteDb(database),      { initialize() }) { WebenNoteService.initialize(it) }
         }
 
         CurrentInstanceHandler.server = embeddedServer(
