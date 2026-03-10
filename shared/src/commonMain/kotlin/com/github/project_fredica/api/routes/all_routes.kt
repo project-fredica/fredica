@@ -48,4 +48,6 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     WebenSourceListRoute,
     WorkerTaskListRoute,
     WorkflowRunStartRoute,
+    PromptGraphRunGetRoute,
+    PromptGraphRunStartRoute,
 )

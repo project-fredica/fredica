@@ -42,6 +42,16 @@ import com.github.project_fredica.db.weben.WebenSegmentDb
 import com.github.project_fredica.db.weben.WebenSegmentService
 import com.github.project_fredica.db.weben.WebenSourceDb
 import com.github.project_fredica.db.weben.WebenSourceService
+import com.github.project_fredica.db.promptgraph.PromptGraphDefDb
+import com.github.project_fredica.db.promptgraph.PromptGraphDefService
+import com.github.project_fredica.db.promptgraph.PromptGraphRunDb
+import com.github.project_fredica.db.promptgraph.PromptGraphRunService
+import com.github.project_fredica.db.promptgraph.PromptNodeRunDb
+import com.github.project_fredica.db.promptgraph.PromptNodeRunService
+import com.github.project_fredica.promptgraph.PromptGraphEngine
+import com.github.project_fredica.api.routes.PromptGraphEngineService
+import com.github.project_fredica.api.routes.PromptGraphRunner
+import com.github.project_fredica.llm.LlmSseClient
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -192,6 +202,33 @@ object FredicaApiJvmService {
             boot("WebenSegmentService",   WebenSegmentDb(database),   { initialize() }) { WebenSegmentService.initialize(it) }
             boot("WebenFlashcardService", WebenFlashcardDb(database), { initialize() }) { WebenFlashcardService.initialize(it) }
             boot("WebenNoteService",      WebenNoteDb(database),      { initialize() }) { WebenNoteService.initialize(it) }
+            // 7. PromptGraph 提示词图引擎（三张表）
+            val pgDefDb  = PromptGraphDefDb(database)
+            val pgRunDb  = PromptGraphRunDb(database)
+            val pgNodeDb = PromptNodeRunDb(database)
+            boot("PromptGraphDefService",     pgDefDb,  { initialize() }) { PromptGraphDefService.initialize(it) }
+            boot("PromptGraphRunService",     pgRunDb,  { initialize() }) { PromptGraphRunService.initialize(it) }
+            boot("PromptNodeRunService",      pgNodeDb, { initialize() }) { PromptNodeRunService.initialize(it) }
+            // 系统内置图种子初始化（每次启动同步最新内置版本）
+            pgDefDb.upsertSystemGraphs()
+            // 注册引擎到 PromptGraphEngineService（通过 PromptGraphRunner 接口隐藏 jvmMain 依赖）
+            PromptGraphEngineService.initialize(object : PromptGraphRunner {
+                private val engine = PromptGraphEngine { modelConfig, requestBody, cancelSignal ->
+                    LlmSseClient.streamChat(
+                        modelConfig  = modelConfig,
+                        requestBody  = requestBody,
+                        cancelSignal = cancelSignal,
+                    )
+                }
+                override suspend fun run(
+                    defId: String,
+                    initialContext: Map<String, String>,
+                    materialId: String?,
+                    workflowRunId: String?,
+                    cancelSignal: kotlinx.coroutines.CompletableDeferred<Unit>?,
+                ) = engine.run(defId, initialContext, materialId, workflowRunId, cancelSignal)
+            })
+            logger.debug("PromptGraphEngineService initialized")
         }
 
         CurrentInstanceHandler.server = embeddedServer(
