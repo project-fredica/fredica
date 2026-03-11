@@ -39,7 +39,7 @@ async def _make_credential(
             logger.info("credential refresh ... old value is {}", str(c))
             await c.refresh()
             logger.info("credential refresh success , new value is {}", str(c))
-        if await c.check_valid():
+        if not await c.check_valid():
             logger.error("credential invalid , value is {}", str(c))
             return None
         return c
