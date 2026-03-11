@@ -49,6 +49,22 @@ interface TaskExecutor {
      * 默认返回 false，子类按需覆写。
      */
     fun canSkip(task: Task): Boolean = false
+
+    /**
+     * 任务最终失败或取消时的回调（由 WorkerEngine 在写入 failed/cancelled 状态后调用）。
+     *
+     * 用途：Executor 可在此处理业务副作用，例如将关联的 WebenSource.analysisStatus
+     * 重置为 "failed"，避免因未捕获异常导致业务状态永远停留在中间态。
+     *
+     * 设计约定：
+     *   - 此方法不应抛出异常（内部用 runCatching 保护）
+     *   - WorkerEngine 不感知具体业务对象，解耦由此实现
+     *   - 默认空实现，不需要副作用的 Executor 无需覆写
+     *
+     * @param task    失败的任务（含 payload，可用于定位关联业务对象）
+     * @param result  最终的执行结果（含 error / errorType）
+     */
+    suspend fun onTaskFailed(task: Task, result: ExecuteResult) {}
 }
 
 /**

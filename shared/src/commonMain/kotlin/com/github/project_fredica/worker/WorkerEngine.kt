@@ -253,6 +253,9 @@ object WorkerEngine {
                 // 用户主动取消：不触发重试，直接标记 cancelled
                 TaskService.repo.updateStatus(task.id, "cancelled", error = execResult.error, errorType = "CANCELLED")
                 logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）已被用户取消")
+                // 通知 Executor 处理业务副作用（如重置 WebenSource 状态）
+                runCatching { executor.onTaskFailed(task, execResult) }
+                    .onFailure { logger.error("WorkerEngine: onTaskFailed 回调异常，任务 ${task.id}", it) }
             }
             execResult.isSuccess -> {
                 TaskService.repo.updateStatus(task.id, "completed", result = execResult.result)
@@ -278,6 +281,9 @@ object WorkerEngine {
                 } else {
                     // 重试次数耗尽或不可重试，永久失败
                     finishFailed(task, execResult.error, execResult.errorType)
+                    // 通知 Executor 处理业务副作用（如重置 WebenSource 状态）
+                    runCatching { executor.onTaskFailed(task, execResult) }
+                        .onFailure { logger.error("WorkerEngine: onTaskFailed 回调异常，任务 ${task.id}", it) }
                 }
             }
         }

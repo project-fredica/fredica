@@ -74,6 +74,19 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
         return done
     }
 
+    /**
+     * 任务永久失败或取消时，将 WebenSource.analysisStatus 重置为 "failed"。
+     * 覆写此回调而非在 executeWithSignals 各路径散落调用，保持业务状态更新的统一收口。
+     */
+    override suspend fun onTaskFailed(task: Task, result: ExecuteResult) {
+        val sourceId = runCatching {
+            Json.decodeFromString<Payload>(task.payload).sourceId
+        }.getOrNull() ?: return
+        runCatching { WebenSourceService.repo.updateAnalysisStatus(sourceId, "failed") }
+            .onFailure { logger.warn("FetchSubtitleExecutor.onTaskFailed: 更新状态失败 sourceId=$sourceId: ${it.message}") }
+        logger.info("FetchSubtitleExecutor.onTaskFailed: sourceId=$sourceId → failed (errorType=${result.errorType})")
+    }
+
     override suspend fun executeWithSignals(
         task: Task,
         cancelSignal: CompletableDeferred<Unit>,
@@ -112,7 +125,6 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
             FredicaApi.PyUtil.post("/bilibili/video/subtitle-meta/${payload.bvid}/${payload.page}", credBody.str)
         } catch (e: Throwable) {
             logger.error("FetchSubtitleExecutor: 获取字幕元信息失败 [taskId=${task.id}]: ${e.message}")
-            WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "failed")
             return@withContext ExecuteResult(error = "获取字幕元信息失败: ${e.message}", errorType = "SUBTITLE_META_ERROR")
         }
 
@@ -127,7 +139,6 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", bodyBody.str)
             } catch (e: Throwable) {
                 logger.error("FetchSubtitleExecutor: 获取字幕内容失败 [taskId=${task.id}]: ${e.message}")
-                WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "failed")
                 return@withContext ExecuteResult(error = "获取字幕内容失败: ${e.message}", errorType = "SUBTITLE_BODY_ERROR")
             }
             val text = extractSubtitleText(bodyRaw)
@@ -157,7 +168,6 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 logger.info("FetchSubtitleExecutor: $fallbackReason，启动 ASR materialId=$materialId [taskId=${task.id}]")
                 val asrText = runAsrFallback(task, materialId, payload.sourceId, cancelSignal, pauseResumeChannels, cfg)
                 if (asrText == null) {
-                    WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "failed")
                     return@withContext ExecuteResult(error = "用户已取消", errorType = "CANCELLED")
                 }
                 outputFile.writeText(asrText)
@@ -323,7 +333,7 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 onProgress = { pct ->
                     val base = 25 + i * 75 / chunks.size
                     val step = 75 / chunks.size
-                    val taskPct = (base + pct * step / 100).toInt()
+                    val taskPct = base + pct * step / 100
                     TaskService.repo.updateProgress(task.id, taskPct)
                     WebenSourceService.syncProgressFromGraph(task.workflowRunId)
                 },

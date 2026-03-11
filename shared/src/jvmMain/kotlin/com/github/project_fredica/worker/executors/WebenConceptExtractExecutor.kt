@@ -82,6 +82,19 @@ object WebenConceptExtractExecutor : WebSocketTaskExecutor() {
         return done
     }
 
+    /**
+     * 任务永久失败或取消时，将 WebenSource.analysisStatus 重置为 "failed"。
+     * 覆写此回调而非在 executeWithSignals 各路径散落调用，保持业务状态更新的统一收口。
+     */
+    override suspend fun onTaskFailed(task: Task, result: ExecuteResult) {
+        val sourceId = runCatching {
+            Json.decodeFromString<Payload>(task.payload).sourceId
+        }.getOrNull() ?: return
+        runCatching { WebenSourceService.repo.updateAnalysisStatus(sourceId, "failed") }
+            .onFailure { logger.warn("WebenConceptExtractExecutor.onTaskFailed: 更新状态失败 sourceId=$sourceId: ${it.message}") }
+        logger.info("WebenConceptExtractExecutor.onTaskFailed: sourceId=$sourceId → failed (errorType=${result.errorType})")
+    }
+
     override suspend fun executeWithSignals(
         task: Task,
         cancelSignal: CompletableDeferred<Unit>,
@@ -111,7 +124,6 @@ object WebenConceptExtractExecutor : WebSocketTaskExecutor() {
         for ((i, chunk) in chunks.withIndex()) {
             if (cancelSignal.isCompleted) {
                 logger.info("WebenConceptExtractExecutor: 取消信号，停止 chunk 处理 [taskId=${task.id}]")
-                WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "failed")
                 return@withContext ExecuteResult(error = "用户已取消", errorType = "CANCELLED")
             }
 
@@ -146,7 +158,6 @@ object WebenConceptExtractExecutor : WebSocketTaskExecutor() {
                 )
             } catch (e: Throwable) {
                 if (cancelSignal.isCompleted) {
-                    WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "failed")
                     return@withContext ExecuteResult(error = "用户已取消", errorType = "CANCELLED")
                 }
                 logger.error("WebenConceptExtractExecutor: PromptGraph 失败 chunk=$i [taskId=${task.id}]: ${e.message}")
