@@ -137,8 +137,8 @@ actual suspend fun FredicaApi.PyUtil.get(path: String): String {
     return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Get, path)
 }
 
-actual suspend fun FredicaApi.PyUtil.post(path: String, body: String): String {
-    return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Post, path, body)
+actual suspend fun FredicaApi.PyUtil.post(path: String, body: String, timeoutMs: Long): String {
+    return PythonUtil.Py314Embed.PyUtilServer.requestText(HttpMethod.Post, path, body, timeoutMs)
 }
 
 object FredicaApiJvmService {
