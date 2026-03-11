@@ -123,8 +123,8 @@ def _detect_cuda() -> CudaInfo:
             devices.append(CudaDevice(index=i, name=name, vram_mb=mem.total // (1024 * 1024)))
         pynvml.nvmlShutdown()
         return CudaInfo(available=len(devices) > 0, devices=devices)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[device_util] pynvml detection failed: {}", e)
 
     # Fallback: nvidia-smi
     try:
@@ -145,8 +145,8 @@ def _detect_cuda() -> CudaInfo:
                     devices.append(CudaDevice(index=i, name=name, vram_mb=vram_mb))
             if devices:
                 return CudaInfo(available=True, devices=devices)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[device_util] nvidia-smi detection failed: {}", e)
 
     return CudaInfo(available=False)
 
@@ -157,7 +157,8 @@ def _detect_rocm() -> RocmInfo:
     try:
         result = _run(["rocm-smi", "--showproductname"], timeout=5, label="rocm-smi")
         return RocmInfo(available=result.returncode == 0)
-    except Exception:
+    except Exception as e:
+        logger.debug("[device_util] rocm-smi detection failed: {}", e)
         return RocmInfo(available=False)
 
 
@@ -173,8 +174,8 @@ def _detect_qsv() -> QsvInfo:
             )
             winreg.CloseKey(key)
             return QsvInfo(available=True, device="Intel GPU")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[device_util] QSV MediaSDK registry check failed: {}", e)
         # Secondary: check for Intel display driver registry key
         try:
             import winreg  # type: ignore
@@ -185,8 +186,8 @@ def _detect_qsv() -> QsvInfo:
             )
             winreg.CloseKey(key)
             return QsvInfo(available=True, device="Intel GPU")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[device_util] QSV Intel registry check failed: {}", e)
         return QsvInfo(available=False)
     elif sys == "Linux":
         import os
@@ -197,8 +198,8 @@ def _detect_qsv() -> QsvInfo:
             result = _run(["vainfo"], timeout=5, label="vainfo")
             if result.returncode == 0 and "VAProfileH264" in result.stdout:
                 return QsvInfo(available=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[device_util] QSV Linux detection failed: {}", e)
         return QsvInfo(available=False)
     return QsvInfo(available=False)
 
@@ -214,7 +215,8 @@ def _detect_d3d11va() -> D3d11vaInfo:
         import ctypes
         ctypes.windll.LoadLibrary("d3d11.dll")  # type: ignore
         return D3d11vaInfo(available=True)
-    except Exception:
+    except Exception as e:
+        logger.debug("[device_util] d3d11va detection failed: {}", e)
         return D3d11vaInfo(available=False)
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Loader, Captions, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Loader, Captions, RefreshCw, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 
 interface SubtitleMetaItem {
@@ -247,8 +247,16 @@ export function BilibiliSubtitleModal({
                     )}
 
                     {!metaLoading && metaResult?.code !== 0 && (
-                        <div className="py-6 text-center text-sm text-gray-400">
-                            {metaResult?.message || "获取失败"}
+                        <div className="py-5 flex flex-col items-center gap-2 text-center">
+                            <AlertCircle className="w-8 h-8 text-red-400 flex-shrink-0" />
+                            <p className="text-sm font-medium text-red-500">
+                                {metaResult?.message || "获取失败"}
+                            </p>
+                            {metaResult?.message === "账号未登录" && (
+                                <p className="text-xs text-gray-400">
+                                    请让运维在 <span className="font-medium text-gray-500">服务器设置</span> 中设置 B 站账号。
+                                </p>
+                            )}
                         </div>
                     )}
 

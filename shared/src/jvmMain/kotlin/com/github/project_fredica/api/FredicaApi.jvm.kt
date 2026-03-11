@@ -17,11 +17,17 @@ import com.github.project_fredica.db.WorkflowRunDb
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.TaskDb
 import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.RestartTaskLogDb
+import com.github.project_fredica.db.RestartTaskLogService
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
 import com.github.project_fredica.worker.executors.DownloadBilibiliVideoExecutor
 import com.github.project_fredica.worker.executors.TranscodeMp4Executor
+import com.github.project_fredica.worker.executors.FetchSubtitleExecutor
+import com.github.project_fredica.worker.executors.ExtractAudioExecutor
+import com.github.project_fredica.worker.executors.TranscribeExecutor
+import com.github.project_fredica.worker.executors.WebenConceptExtractExecutor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
 import com.github.project_fredica.api.routes.ImageProxyResponse
@@ -49,6 +55,7 @@ import com.github.project_fredica.db.promptgraph.PromptGraphRunService
 import com.github.project_fredica.db.promptgraph.PromptNodeRunDb
 import com.github.project_fredica.db.promptgraph.PromptNodeRunService
 import com.github.project_fredica.promptgraph.PromptGraphEngine
+import com.github.project_fredica.api.routes.WebenSourceListRoute
 import com.github.project_fredica.api.routes.PromptGraphEngineService
 import com.github.project_fredica.api.routes.PromptGraphRunner
 import com.github.project_fredica.llm.LlmSseClient
@@ -108,14 +115,8 @@ data class FredicaApiJvmInitOption(
 
 
 actual suspend fun FredicaApi.Companion.init(options: Any?) {
-    withContext(Dispatchers.IO) {
-        listOf(async {
-
-        }, async {
-            val o = if (options == null) FredicaApiJvmInitOption() else options as FredicaApiJvmInitOption
-            FredicaApiJvmService.init(o)
-        }).awaitAll()
-    }
+    val o = if (options == null) FredicaApiJvmInitOption() else options as FredicaApiJvmInitOption
+    FredicaApiJvmService.init(o)
 }
 
 actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route> {
@@ -145,6 +146,7 @@ object FredicaApiJvmService {
     object CurrentInstanceHandler {
         lateinit var initOption: FredicaApiJvmInitOption
         lateinit var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
+        lateinit var engineScope: kotlinx.coroutines.CoroutineScope
 
         fun getLocalPort(): UShort = initOption.ktorServerPort
     }
@@ -192,6 +194,7 @@ object FredicaApiJvmService {
             // 5. Async worker task queue (pipeline_instance + task + task_event tables)
             boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
             boot("WorkflowRunService", WorkflowRunDb(database), { initialize() }) { WorkflowRunService.initialize(it) }
+            boot("RestartTaskLogService", RestartTaskLogDb(database), { initialize() }) { RestartTaskLogService.initialize(it) }
             boot("BilibiliAiConclusionCacheService", BilibiliAiConclusionCacheDb(database), { initialize() }) { BilibiliAiConclusionCacheService.initialize(it) }
             boot("BilibiliSubtitleMetaCacheService", BilibiliSubtitleMetaCacheDb(database), { initialize() }) { BilibiliSubtitleMetaCacheService.initialize(it) }
             boot("BilibiliSubtitleBodyCacheService", BilibiliSubtitleBodyCacheDb(database), { initialize() }) { BilibiliSubtitleBodyCacheService.initialize(it) }
@@ -243,12 +246,17 @@ object FredicaApiJvmService {
         // WorkerEngine 位于 commonMain，defaultExecutors 仅含纯 Kotlin 的通用 executor；
         // 依赖 ProcessBuilder / PythonUtil 的 JVM executor 在此处补充传入。
         val engineScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+        CurrentInstanceHandler.engineScope = engineScope
         WorkerEngine.start(
             maxWorkers = 2,
             scope = engineScope,
             executors = listOf(
                 DownloadBilibiliVideoExecutor,
                 TranscodeMp4Executor,
+                FetchSubtitleExecutor,
+                ExtractAudioExecutor,
+                TranscribeExecutor,
+                WebenConceptExtractExecutor,
             ),
         )
         logger.debug("WorkerEngine started")
@@ -325,6 +333,20 @@ object FredicaApiJvmService {
             logger.info("[startup] device detect complete, ffmpegProbeJson saved")
         } catch (e: Throwable) {
             logger.warn("[startup] device detect failed: ${e.message}")
+        }
+    }
+
+    /**
+     * 在 APP 完全就绪（KCEF 初始化完成）后调用，启动后台对账任务。
+     *
+     * 必须在 [init] 之后调用（依赖 engineScope 和各服务已初始化）。
+     * 为非挂起函数，直接在 KCEF 的 onInitialized 回调中调用即可。
+     */
+    fun onAppReady() {
+        val logger = createLogger()
+        logger.info("[onAppReady] KCEF 初始化完成，启动后台 WebenSource 对账任务…")
+        CurrentInstanceHandler.engineScope.launch(Dispatchers.IO) {
+            WebenSourceListRoute.startupReconcileAll()
         }
     }
 

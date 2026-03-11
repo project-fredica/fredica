@@ -211,6 +211,54 @@ interface TaskRepo {
 
     /** 批量插入任务；已存在（id 冲突）的任务静默忽略。 */
     suspend fun createAll(tasks: List<Task>)
+
+    /**
+     * 启动恢复：重置上次会话因 APP 强杀遗留的僵尸任务。
+     * - running  → failed（执行结果不确定，标记永久失败）
+     * - claimed  → pending（仅认领未执行，可安全重新入队）
+     *
+     * @return 受影响任务所属的 workflowRunId 集合（调用方据此触发 recalculate）
+     */
+    suspend fun resetStaleTasks(): Set<String>
+
+    /**
+     * 对账：标记所有孤立 Task 为 failed。
+     *
+     * "孤立 Task"定义：workflow_run_id 指向的 WorkflowRun 记录已不存在于数据库，
+     * 且 Task 自身尚未进入终态（completed / failed / cancelled）。
+     *
+     * 为什么需要此方法：
+     *   WorkflowRun 被手动删除（如数据迁移、DB 清理）后，其孤立 Task 永远不会被
+     *   recalculate() 处理，也不会再被 claimNext() 正常推进；若不显式标记，
+     *   这些任务会永远停留在 pending/claimed/running 状态，产生"僵尸任务"。
+     *
+     * 注意：已是终态的孤立 Task 不会被重复处理（幂等安全）。
+     *
+     * @return 被标记为 failed 的 Task ID 列表
+     */
+    suspend fun failOrphanedTasks(): List<String>
+
+    /**
+     * 快照当前所有非终态任务（status IN pending/claimed/running），返回含原始状态的完整记录。
+     * 在 resetStaleTasks() 之前调用，用于记录重启中断日志。
+     */
+    suspend fun snapshotNonTerminalTasks(): List<Task>
+
+    /**
+     * 级联取消：将指定 WorkflowRun 下所有等待中（pending/claimed）的 Task 标记为 cancelled。
+     *
+     * 适用场景：WorkflowRun 被用户主动取消时，将尚未开始执行的 Task 一并取消，
+     * 防止它们被 claimNext() 重新认领并浪费计算资源。
+     *
+     * 注意：
+     *   - 只处理 pending / claimed 状态的任务；running 任务需通过 TaskCancelService
+     *     发送取消信号后由 Executor 自行处理，本方法不干预。
+     *   - 已是终态（completed / failed / cancelled）的任务不受影响（幂等安全）。
+     *
+     * @param workflowRunId  目标工作流运行实例 ID
+     * @return               被取消的 Task ID 列表
+     */
+    suspend fun cancelPendingTasksByWorkflowRun(workflowRunId: String): List<String>
 }
 
 // =============================================================================

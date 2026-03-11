@@ -154,6 +154,68 @@ class WorkflowRunDbTest {
         )
     }
 
+    // ── 测试 5：recalculate — 所有任务取消 ────────────────────────────────────
+
+    /**
+     * 证明目的：所有子任务均变为 cancelled 后，recalculate() 应将 WorkflowRun
+     *           状态更新为 cancelled，而非原来错误的 "pending"。
+     *
+     * 证明过程：
+     *   1. 创建运行实例 + 3 个子任务（均为 pending）。
+     *   2. 将全部 3 个任务改为 "cancelled"（模拟 resetStaleTasks 在重启时的操作）。
+     *   3. 调用 recalculate()。
+     *   4. 断言 status = "cancelled"（修复前此处会错误返回 "pending"）。
+     *
+     * 修复背景：
+     *   原 recalculate() 未跟踪 hasCancelled 标志，所有任务取消后各计数均为 0/false，
+     *   走 else 分支返回 "pending"，导致 WorkflowRun 永远处于非终态。
+     */
+    @Test
+    fun testRecalculate_allCancelled() = runBlocking {
+        workflowRunDb.create(workflowRun("wr-all-cancelled"))
+        val tasks = createTasks("wr-all-cancelled", 3)
+
+        // 模拟应用重启时 resetStaleTasks() 将所有 pending 任务取消
+        tasks.forEach { taskDb.updateStatus(it.id, "cancelled") }
+        workflowRunDb.recalculate("wr-all-cancelled")
+
+        assertEquals(
+            "cancelled", workflowRunDb.getById("wr-all-cancelled")!!.status,
+            "所有子任务取消后，WorkflowRun 应进入 cancelled 终态，而非 pending"
+        )
+    }
+
+    // ── 测试 6：recalculate — 部分完成后其余取消 ──────────────────────────────
+
+    /**
+     * 证明目的：部分任务 completed、其余任务 cancelled 时，
+     *           recalculate() 应将 WorkflowRun 状态更新为 cancelled。
+     *
+     * 证明过程：
+     *   1. 创建运行实例 + 3 个子任务。
+     *   2. 第 1 个任务 completed，第 2、3 个任务 cancelled。
+     *   3. 调用 recalculate()，断言 status = "cancelled"。
+     *
+     * 语义说明：
+     *   部分完成 + 部分取消不代表整体成功，WorkflowRun 应以 cancelled 结束，
+     *   用户需在任务中心重新创建任务流以完成剩余步骤。
+     */
+    @Test
+    fun testRecalculate_partialCancelledWithCompleted() = runBlocking {
+        workflowRunDb.create(workflowRun("wr-partial-cancel"))
+        val tasks = createTasks("wr-partial-cancel", 3)
+
+        taskDb.updateStatus(tasks[0].id, "completed")
+        taskDb.updateStatus(tasks[1].id, "cancelled")
+        taskDb.updateStatus(tasks[2].id, "cancelled")
+        workflowRunDb.recalculate("wr-partial-cancel")
+
+        assertEquals(
+            "cancelled", workflowRunDb.getById("wr-partial-cancel")!!.status,
+            "部分完成 + 部分取消时，WorkflowRun 应为 cancelled（非 completed）"
+        )
+    }
+
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L

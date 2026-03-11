@@ -5,7 +5,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.encodeToString
 
 /**
@@ -17,10 +17,15 @@ import kotlinx.serialization.encodeToString
  * 特殊 status 值：`pending`=等待中(pending+claimed)，`running`=运行中(running且未暂停)，
  * `paused`=已暂停(running+is_paused=1)；其他值精确匹配。
  * sort: "desc"（默认，最新优先）或 "asc"。
+ *
+ * 启动对账：
+ * - 按 material_id 过滤时，首次请求对该素材下所有非终态 WorkflowRun 进行对账
+ * - 按 workflow_run_id 过滤时，首次请求对该 WorkflowRun 进行对账
+ * - 不过滤时跳过对账（WorkerEngine 启动时已执行全局对账）
  */
 object WorkerTaskListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
-    override val desc = "列出 Worker 任务（可按 id/workflow_run_id/status/material_id/category_id 过滤，支持分页和排序）"
+    override val desc = "列出 Worker 任务（可按 id/workflow_run_id/status/material_id/category_id 过滤，支持分页和排序，含首次启动对账）"
 
     override suspend fun handler(param: String): ValidJsonString {
         val query         = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
@@ -33,7 +38,8 @@ object WorkerTaskListRoute : FredicaApi.Route {
         val pageSize      = query["page_size"]?.firstOrNull()?.toIntOrNull()?.coerceIn(1, 200) ?: 20
         val sortDesc      = (query["sort"]?.firstOrNull() ?: "desc") != "asc"
 
-        val result = TaskService.repo.listAll(
+        // listAll 在首次调用时触发对账（StartupReconcileGuard 保护），后续跳过
+        val result = TaskStatusService.listAll(
             taskId        = taskId,
             workflowRunId = workflowRunId,
             status        = status,

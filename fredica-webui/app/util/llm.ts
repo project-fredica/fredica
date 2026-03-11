@@ -1,4 +1,4 @@
-import { getBridge } from "./bridge";
+import { callBridge } from "./bridge";
 import { buildAuthHeaders, DEFAULT_SERVER_PORT } from "./app_fetch";
 
 /** direct 模式：前端直接持有凭证，SSE 流式 */
@@ -105,23 +105,13 @@ export async function* llmChat(params: LlmChatParams): AsyncGenerator<string> {
         yield* sseChunks(resp);
 
     } else {
-        const bridge = getBridge();
-        if (!bridge) throw new Error("JsBridge 不可用（非 WebView 环境）");
-        const result = await new Promise<string>((resolve, reject) => {
-            bridge.callNative(
-                "llm_proxy_chat",
-                JSON.stringify({ app_model_id: params.app_model_id, message: params.message }),
-                (raw: string) => {
-                    try {
-                        const parsed = JSON.parse(raw);
-                        if (parsed?.error) reject(new Error(parsed.error));
-                        else resolve(parsed?.content ?? "");
-                    } catch {
-                        reject(new Error(`Bridge 响应解析失败: ${raw}`));
-                    }
-                },
-            );
-        });
-        if (result) yield result;
+        const raw = await callBridge(
+            "llm_proxy_chat",
+            JSON.stringify({ app_model_id: params.app_model_id, message: params.message }),
+        );
+        const parsed = JSON.parse(raw);
+        if (parsed?.error) throw new Error(parsed.error);
+        const content = parsed?.content ?? "";
+        if (content) yield content;
     }
 }

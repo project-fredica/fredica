@@ -16,6 +16,8 @@ object AppWebViewMessages {
             GetLlmDefaultRolesJsMessageHandler(),
             SaveLlmDefaultRolesJsMessageHandler(),
             LlmProxyChatJsMessageHandler(),
+            CheckBilibiliCredentialJsMessageHandler(),
+            TryRefreshBilibiliCredentialJsMessageHandler(),
         )
     }
 }

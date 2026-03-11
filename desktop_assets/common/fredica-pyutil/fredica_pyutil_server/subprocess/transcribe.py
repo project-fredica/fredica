@@ -4,16 +4,11 @@ faster-whisper 转录服务。
 
 提供 FasterWhisperTranscribeTaskEndpoint：在子进程中运行 faster-whisper，
 每转录完一个片段立即通过 WebSocket 推送给客户端。
-
-路由示例（在 routes/ 下注册）：
-    @router.websocket("/transcribe-task")
-    async def transcribe_task_endpoint(websocket: WebSocket):
-        endpoint = FasterWhisperTranscribeTaskEndpoint(
-            tag="whisper", websocket=websocket
-        )
-        await endpoint.start_and_wait()
 """
+import time
 from typing import Any
+
+from loguru import logger
 
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInSubProcess
 
@@ -26,11 +21,6 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
     """
     在子进程中运行 faster-whisper 转录，将结果逐片段推送至 status_queue。
 
-    :param param:         init_param_and_run 传入的参数字典，字段见下方
-    :param status_queue:  multiprocessing.Queue，用于向父进程推送消息
-    :param cancel_event:  multiprocessing.Event，set 时应尽快退出
-    :param resume_event:  multiprocessing.Event，clear 时应 wait()（暂停）
-
     param 支持的字段：
         audio_path   (str)       必填，音频文件路径
         model_name   (str)       模型名称，默认 "large-v3"
@@ -39,12 +29,10 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
         compute_type (str)       "float16" | "int8" 等，默认 "float16"
 
     向 status_queue 推送的消息格式：
-        # 每个转录片段
+        {"type": "log",     "level": str, "message": str}   # 进度日志（父进程写 logger）
         {"type": "segment", "start": float, "end": float, "text": str}
-        # 全部完成
-        {"type": "done", "text": str, "language": str}
-        # 出错
-        {"type": "error", "error": str}
+        {"type": "done",    "text": str, "language": str}
+        {"type": "error",   "error": str}
     """
     # 在子进程内延迟导入，避免占用主进程内存
     from faster_whisper import WhisperModel
@@ -55,22 +43,48 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
     device: str = param.get("device", "auto")
     compute_type: str = param.get("compute_type", "float16")
 
+    def _log(level: str, msg: str):
+        status_queue.put({"type": "log", "level": level, "message": msg})
+
+    _log("info", f"[whisper] 加载模型 model={model_name} device={device} compute_type={compute_type}")
+    t_load = time.monotonic()
+
     try:
         model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        _log("info", f"[whisper] 模型加载完成 耗时={time.monotonic() - t_load:.1f}s  文件={audio_path!r}")
+
+        t_trans = time.monotonic()
         segments_iter, info = model.transcribe(audio_path, language=language)
+        duration = getattr(info, "duration", 0) or 0
+        _log("info", f"[whisper] 检测语言={info.language} 音频时长={duration:.1f}s")
 
         collected_texts = []
+        seg_count = 0
+        last_pct = -1
+
         for seg in segments_iter:
             # 响应取消信号
             if cancel_event.is_set():
+                _log("info", "[whisper] 收到取消信号，中止转录")
                 break
-            # 支持暂停（暂停时阻塞在此直到 resume）
+            # 支持暂停
             resume_event.wait()
             if cancel_event.is_set():
                 break
 
             text = seg.text.strip()
             collected_texts.append(text)
+            seg_count += 1
+
+            # 每 10% 进度或每 20 段输出一次日志
+            pct = int(seg.end / duration * 100) if duration > 0 else 0
+            if pct // 10 > last_pct // 10 or seg_count % 20 == 1:
+                elapsed = time.monotonic() - t_trans
+                _log("info",
+                     f"[whisper] 进度 {pct}%  [{seg.start:.1f}s → {seg.end:.1f}s]  "
+                     f"已处理 {seg_count} 段  耗时 {elapsed:.0f}s")
+                last_pct = pct
+
             status_queue.put({
                 "type": "segment",
                 "start": seg.start,
@@ -79,6 +93,11 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
             })
 
         if not cancel_event.is_set():
+            total_chars = sum(len(t) for t in collected_texts)
+            elapsed = time.monotonic() - t_trans
+            _log("info",
+                 f"[whisper] 转录完成  共 {seg_count} 段  {total_chars} 字  "
+                 f"语言={info.language}  耗时={elapsed:.1f}s")
             status_queue.put({
                 "type": "done",
                 "text": " ".join(collected_texts),
@@ -86,6 +105,7 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
             })
 
     except Exception as e:
+        _log("error", f"[whisper] 转录出错: {e}")
         status_queue.put({"type": "error", "error": str(e)})
 
 
@@ -106,19 +126,21 @@ class FasterWhisperTranscribeTaskEndpoint(TaskEndpointInSubProcess):
             "compute_type":  str,        "float16" | "int8"（默认 "float16"）
         }
 
-    WebSocket 推送消息格式（由子进程产生，父进程透传）：
+    WebSocket 推送消息格式：
         {"type": "segment", "start": float, "end": float, "text": str}
         {"type": "done",    "text": str, "language": str}
         {"type": "error",   "error": str}
-
-    status 命令返回最近一条子进程消息。
+        （"log" 类型消息由父进程写入 logger，不转发给客户端）
     """
 
     def _get_process_target(self):
         return _faster_whisper_worker
 
     async def _on_subprocess_message(self, msg: Any):
-        """收到子进程消息后：更新状态快照，并主动推送至 WebSocket。"""
+        if msg.get("type") == "log":
+            level = msg.get("level", "info")
+            getattr(logger, level, logger.info)(msg.get("message", ""))
+            return  # log 消息不推送给 WebSocket 客户端
         self._current_status = msg
         await self.send_json(msg)
 

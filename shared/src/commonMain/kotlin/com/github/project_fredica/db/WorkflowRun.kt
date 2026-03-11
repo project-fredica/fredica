@@ -79,6 +79,29 @@ interface WorkflowRunRepo {
      * 由 WorkerEngine 在每次任务状态变更后触发。
      */
     suspend fun recalculate(workflowRunId: String)
+
+    /**
+     * 对账：对所有非终态 WorkflowRun 重新从 Task 实际状态推导，修正可能落后的汇总状态。
+     *
+     * 为什么需要此方法：
+     *   WorkerEngine 的 recalculate() 在每次任务状态变更后触发，但若该调用因异常
+     *   而失败（如 DB 写入错误、协程被取消），WorkflowRun 的汇总状态就会落后于
+     *   Task 的实际状态。此方法作为补偿手段，在启动恢复后一次性修正所有遗漏。
+     *
+     * 对账规则（依次判断）：
+     *   1. 若 Task 全部被删除（total_tasks = 0）→ 标记 failed（孤立工作流，无任务可推进）
+     *   2. 否则调用 recalculate() 让 Task 实际状态驱动 WorkflowRun 状态
+     *      - 有任意 failed Task → failed
+     *      - 全部 completed    → completed
+     *      - 有 running/pending → running
+     *
+     * 与 recalculate() 的区别：
+     *   - recalculate(id)：针对单个 WF，由 WorkerEngine 在任务完成后实时触发
+     *   - reconcileNonTerminal()：针对全部非终态 WF，在启动恢复后批量执行
+     *
+     * @return 状态被修改的 WorkflowRun 数量
+     */
+    suspend fun reconcileNonTerminal(): Int
 }
 
 // =============================================================================

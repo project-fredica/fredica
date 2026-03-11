@@ -96,8 +96,8 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
                 # 立即终止 FFmpeg 进程，不等待 readline() 返回
                 try:
                     proc.terminate()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[transcode] proc.terminate() failed: {}", e)
                 status_queue.put({"type": "error", "message": "cancelled"})
                 return
 
@@ -148,8 +148,8 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
                 import os
                 done_path = os.path.join(os.path.dirname(output_path), "transcode.done")
                 open(done_path, "w").close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[transcode] failed to write transcode.done: {}", e)
             status_queue.put({"type": "done", "output_path": output_path})
         elif not cancel_event.is_set():
             status_queue.put({"type": "error", "message": f"ffmpeg exited with code {proc.returncode}"})
@@ -175,7 +175,8 @@ def _probe_duration(ffmpeg_path: str, video_path: str) -> float:
             capture_output=True, text=True, timeout=10,
         )
         return float(r.stdout.strip())
-    except Exception:
+    except Exception as e:
+        logger.debug("[transcode] probe_duration failed for {!r}: {}", video_path, e)
         return 0.0
 
 
@@ -185,7 +186,8 @@ def _parse_time(time_str: str) -> float:
         parts = time_str.split(":")
         h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
         return h * 3600 + m * 60 + s
-    except Exception:
+    except Exception as e:
+        logger.debug("[transcode] parse_time failed for {!r}: {}", time_str, e)
         return 0.0
 
 

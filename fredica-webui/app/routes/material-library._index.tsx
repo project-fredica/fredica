@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useEffect, useCallback } from "react";
-import { Trash2, ExternalLink, Plus, X, Loader, Settings, Download, RefreshCw, Pause, Play, Clapperboard } from "lucide-react";
+import { Trash2, ExternalLink, Plus, X, Loader, Settings, Download, RefreshCw, Pause, Play, Clapperboard, Brain, ArrowRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
@@ -8,6 +8,7 @@ import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
 import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
 import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
+import { type WebenSource, getAnalysisStatusInfo } from "~/util/weben";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +120,107 @@ function formatCount(n: number): string {
     return String(n);
 }
 
+// ─── WebenTab ─────────────────────────────────────────────────────────────────
+
+function WebenTab({ sources, loading, starting, onStartAnalysis }: {
+    sources: WebenSource[];
+    loading: boolean;
+    starting: boolean;
+    onStartAnalysis: () => void;
+}) {
+    const hasActive = sources.some(s => s.analysis_status === 'pending' || s.analysis_status === 'analyzing');
+    const hasCompleted = sources.some(s => s.analysis_status === 'completed');
+
+    return (
+        <div className="space-y-3">
+            {/* Sources list */}
+            {loading ? (
+                <div className="flex justify-center py-6">
+                    <Loader className="w-5 h-5 animate-spin text-gray-400" />
+                </div>
+            ) : sources.length === 0 ? (
+                <div className="py-6 text-center space-y-1">
+                    <Brain className="w-8 h-8 text-gray-200 mx-auto" />
+                    <p className="text-sm text-gray-500">尚未进行知识提取</p>
+                    <p className="text-xs text-gray-400">将从字幕/转录文本中提取概念、关系和闪卡</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {sources.map(s => {
+                        const st = getAnalysisStatusInfo(s.analysis_status);
+                        return (
+                            <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 rounded-lg">
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`} />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-gray-700 truncate">{s.title}</p>
+                                    <p className="text-[10px] text-gray-400 mt-0.5">
+                                        {s.analysis_status === 'analyzing' ? '正在提取…' :
+                                         s.analysis_status === 'pending'   ? '排队等待中' :
+                                         s.analysis_status === 'completed' ? '已完成提取' : '提取失败'}
+                                    </p>
+                                </div>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${st.badge}`}>
+                                    {st.label}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Result links */}
+            {hasCompleted && (
+                <div className="flex gap-2">
+                    <Link
+                        to="/weben/concepts"
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors"
+                    >
+                        <Brain className="w-3.5 h-3.5" />
+                        查看提取概念
+                    </Link>
+                    <Link
+                        to="/weben"
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                        知识网络
+                        <ArrowRight className="w-3 h-3" />
+                    </Link>
+                </div>
+            )}
+
+            {/* Start / re-analyze button */}
+            <div className="flex items-center justify-between gap-3 pt-1 border-t border-gray-100">
+                <div className="min-w-0">
+                    <span className="text-sm text-gray-700">
+                        {sources.length === 0 ? '开始知识提取' : '重新提取'}
+                    </span>
+                    {hasActive && (
+                        <p className="text-xs text-blue-600 mt-0.5">分析任务进行中，可前往任务中心查看进度</p>
+                    )}
+                </div>
+                <button
+                    onClick={onStartAnalysis}
+                    disabled={starting || hasActive}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {starting ? <Loader className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                    {hasActive ? '分析中…' : sources.length === 0 ? '开始提取' : '重新提取'}
+                </button>
+            </div>
+
+            {/* Task center link when analyzing */}
+            {hasActive && (
+                <Link
+                    to="/tasks"
+                    className="flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-violet-600 transition-colors"
+                >
+                    前往任务中心查看进度 →
+                </Link>
+            )}
+        </div>
+    );
+}
+
 // ─── InfoTab ──────────────────────────────────────────────────────────────────
 
 function InfoTab({ actionTarget, onOpenModal, onOpenSubtitleModal }: {
@@ -190,12 +292,17 @@ export default function LibraryPage() {
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
-    const [actionTab, setActionTab] = useState<'workflow' | 'info'>('workflow');
+    const [actionTab, setActionTab] = useState<'workflow' | 'info' | 'weben'>('workflow');
     const [modalWorkerTasks, setModalWorkerTasks] = useState<WorkerTask[]>([]);
     const [modalTasksLoading, setModalTasksLoading] = useState(false);
     const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
     const [cancellingPipelineId, setCancellingPipelineId] = useState<string | null>(null);
     const [pausingTaskId, setPausingTaskId] = useState<string | null>(null);
+
+    // Weben knowledge extraction state
+    const [webenSources, setWebenSources] = useState<WebenSource[]>([]);
+    const [webenSourcesLoading, setWebenSourcesLoading] = useState(false);
+    const [startingAnalysis, setStartingAnalysis] = useState(false);
 
     // New category creation
     const [newCategoryName, setNewCategoryName] = useState('');
@@ -317,6 +424,29 @@ export default function LibraryPage() {
         return () => clearInterval(id);
     }, [actionTarget, fetchModalTasks]);
 
+    // Fetch WebenSources for the currently open modal
+    const fetchWebenSources = useCallback(async (materialId: string) => {
+        setWebenSourcesLoading(true);
+        try {
+            const { data } = await apiFetch(
+                `/api/v1/WebenSourceListRoute?material_id=${encodeURIComponent(materialId)}`,
+                { method: 'GET' },
+                { silent: true },
+            );
+            if (Array.isArray(data)) setWebenSources(data as WebenSource[]);
+        } catch { /* silent */ } finally {
+            setWebenSourcesLoading(false);
+        }
+    }, [apiFetch]);
+
+    // Poll weben sources while modal is open (analysis can take minutes)
+    useEffect(() => {
+        if (!actionTarget) return;
+        fetchWebenSources(actionTarget.id);
+        const id = setInterval(() => fetchWebenSources(actionTarget.id), 5_000);
+        return () => clearInterval(id);
+    }, [actionTarget, fetchWebenSources]);
+
     // ── Imperative actions ──────────────────────────────────────────────────
 
     const handleDeleteVideo = async (id: string) => {
@@ -378,6 +508,7 @@ export default function LibraryPage() {
         setActionTarget(video);
         setModalWorkerTasks([]);
         setRunningTaskType(null);
+        setWebenSources([]);
         // Polling is handled by the useEffect that watches actionTarget
     };
 
@@ -387,6 +518,8 @@ export default function LibraryPage() {
         setRunningTaskType(null);
         setCancellingPipelineId(null);
         setPausingTaskId(null);
+        setWebenSources([]);
+        setStartingAnalysis(false);
     };
 
     const handleRunTask = async (taskType: string) => {
@@ -479,6 +612,37 @@ export default function LibraryPage() {
         }
     };
 
+    const handleStartAnalysis = async () => {
+        if (!actionTarget || startingAnalysis) return;
+        let bvid: string | null = null;
+        if (actionTarget.source_type === 'bilibili') {
+            try { bvid = (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid ?? actionTarget.source_id; }
+            catch { bvid = actionTarget.source_id; }
+        }
+        setStartingAnalysis(true);
+        try {
+            const { resp } = await apiFetch('/api/v1/WebenSourceAnalyzeRoute', {
+                method: 'POST',
+                body: JSON.stringify({
+                    material_id: actionTarget.id,
+                    url: bvid ? `https://www.bilibili.com/video/${bvid}` : '',
+                    title: actionTarget.title || actionTarget.source_id,
+                    source_type: actionTarget.source_type === 'bilibili' ? 'bilibili_video' : 'local_file',
+                    ...(bvid ? { bvid } : {}),
+                    ...(actionTarget.duration ? { duration_sec: actionTarget.duration } : {}),
+                    quality_score: 0.8,
+                }),
+            });
+            if (resp.ok) {
+                await fetchWebenSources(actionTarget.id);
+            } else {
+                reportHttpError('启动知识提取失败', resp);
+            }
+        } finally {
+            setStartingAnalysis(false);
+        }
+    };
+
     // ── Filtering ───────────────────────────────────────────────────────────
 
     const filtered = (videos ?? []).filter(v => {
@@ -548,7 +712,7 @@ export default function LibraryPage() {
 
                         {/* Tabs */}
                         <div className="flex border-b border-gray-200 px-5">
-                            {(['workflow', 'info'] as const).map(tab => (
+                            {(['workflow', 'info', 'weben'] as const).map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActionTab(tab)}
@@ -557,7 +721,7 @@ export default function LibraryPage() {
                                         : 'border-transparent text-gray-500 hover:text-gray-700'
                                     }`}
                                 >
-                                    {tab === 'workflow' ? '一键流程' : '信息拉取'}
+                                    {tab === 'workflow' ? '一键流程' : tab === 'info' ? '信息拉取' : '知识提取'}
                                 </button>
                             ))}
                         </div>
@@ -732,6 +896,15 @@ export default function LibraryPage() {
 
                             {actionTab === 'info' && (
                                 <InfoTab actionTarget={actionTarget} onOpenModal={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })} onOpenSubtitleModal={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })} />
+                            )}
+
+                            {actionTab === 'weben' && (
+                                <WebenTab
+                                    sources={webenSources}
+                                    loading={webenSourcesLoading && webenSources.length === 0}
+                                    starting={startingAnalysis}
+                                    onStartAnalysis={handleStartAnalysis}
+                                />
                             )}
                         </div>
                     </div>
@@ -1018,6 +1191,14 @@ export default function LibraryPage() {
                                                     onClick={() => setAiConclusionTarget({ bvid: video.source_id, pageIndex: bilibiliPage - 1 })}
                                                 />
                                             )}
+                                            <button
+                                                onClick={() => { handleOpenAction(video); setActionTab('weben'); }}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors whitespace-nowrap"
+                                                title="知识提取"
+                                            >
+                                                <Brain className="w-3.5 h-3.5" />
+                                                知识
+                                            </button>
                                             <button
                                                 onClick={() => handleOpenAction(video)}
                                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"

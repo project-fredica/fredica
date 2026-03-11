@@ -4,7 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.worker.TaskPauseResumeService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -24,7 +24,7 @@ object TaskPauseRoute : FredicaApi.Route {
         val p = param.loadJsonModel<TaskPauseParam>().getOrThrow()
         val signalled = TaskPauseResumeService.pause(p.taskId)
         if (signalled) {
-            TaskService.repo.updatePaused(p.taskId, true)
+            TaskStatusService.updatePaused(p.taskId, true)
         }
         return buildValidJson { kv("signalled", signalled) }
     }

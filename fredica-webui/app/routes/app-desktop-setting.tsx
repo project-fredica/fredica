@@ -1,55 +1,11 @@
 import { useEffect, useState } from "react";
 import type React from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, RefreshCw, Save, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, RefreshCw, Save, CheckCircle, XCircle, Loader } from "lucide-react";
 import type { Route } from "./+types/app-desktop-setting";
-import { getBridge, openExternalUrl } from "../util/bridge";
-
-function PasswordInput({ value, placeholder, onChange, style }: {
-    value: string;
-    placeholder?: string;
-    onChange: (v: string) => void;
-    style?: React.CSSProperties;
-}) {
-    const [show, setShow] = useState(false);
-    return (
-        <div style={{ position: "relative", flex: 1 }}>
-            <style>{`.pw-input::placeholder { color: #d1d5db; }`}</style>
-            <input
-                className="pw-input"
-                type={show ? "text" : "password"}
-                value={value}
-                placeholder={placeholder}
-                onChange={(e) => onChange(e.target.value)}
-                style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    paddingRight: "32px",
-                    ...style,
-                }}
-            />
-            <button
-                type="button"
-                onClick={() => setShow(v => !v)}
-                style={{
-                    position: "absolute",
-                    right: "8px",
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                    color: "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                }}
-            >
-                {show ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-        </div>
-    );
-}
+import { print_error } from "~/util/error_handler";
+import { callBridge, BridgeUnavailableError, openExternalUrl } from "../util/bridge";
+import { PasswordInput } from "~/components/ui/PasswordInput";
 
 export function meta({ }: Route.MetaArgs) {
     return [
@@ -233,40 +189,185 @@ export default function Component({ }: Route.ComponentProps) {
     const [ffmpegProbe, setFfmpegProbe] = useState<any>(null);
     const [detecting, setDetecting] = useState(false);
 
-    useEffect(() => {
-        const bridge = getBridge();
-        if (!bridge) {
-            setLoadError("kmpJsBridge 不可用，请在桌面端环境中使用。当前显示默认值。");
-            return;
-        }
+    // B站账号有效性检测状态
+    type CredStatus = "idle" | "checking" | "valid" | "invalid" | "unconfigured" | "error";
+    const [credStatus, setCredStatus] = useState<CredStatus>("idle");
+    const [credMessage, setCredMessage] = useState<string>("");
+
+    // B站账号刷新状态
+    type RefreshStatus = "idle" | "revealing" | "refreshing" | "refreshed" | "no_refresh" | "error";
+    const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>("idle");
+    const [refreshMessage, setRefreshMessage] = useState<string>("");
+    // 强制展开所有 B站账号密码字段（刷新前让用户看到当前值）
+    const [showBilibiliFields, setShowBilibiliFields] = useState<Record<string, boolean>>({});
+
+    /** 通过 kmpJsBridge 检测当前表单中的 B 站账号登录态是否有效 */
+    const handleCheckCredential = async () => {
+        // 重置刷新状态，避免两个操作的结果同时显示
+        setRefreshStatus("idle");
+        setRefreshMessage("");
+        setCredStatus("checking");
+        setCredMessage("");
+
+        // 传入当前表单中的凭据值（未保存的编辑也能被检测）
+        const credParams = JSON.stringify({
+            sessdata: values["bilibili_sessdata"] || "",
+            bili_jct: values["bilibili_bili_jct"] || "",
+            buvid3: values["bilibili_buvid3"] || "",
+            buvid4: values["bilibili_buvid4"] || "",
+            dedeuserid: values["bilibili_dedeuserid"] || "",
+            ac_time_value: values["bilibili_ac_time_value"] || "",
+            proxy: values["bilibili_proxy"] || "",
+        });
+
         try {
-            bridge.callNative("get_app_config", "{}", (result: string) => {
-                try {
-                    const config = JSON.parse(result) as Record<string, string | number | boolean>;
-                    setValues(prev => ({ ...prev, ...config }));
-                    setLoadError(null);
-                } catch (e) {
-                    setLoadError("解析配置失败：" + e + "  ---  result is : " + result);
-                }
-            });
+            console.debug("[app-desktop-setting] handleCheckCredential: 调用 check_bilibili_credential");
+            const raw = await callBridge("check_bilibili_credential", credParams);
+            console.debug("[app-desktop-setting] check_bilibili_credential raw:", raw);
+            const r = JSON.parse(raw) as { configured: boolean; valid: boolean; message: string };
+            console.debug("[app-desktop-setting] check_bilibili_credential 解析结果:", r);
+            if (!r.configured) {
+                setCredStatus("unconfigured");
+                setCredMessage("未配置账号");
+            } else if (r.valid) {
+                setCredStatus("valid");
+                setCredMessage("账号有效");
+            } else {
+                setCredStatus("invalid");
+                setCredMessage(r.message || "账号已失效");
+            }
         } catch (e) {
-            setLoadError("调用 kmpJsBridge 失败：" + e);
+            const errMsg = e instanceof BridgeUnavailableError ? "此功能仅在桌面端 App 中可用" : "检测失败，请确认服务已启动";
+            setCredStatus("error");
+            setCredMessage(errMsg);
+            print_error({ reason: errMsg, err: e });
         }
+    };
+
+    /**
+     * 通过 kmpJsBridge 尝试刷新 B 站账号凭据。
+     *
+     * 流程：
+     *   1. 展开所有密码字段（用户看到当前值，感知"即将被更新"）
+     *   2. 等待 700ms 间隔（给用户视觉感知时间）
+     *   3. 调用 bridge try_refresh_bilibili_credential（传入当前表单值）
+     *   4. 刷新成功 → 将新凭据值更新到表单（用户仍需点"保存"才持久化）
+     *      无需刷新 → 提示有效；失败 → 通过 print_error 弹 Toast 通知
+     *
+     * 注意：此功能仅在内嵌 WebView（kmpJsBridge 可用）环境下工作。
+     */
+    const handleTryRefresh = async () => {
+        // 重置检测状态，避免两个操作的结果同时显示
+        setCredStatus("idle");
+        setCredMessage("");
+
+        // Step 1: 先展开所有密码字段，让用户看到当前凭据值
+        setShowBilibiliFields({
+            bilibili_sessdata: true,
+            bilibili_bili_jct: true,
+            bilibili_buvid3: true,
+            bilibili_buvid4: true,
+            bilibili_dedeuserid: true,
+            bilibili_ac_time_value: true,
+        });
+        setRefreshStatus("revealing");
+        setRefreshMessage("");
+
+        // Step 2: 等待 700ms，给用户视觉感知"字段已展开，即将更新"的时间
+        await new Promise<void>(resolve => setTimeout(resolve, 700));
+
+        setRefreshStatus("refreshing");
+        console.debug("[app-desktop-setting] handleTryRefresh: 调用 try_refresh_bilibili_credential");
+
+        // Step 3: 传入当前表单值，让 Kotlin 侧直接使用（不再回退读 AppConfig）
+        const credParams = JSON.stringify({
+            sessdata: values["bilibili_sessdata"] || "",
+            bili_jct: values["bilibili_bili_jct"] || "",
+            buvid3: values["bilibili_buvid3"] || "",
+            buvid4: values["bilibili_buvid4"] || "",
+            dedeuserid: values["bilibili_dedeuserid"] || "",
+            ac_time_value: values["bilibili_ac_time_value"] || "",
+            proxy: values["bilibili_proxy"] || "",
+        });
+
         try {
-            bridge.callNative("get_device_info", "{}", (result: string) => {
-                try {
-                    const info = JSON.parse(result);
-                    if (info.device_info_json) {
-                        setDeviceInfo(typeof info.device_info_json === "string"
-                            ? JSON.parse(info.device_info_json) : info.device_info_json);
-                    }
-                    if (info.ffmpeg_probe_json) {
-                        setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
-                            ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
-                    }
-                } catch (_) { /* device info optional */ }
-            });
-        } catch (_) { /* device info optional */ }
+            const raw = await callBridge("try_refresh_bilibili_credential", credParams);
+            // bridge 回调：注意 kmpJsBridge 会将字符串包裹在 JS 单引号字面量中，
+            // 若 raw 中含有未转义的单引号（如异常描述），会导致 JSON.parse 失败。
+            // MyJsMessageHandler.kt 中已统一转义，此处应可正常解析。
+            console.debug("[app-desktop-setting] try_refresh_bilibili_credential raw:", raw);
+            const r = JSON.parse(raw) as {
+                success: boolean;
+                refreshed: boolean;
+                message: string;
+                sessdata?: string;
+                bili_jct?: string;
+                buvid3?: string;
+                buvid4?: string;
+                dedeuserid?: string;
+                ac_time_value?: string;
+                error?: string;
+            };
+            console.debug("[app-desktop-setting] try_refresh_bilibili_credential 解析结果:", r);
+
+            if (r.success && r.refreshed) {
+                // Step 4: 将新凭据值写入表单（此时字段仍展开，用户可直接看到变化）
+                if (r.sessdata !== undefined) handleChange("bilibili_sessdata", r.sessdata);
+                if (r.bili_jct !== undefined) handleChange("bilibili_bili_jct", r.bili_jct);
+                if (r.buvid3 !== undefined) handleChange("bilibili_buvid3", r.buvid3);
+                if (r.buvid4 !== undefined) handleChange("bilibili_buvid4", r.buvid4 ?? "");
+                if (r.dedeuserid !== undefined) handleChange("bilibili_dedeuserid", r.dedeuserid);
+                if (r.ac_time_value !== undefined) handleChange("bilibili_ac_time_value", r.ac_time_value ?? "");
+                setRefreshStatus("refreshed");
+                setRefreshMessage("刷新成功，请检查后点保存");
+                console.debug("[app-desktop-setting] handleTryRefresh: 凭据已更新到表单");
+            } else if (r.success && !r.refreshed) {
+                // check_refresh() 返回 false：账号有效，bilibili-api 判断无需刷新
+                setRefreshStatus("no_refresh");
+                setRefreshMessage(r.message || "账号有效，无需刷新");
+                console.debug("[app-desktop-setting] handleTryRefresh: 无需刷新");
+            } else {
+                // Python 返回 success=false（含"未配置"/"账号未登录"/"刷新失败"等情况）
+                const errMsg = r.message || "刷新失败";
+                setRefreshStatus("error");
+                setRefreshMessage(errMsg);
+                print_error({ reason: `B 站凭据刷新失败：${errMsg}`, variables: { raw, r } });
+            }
+        } catch (e) {
+            const errMsg = e instanceof BridgeUnavailableError
+                ? "此功能仅在桌面端 App 中可用"
+                : "解析 Bridge 响应失败";
+            setRefreshStatus("error");
+            setRefreshMessage(errMsg);
+            print_error({ reason: errMsg, err: e });
+        }
+    };
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const result = await callBridge("get_app_config");
+                const config = JSON.parse(result) as Record<string, string | number | boolean>;
+                setValues(prev => ({ ...prev, ...config }));
+                setLoadError(null);
+            } catch (e) {
+                setLoadError(e instanceof BridgeUnavailableError
+                    ? "kmpJsBridge 不可用，请在桌面端环境中使用。当前显示默认值。"
+                    : "解析配置失败：" + e);
+            }
+            try {
+                const result = await callBridge("get_device_info");
+                const info = JSON.parse(result);
+                if (info.device_info_json) {
+                    setDeviceInfo(typeof info.device_info_json === "string"
+                        ? JSON.parse(info.device_info_json) : info.device_info_json);
+                }
+                if (info.ffmpeg_probe_json) {
+                    setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
+                        ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+                }
+            } catch (_) { /* device info optional */ }
+        })();
     }, []);
 
     const handleChange = (key: string, value: string | number | boolean) => {
@@ -274,52 +375,37 @@ export default function Component({ }: Route.ComponentProps) {
         setSaved(false);
     };
 
-    const handleSave = () => {
-        const bridge = getBridge();
-        if (!bridge) {
-            alert("kmpJsBridge 不可用，无法保存设置。");
-            return;
-        }
+    const handleSave = async () => {
         try {
-            bridge.callNative("save_app_config", JSON.stringify(values), (result: string) => {
-                try {
-                    const updated = JSON.parse(result) as Record<string, string | number | boolean>;
-                    setValues(prev => ({ ...prev, ...updated }));
-                    setSaved(true);
-                    setTimeout(() => setSaved(false), 2000);
-                } catch (e) {
-                    console.error("保存设置后解析响应失败：", e);
-                }
-            });
+            const result = await callBridge("save_app_config", JSON.stringify(values));
+            const updated = JSON.parse(result) as Record<string, string | number | boolean>;
+            setValues(prev => ({ ...prev, ...updated }));
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
         } catch (e) {
-            console.error("调用 kmpJsBridge 保存配置失败：", e);
+            console.error("保存设置失败：", e);
             alert("保存失败：" + e);
         }
     };
 
-    const handleDetect = () => {
-        const bridge = getBridge();
-        if (!bridge) return;
+    const handleDetect = async () => {
         setDetecting(true);
         try {
-            bridge.callNative("run_ffmpeg_detect", "{}", (result: string) => {
-                setDetecting(false);
-                try {
-                    const info = JSON.parse(result);
-                    if (info.error) { console.error("device detect error:", info.error); return; }
-                    if (info.device_info_json) {
-                        setDeviceInfo(typeof info.device_info_json === "string"
-                            ? JSON.parse(info.device_info_json) : info.device_info_json);
-                    }
-                    if (info.ffmpeg_probe_json) {
-                        setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
-                            ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
-                    }
-                } catch (_) { /* ignore parse errors */ }
-            });
+            const result = await callBridge("run_ffmpeg_detect");
+            const info = JSON.parse(result);
+            if (info.error) { console.error("device detect error:", info.error); return; }
+            if (info.device_info_json) {
+                setDeviceInfo(typeof info.device_info_json === "string"
+                    ? JSON.parse(info.device_info_json) : info.device_info_json);
+            }
+            if (info.ffmpeg_probe_json) {
+                setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
+                    ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+            }
         } catch (e) {
-            setDetecting(false);
             console.error("detect failed:", e);
+        } finally {
+            setDetecting(false);
         }
     };
 
@@ -689,13 +775,6 @@ export default function Component({ }: Route.ComponentProps) {
                             <h2 style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                                 B站账号
                             </h2>
-                            <button
-                                type="button"
-                                onClick={() => openExternalUrl("https://nemo2011.github.io/bilibili-api/#/get-credential")}
-                                style={{ fontSize: "12px", color: "#6366f1", background: "none", border: "none", cursor: "pointer", padding: "2px 0", textDecoration: "underline" }}
-                            >
-                                查看教程 ↗
-                            </button>
                         </div>
                         <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#9ca3af" }}>
                             留空则匿名请求。仅当出现"账号未登录"错误时才需要配置。从浏览器 Cookie 中获取对应字段值。
@@ -708,8 +787,8 @@ export default function Component({ }: Route.ComponentProps) {
                         { key: "bilibili_buvid4", label: "buvid4", placeholder: "浏览器 Cookie 中的 buvid4（可选）" },
                         { key: "bilibili_dedeuserid", label: "DedeUserID", placeholder: "浏览器 Cookie 中的 DedeUserID" },
                         { key: "bilibili_ac_time_value", label: "ac_time_value", placeholder: "浏览器 Cookie 中的 ac_time_value" },
-                        { key: "bilibili_proxy", label: "B站专用代理", placeholder: "http://127.0.0.1:7890（可选，留空则不使用）" },
-                    ] as const).map(({ key, label, placeholder }, idx, arr) => (
+                        { key: "bilibili_proxy", label: "bilibili-api 代理", placeholder: "http://127.0.0.1:7890（可选，留空则不使用）", plainText: true },
+                    ] as const).map(({ key, label, placeholder, ...rest }, idx, arr) => (
                         <div key={key} style={{
                             display: "flex",
                             alignItems: "center",
@@ -721,21 +800,129 @@ export default function Component({ }: Route.ComponentProps) {
                             <p style={{ margin: 0, fontSize: "14px", fontWeight: 500, color: "#374151", minWidth: "140px" }}>
                                 {label}
                             </p>
-                            <PasswordInput
-                                value={(values[key] as string) ?? ""}
-                                placeholder={placeholder}
-                                onChange={(v) => handleChange(key, v)}
-                                style={{
-                                    padding: "6px 10px",
-                                    fontSize: "13px",
-                                    color: "#374151",
-                                    border: "1px solid #d1d5db",
-                                    borderRadius: "8px",
-                                    fontFamily: "monospace",
-                                }}
-                            />
+                            {"plainText" in rest && rest.plainText ? (
+                                <input
+                                    type="text"
+                                    value={(values[key] as string) ?? ""}
+                                    placeholder={placeholder}
+                                    onChange={(e) => handleChange(key, e.target.value)}
+                                    style={{
+                                        flex: 1,
+                                        padding: "6px 10px",
+                                        fontSize: "13px",
+                                        color: "#374151",
+                                        border: "1px solid #d1d5db",
+                                        borderRadius: "8px",
+                                        fontFamily: "monospace",
+                                        boxSizing: "border-box",
+                                    }}
+                                />
+                            ) : (
+                                <PasswordInput
+                                    value={(values[key] as string) ?? ""}
+                                    placeholder={placeholder}
+                                    onChange={(v) => handleChange(key, v)}
+                                    show={showBilibiliFields[key] ?? false}
+                                    onShowChange={(v) => setShowBilibiliFields(prev => ({ ...prev, [key]: v }))}
+                                    style={{
+                                        padding: "6px 10px",
+                                        fontSize: "13px",
+                                        color: "#374151",
+                                        border: "1px solid #d1d5db",
+                                        borderRadius: "8px",
+                                        fontFamily: "monospace",
+                                    }}
+                                />
+                            )}
                         </div>
                     ))}
+                    {/* 检测按钮 + 刷新按钮 + 查看教程 + 状态（表单下方） */}
+                    <div style={{ padding: "12px 20px", borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        <button
+                            type="button"
+                            onClick={handleCheckCredential}
+                            disabled={credStatus === "checking"}
+                            style={{
+                                display: "flex", alignItems: "center", gap: "6px",
+                                padding: "7px 14px",
+                                fontSize: "13px", fontWeight: 500,
+                                color: "#6366f1",
+                                background: "#eef2ff",
+                                border: "1px solid #c7d2fe",
+                                borderRadius: "8px",
+                                cursor: credStatus === "checking" ? "default" : "pointer",
+                                opacity: credStatus === "checking" ? 0.6 : 1,
+                                transition: "all 0.15s ease",
+                            }}
+                        >
+                            {credStatus === "checking"
+                                ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }} />检测中…</>
+                                : "检测账号有效性"
+                            }
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleTryRefresh}
+                            disabled={refreshStatus === "revealing" || refreshStatus === "refreshing"}
+                            style={{
+                                display: "flex", alignItems: "center", gap: "6px",
+                                padding: "7px 14px",
+                                fontSize: "13px", fontWeight: 500,
+                                color: "#059669",
+                                background: "#ecfdf5",
+                                border: "1px solid #6ee7b7",
+                                borderRadius: "8px",
+                                cursor: (refreshStatus === "revealing" || refreshStatus === "refreshing") ? "default" : "pointer",
+                                opacity: (refreshStatus === "revealing" || refreshStatus === "refreshing") ? 0.6 : 1,
+                                transition: "all 0.15s ease",
+                            }}
+                        >
+                            {refreshStatus === "revealing"
+                                ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }} />准备中…</>
+                                : refreshStatus === "refreshing"
+                                    ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }} />刷新中…</>
+                                    : <><RefreshCw size={13} />尝试刷新</>
+                            }
+                        </button>
+                        {/* 检测结果 */}
+                        {credStatus === "valid" && (
+                            <span style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", color: "#16a34a" }}>
+                                <CheckCircle size={14} />账号有效
+                            </span>
+                        )}
+                        {credStatus === "invalid" && (
+                            <span style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", color: "#dc2626" }}>
+                                <XCircle size={14} />{credMessage}
+                            </span>
+                        )}
+                        {credStatus === "unconfigured" && (
+                            <span style={{ fontSize: "13px", color: "#9ca3af" }}>未配置账号</span>
+                        )}
+                        {credStatus === "error" && (
+                            <span style={{ fontSize: "13px", color: "#b45309" }}>{credMessage}</span>
+                        )}
+                        {/* 刷新结果 */}
+                        {refreshStatus === "refreshed" && (
+                            <span style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", color: "#16a34a" }}>
+                                <CheckCircle size={14} />{refreshMessage}
+                            </span>
+                        )}
+                        {refreshStatus === "no_refresh" && (
+                            <span style={{ fontSize: "13px", color: "#6b7280" }}>{refreshMessage}</span>
+                        )}
+                        {refreshStatus === "error" && (
+                            <span style={{ fontSize: "13px", color: "#dc2626" }}>{refreshMessage}</span>
+                        )}
+                        {/* 分隔，查看教程链接靠右 */}
+                        <div style={{ flex: 1 }} />
+                        <button
+                            type="button"
+                            onClick={() => openExternalUrl("https://nemo2011.github.io/bilibili-api/#/get-credential")}
+                            style={{ fontSize: "12px", color: "#6366f1", background: "none", border: "none", cursor: "pointer", padding: "2px 0", textDecoration: "underline", whiteSpace: "nowrap" }}
+                        >
+                            查看教程 ↗
+                        </button>
+                    </div>
                 </div>
 
                 {/* LLM 模型配置入口 */}

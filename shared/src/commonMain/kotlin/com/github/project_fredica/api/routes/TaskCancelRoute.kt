@@ -4,7 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.worker.TaskCancelService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -31,12 +31,12 @@ object TaskCancelRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<TaskCancelParam>().getOrThrow()
 
-        // 查找目标任务，获取 workflowRunId 以便级联取消
-        val targetTask = TaskService.repo.findById(p.taskId)
+        // 查找目标任务，获取 workflowRunId 以便级联取消；首次访问时对父 WorkflowRun 进行对账
+        val targetTask = TaskStatusService.findById(p.taskId)
             ?: return buildValidJson { kv("signalled", false); kv("cancelled_count", 0) }
 
-        // 收集同一 WorkflowRun 内所有活跃任务（含目标任务本身）
-        val siblings = TaskService.repo.listByWorkflowRun(targetTask.workflowRunId)
+        // 收集同一 WorkflowRun 内所有活跃任务（含目标任务本身）；首次访问时对该 WorkflowRun 进行对账
+        val siblings = TaskStatusService.listByWorkflowRun(targetTask.workflowRunId)
             .filter { it.status in activeStatuses }
 
         var signalled = false
@@ -46,7 +46,7 @@ object TaskCancelRoute : FredicaApi.Route {
             val sig = TaskCancelService.cancel(task.id)
             if (task.id == p.taskId) signalled = sig
             if (!sig && (task.status == "pending" || task.status == "claimed")) {
-                TaskService.repo.updateStatus(task.id, "cancelled", error = "用户已取消", errorType = "CANCELLED")
+                TaskStatusService.updateStatus(task.id, "cancelled", error = "用户已取消", errorType = "CANCELLED")
                 cancelledCount++
             } else if (sig) {
                 cancelledCount++

@@ -27,6 +27,7 @@ package com.github.project_fredica.worker
 
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
+import com.github.project_fredica.db.RestartTaskLogService
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
@@ -39,6 +40,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.UUID
 
 object WorkerEngine {
     private val logger = createLogger()
@@ -65,12 +67,18 @@ object WorkerEngine {
     /**
      * 启动 Worker 引擎。在服务器初始化完成后调用一次。
      *
+     * 此函数为挂起函数（suspend），在返回前会先完成所有启动恢复操作
+     * （resetStaleTasks / failOrphanedTasks / reconcileNonTerminal），
+     * 确保调用方在创建新任务前，上次会话的僵尸任务已全部清理完毕。
+     * 这样可以避免测试中的竞态：若任务在恢复完成前已插入，resetStaleTasks
+     * 会将其误取消。
+     *
      * @param maxWorkers  最大并行任务数（受 Semaphore 限制）
      * @param scope       协程 scope（通常使用服务器生命周期的 IO scope）
      * @param executors   Executor 列表；JVM 平台由 FredicaApi.jvm.kt 传入；
      *                    测试时可传入 FakeExecutor 覆盖
      */
-    fun start(
+    suspend fun start(
         maxWorkers: Int,
         scope: CoroutineScope,
         executors: List<TaskExecutor> = commonExecutors,
@@ -78,6 +86,9 @@ object WorkerEngine {
         // 注册 Executor（允许测试用 fake 覆盖 default）
         executors.forEach { registry[it.taskType] = it }
         logger.info("WorkerEngine 启动 — maxWorkers=$maxWorkers, executors=${registry.keys}")
+
+        // 启动恢复：同步完成，确保调用方（测试或生产代码）在此后插入的任务不被误取消
+        runStartupRecovery()
 
         val sem = Semaphore(maxWorkers) // 信号量：同时最多 maxWorkers 个任务在执行
 
@@ -115,6 +126,68 @@ object WorkerEngine {
                 }
                 delay(POLL_INTERVAL_MS)
             }
+        }
+    }
+
+    // ── runStartupRecovery：启动恢复（同步执行，start() 返回前完成）────────────
+
+    /**
+     * 执行三道启动恢复保护，所有步骤完成后 start() 才返回。
+     *
+     * 同步执行的目的：确保调用方在创建新任务之前，上次会话的僵尸任务已全部清理完毕。
+     * 若恢复在后台异步执行，调用方插入的新 pending 任务可能被 resetStaleTasks() 误取消。
+     */
+    private suspend fun runStartupRecovery() {
+        // 1. 快照非终态任务（在 resetStaleTasks() 修改状态之前），用于记录重启日志
+        val nonTerminalSnapshot = try {
+            TaskService.repo.snapshotNonTerminalTasks()
+        } catch (e: Throwable) {
+            logger.warn("WorkerEngine 启动恢复: 快照非终态任务失败"); emptyList()
+        }
+
+        // 2. 重置僵尸任务（running/claimed/pending → cancelled）
+        try {
+            val affectedWfIds = TaskService.repo.resetStaleTasks()
+            if (affectedWfIds.isNotEmpty()) {
+                affectedWfIds.forEach {
+                    try { WorkflowRunService.repo.recalculate(it) } catch (_: Throwable) {}
+                }
+                logger.info("WorkerEngine 启动恢复: 已重置 ${affectedWfIds.size} 个工作流的遗留僵尸任务")
+            }
+        } catch (e: Throwable) {
+            logger.error("WorkerEngine 启动恢复失败", e)
+        }
+
+        // 3. 写重启日志（仅当确实有非终态任务被记录）
+        if (nonTerminalSnapshot.isNotEmpty()) {
+            val sessionId = UUID.randomUUID().toString()
+            val nowSec = System.currentTimeMillis() / 1000L
+            try {
+                RestartTaskLogService.repo.recordRestartSession(sessionId, nonTerminalSnapshot, nowSec)
+                logger.info("WorkerEngine 启动恢复: 记录中断任务 ${nonTerminalSnapshot.size} 条，session=$sessionId")
+            } catch (e: Throwable) {
+                logger.warn("WorkerEngine 启动恢复: 写重启日志失败（不影响正常启动）")
+            }
+        }
+
+        // 4. 孤立任务对账：标记 workflow_run 已被删除的任务为 failed
+        try {
+            val orphaned = TaskService.repo.failOrphanedTasks()
+            if (orphaned.isNotEmpty()) {
+                logger.info("WorkerEngine 启动恢复: 清理孤立任务 ${orphaned.size} 个")
+            }
+        } catch (e: Throwable) {
+            logger.error("WorkerEngine 孤立任务对账失败", e)
+        }
+
+        // 5. WorkflowRun 批量对账：修正因 recalculate() 异常而落后的汇总状态
+        try {
+            val fixed = WorkflowRunService.repo.reconcileNonTerminal()
+            if (fixed > 0) {
+                logger.info("WorkerEngine 启动恢复: 修正落后状态的 WorkflowRun $fixed 个")
+            }
+        } catch (e: Throwable) {
+            logger.error("WorkerEngine WorkflowRun 对账失败", e)
         }
     }
 

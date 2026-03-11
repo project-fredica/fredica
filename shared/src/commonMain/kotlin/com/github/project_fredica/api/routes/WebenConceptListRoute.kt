@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenConceptService
@@ -11,10 +12,16 @@ import kotlinx.serialization.encodeToString
 /**
  * GET /api/v1/WebenConceptListRoute[?concept_type=&limit=50&offset=0]
  *
- * 概念瀑布流分页。按掌握度升序（掌握度低的优先展示）。
- * concept_type 为空时返回全部类型。
+ * 概念瀑布流分页。按掌握度升序（掌握度低的优先展示），便于用户优先复习薄弱概念。
+ *
+ * 参数说明：
+ *   concept_type — 过滤概念类型（如"术语"/"算法"/"定理"），不传则返回全部
+ *   limit        — 每页条数，范围 1-200，默认 50
+ *   offset       — 分页偏移，默认 0
  */
 object WebenConceptListRoute : FredicaApi.Route {
+    private val logger = createLogger { "WebenConceptListRoute" }
+
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "概念瀑布流分页（可按 concept_type 过滤，按掌握度升序）"
 
@@ -24,10 +31,19 @@ object WebenConceptListRoute : FredicaApi.Route {
         val limit       = query["limit"]?.firstOrNull()?.toIntOrNull()?.coerceIn(1, 200) ?: 50
         val offset      = query["offset"]?.firstOrNull()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
 
+        logger.debug(
+            "WebenConceptListRoute: 查询概念列表 conceptType=$conceptType limit=$limit offset=$offset"
+        )
+
         val concepts = WebenConceptService.repo.listAll(
             conceptType = conceptType,
             limit       = limit,
             offset      = offset,
+        )
+
+        logger.debug(
+            "WebenConceptListRoute: 返回 ${concepts.size} 条概念" +
+            " conceptType=$conceptType limit=$limit offset=$offset"
         )
         return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(concepts))
     }

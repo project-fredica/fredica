@@ -43,8 +43,12 @@ abstract class MyJsMessageHandler : IJsMessageHandler {
         CoroutineScope(Dispatchers.IO).launch {
             handle2(message, navigator) {
                 callback(
-                    // Fixed kmpJsBridge BUG
-                    it.replace("\\", "\\\\")
+                    // kmpJsBridge 将回调字符串包裹在 JS 单引号字面量中：
+                    //   window.kmpJsBridge.onCallback(id, '<payload>')
+                    // 因此 payload 内的反斜杠和单引号必须提前转义，否则会破坏 JS 语法，
+                    // 导致前端 JSON.parse 收到截断或错误的字符串。
+                    // 顺序：先转义反斜杠（避免后续步骤二次转义），再转义单引号。
+                    it.replace("\\", "\\\\").replace("'", "\\'")
                 )
             }
         }

@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Plus, Search, History, Box, MessageSquare,
   Compass, ChevronDown, ChevronRight, FileText,
@@ -9,8 +9,11 @@ import {
   Database,
   Cpu,
   Wrench,
+  BrainCircuit,
+  AlertCircle,
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
+import { useAppFetch } from '~/util/app_fetch';
 
 interface SidebarItemProps {
   uid: string;
@@ -52,6 +55,29 @@ const SideBarItem: React.FC<SidebarItemProps> = ({ uid, title, Icon, routeTo }) 
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
+  const location = useLocation();
+  const [pendingRestartCount, setPendingRestartCount] = useState(0);
+  const { apiFetch } = useAppFetch();
+
+  // Poll restart log pending_review_count
+  useEffect(() => {
+    let active = true;
+    const fetchCount = async () => {
+      try {
+        const { data } = await apiFetch(
+          '/api/v1/RestartTaskLogListRoute?disposition=pending_review',
+          { method: 'GET' },
+          { silent: true },
+        );
+        if (active && data && typeof (data as any).pending_review_count === 'number') {
+          setPendingRestartCount((data as any).pending_review_count);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchCount();
+    const id = setInterval(fetchCount, 30_000);
+    return () => { active = false; clearInterval(id); };
+  }, [apiFetch]);
 
 
   const sectionTitleClass = "flex flex-row items-center text-sm px-4 py-2 font-semibold text-gray-400 uppercase tracking-wider"
@@ -81,10 +107,25 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           <div className='striky'>
             <SideBarItem uid='add-resource' Icon={Plus} title='添加素材' routeTo='/add-resource' />
             <SideBarItem uid='library' Icon={Database} title='素材库' routeTo='/material-library' />
-            <SideBarItem uid='tasks' Icon={Cpu} title='任务中心' routeTo='/tasks' />
+            <SideBarItem uid='tasks' Icon={Cpu} title='任务状态' routeTo='/tasks/status' />
+            {/* 重启中断日志，有待处置条目时显示红色数量徽章 */}
+            <div className='cursor-pointer relative'>
+              <NavLink to='/tasks/restart'>
+                <div id='sidebar-item-restart-log' className={`flex flex-row items-center text-sm px-4 py-2 font-medium rounded-lg ${location.pathname === '/tasks/restart' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+                  <AlertCircle className="w-4 h-4 mr-3" />
+                  重启中断
+                  {pendingRestartCount > 0 && (
+                    <span className="ml-auto flex-shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                      {pendingRestartCount}
+                    </span>
+                  )}
+                </div>
+              </NavLink>
+            </div>
+            <SideBarItem uid='weben' Icon={BrainCircuit} title='知识网络' routeTo='/weben' />
             <SideBarItem uid='tools' Icon={Wrench} title='小工具' routeTo='/tools' />
-            <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' />
-            <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' />
+            {/* <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' /> */}
+            {/* <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' /> */}
             {/* <SideBarItem uid='source-search' Icon={Search} title='搜索' />
             <SideBarItem uid='source-history' Icon={History} title='历史' routeTo='/source-history' /> */}
           </div>
@@ -150,10 +191,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           <div >
             <h3 className={sectionTitleClass}>帮助与工具</h3>
             {/** routeTo='/crud/model-config' */}
-            <SideBarItem uid='model-config' Icon={Box} title='模型设置' />
+            {/* <SideBarItem uid='model-config' Icon={Box} title='模型设置' />
             <SideBarItem uid='feedback' Icon={HelpCircle} title='反馈意见' />
             <SideBarItem uid='quick-guide' Icon={BookOpen} title='快速指南' />
-            <SideBarItem uid='home' Icon={Home} title='主页' routeTo='/' />
+            <SideBarItem uid='home' Icon={Home} title='主页' routeTo='/' /> */}
           </div>
         </div>
 

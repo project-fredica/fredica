@@ -100,11 +100,12 @@ class WorkflowRunDb(private val db: Database) : WorkflowRunRepo {
      */
     override suspend fun recalculate(workflowRunId: String): Unit = withContext(Dispatchers.IO) {
         db.useConnection { conn ->
-            var total      = 0
-            var done       = 0
-            var hasFailed  = false
-            var hasRunning = false
-            var hasPending = false
+            var total        = 0
+            var done         = 0
+            var hasFailed    = false
+            var hasRunning   = false
+            var hasPending   = false
+            var hasCancelled = false
 
             conn.prepareStatement(
                 "SELECT status, COUNT(*) as cnt FROM task WHERE workflow_run_id=? GROUP BY status"
@@ -116,21 +117,29 @@ class WorkflowRunDb(private val db: Database) : WorkflowRunRepo {
                         val cnt = rs.getInt("cnt")
                         total += cnt
                         when (s) {
-                            "completed"           -> done += cnt
-                            "failed"              -> hasFailed  = true
-                            "running", "claimed"  -> hasRunning = true
-                            "pending"             -> hasPending = true
-                            // "cancelled" 不影响状态判定
+                            "completed"           -> done       += cnt
+                            "failed"              -> hasFailed   = true
+                            "running", "claimed"  -> hasRunning  = true
+                            "pending"             -> hasPending  = true
+                            "cancelled"           -> hasCancelled = true
+                            // cancelled 纳入 total 计数，但不计入 done，
+                            // 且需要在状态优先级中正确处理（见下方 when 表达式）
                         }
                     }
                 }
             }
 
+            // 状态优先级（高 → 低）：
+            //   failed    > completed（全完成）> running/pending（进行中）> cancelled（全取消）> pending（空）
+            //
+            // 修复说明：原 else 分支会将"所有任务均已取消"的情况错误地回退为 "pending"，
+            // 导致 WorkflowRun 永远不会进入终态。加入 hasCancelled 分支修正此问题。
             val newStatus = when {
                 hasFailed                  -> "failed"
                 total > 0 && done == total -> "completed"
                 hasRunning || hasPending   -> "running"
-                else                       -> "pending"
+                hasCancelled               -> "cancelled"
+                else                       -> "pending"   // total=0 或全部取消且无其他状态
             }
 
             val nowSec      = System.currentTimeMillis() / 1000L
@@ -152,6 +161,73 @@ class WorkflowRunDb(private val db: Database) : WorkflowRunRepo {
                 ps.executeUpdate()
             }
         }
+    }
+
+    // ── reconcileNonTerminal：批量对账非终态 WorkflowRun ─────────────────────
+
+    /**
+     * 对所有非终态 WorkflowRun 执行对账重算，修正因 recalculate() 调用失败而
+     * 落后的汇总状态。
+     *
+     * 执行流程：
+     * 1. 查询全部 status NOT IN (completed/failed/cancelled) 的 WF ID 及当前状态
+     * 2. 对每个 WF：
+     *    a. 调用 recalculate() 根据 Task 实际状态重新推导 WF 状态
+     *    b. 若 total_tasks = 0（所有 Task 被删除）→ 额外修正为 failed
+     *       （recalculate 在 total=0 时会设为 pending，不适合孤立工作流场景）
+     * 3. 累计状态发生变化的 WF 数量
+     *
+     * ⚠️ total=0 的特殊情况（Kotlin 空集合逻辑陷阱的 WorkflowRun 版本）：
+     *   recalculate() 中：`hasFailed=false, done(0)==total(0)` 因 total>0 守护不成立，
+     *   会走 else 分支 → pending。但若一个非新建的 WF 已无任务，代表数据异常，
+     *   应标记 failed 而非 pending，否则前端永远看到"进行中"状态。
+     */
+    override suspend fun reconcileNonTerminal(): Int = withContext(Dispatchers.IO) {
+        // 1. 快照所有非终态 WF 的当前状态（id → statusBefore）
+        val snapshots = mutableListOf<Pair<String, String>>()  // (id, statusBefore)
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT id, status FROM workflow_run WHERE status NOT IN ('completed', 'failed', 'cancelled')"
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        snapshots.add(rs.getString("id") to rs.getString("status"))
+                    }
+                }
+            }
+        }
+
+        if (snapshots.isEmpty()) return@withContext 0
+
+        val nowSec = System.currentTimeMillis() / 1000L
+        var modifiedCount = 0
+
+        for ((wfId, statusBefore) in snapshots) {
+            // 2a. 调用 recalculate() 重新从 Task 状态推导
+            recalculate(wfId)
+
+            // 2b. 若 total_tasks=0（全部 Task 被删除），recalculate 会把状态设成 pending。
+            //     孤立工作流无任何 Task 可以推进，应修正为 failed。
+            val wfAfter = getById(wfId) ?: continue
+            if (wfAfter.totalTasks == 0) {
+                db.useConnection { conn ->
+                    conn.prepareStatement(
+                        "UPDATE workflow_run SET status='failed', completed_at=COALESCE(completed_at,?) WHERE id=?"
+                    ).use { ps ->
+                        ps.setLong(1, nowSec)
+                        ps.setString(2, wfId)
+                        ps.executeUpdate()
+                    }
+                }
+                modifiedCount++
+                continue
+            }
+
+            // 3. 若状态发生变化，计入修改计数
+            if (wfAfter.status != statusBefore) modifiedCount++
+        }
+
+        modifiedCount
     }
 
     // ── rowToWorkflowRun：ResultSet → WorkflowRun ────────────────────────────

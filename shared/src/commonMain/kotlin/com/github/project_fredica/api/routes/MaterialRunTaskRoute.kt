@@ -8,9 +8,9 @@ import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.WorkflowRun
-import com.github.project_fredica.db.WorkflowRunService
+import com.github.project_fredica.db.WorkflowRunStatusService
 import com.github.project_fredica.db.Task
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
@@ -34,7 +34,7 @@ object MaterialRunTaskRoute : FredicaApi.Route {
             ?: return buildValidJson { kv("error", "MATERIAL_NOT_FOUND") }
 
         val activeStatuses = setOf("pending", "claimed", "running")
-        val isActive = TaskService.repo.listAll(materialId = materialId, pageSize = 200)
+        val isActive = TaskStatusService.listAll(materialId = materialId, pageSize = 200)
             .items.any { it.type == taskType && it.status in activeStatuses }
         if (isActive) {
             return buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
@@ -70,7 +70,7 @@ object MaterialRunTaskRoute : FredicaApi.Route {
 
         val maxRetries = 3
 
-        WorkflowRunService.repo.create(
+        WorkflowRunStatusService.create(
             WorkflowRun(
                 id         = workflowRunId,
                 materialId = material.id,
@@ -81,7 +81,7 @@ object MaterialRunTaskRoute : FredicaApi.Route {
                 createdAt  = nowSec,
             )
         )
-        TaskService.repo.create(
+        TaskStatusService.create(
             Task(
                 id         = taskId,
                 type       = taskType,

@@ -35,14 +35,13 @@ async def _make_credential(
             ac_time_value=ac_time_value or None,
             proxy=proxy or None,
         )
-        # TODO: 这里以后应当让 kotlin 后端去管理实现，以避免频繁请求。
-        # if await c.check_refresh():
-        #     logger.info("credential refresh ... old value is {}", str(c))
-        #     await c.refresh()
-        #     logger.info("credential refresh success , new value is {}", str(c))
-        # if await c.check_valid():
-        #     logger.error("credential invalid , value is {}", str(c))
-        #     return None
+        if await c.check_refresh():
+            logger.info("credential refresh ... old value is {}", str(c))
+            await c.refresh()
+            logger.info("credential refresh success , new value is {}", str(c))
+        if await c.check_valid():
+            logger.error("credential invalid , value is {}", str(c))
+            return None
         return c
     return None
 

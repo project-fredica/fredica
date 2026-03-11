@@ -68,6 +68,12 @@ desktop_assets/common/fredica-pyutil/   # Python 服务源代码
 # 运行单个测试类
 ./gradlew :shared:jvmTest --tests "com.github.project_fredica.db.TaskDbTest"
 
+# 运行全部单元测试（重新测试）
+./gradlew :shared:jvmTest --rerun-tasks
+
+# 运行全部单元测试（带有详细信息（非常长））
+./gradlew :shared:jvmTest --rerun-tasks --info
+
 # 前端开发（独立 Node 工程，在 fredica-webui/ 目录执行）
 cd fredica-webui && npm install && npm run dev
 ```

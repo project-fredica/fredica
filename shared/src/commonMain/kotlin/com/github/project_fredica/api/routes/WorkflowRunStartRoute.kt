@@ -9,9 +9,9 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialVideo
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.Task
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.db.WorkflowRun
-import com.github.project_fredica.db.WorkflowRunService
+import com.github.project_fredica.db.WorkflowRunStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
@@ -39,7 +39,7 @@ object WorkflowRunStartRoute : FredicaApi.Route {
 
     private suspend fun startBilibiliDownloadTranscode(material: MaterialVideo): ValidJsonString {
         val activeStatuses = setOf("pending", "claimed", "running")
-        val hasActive = TaskService.repo.listAll(materialId = material.id, pageSize = 200)
+        val hasActive = TaskStatusService.listAll(materialId = material.id, pageSize = 200)
             .items.any { it.type in setOf("DOWNLOAD_BILIBILI_VIDEO", "TRANSCODE_MP4") && it.status in activeStatuses }
         if (hasActive) return buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
 
@@ -64,7 +64,7 @@ object WorkflowRunStartRoute : FredicaApi.Route {
             kv("check_skip",  true)
         } }.toString()
 
-        WorkflowRunService.repo.create(WorkflowRun(
+        WorkflowRunStatusService.create(WorkflowRun(
             id         = workflowRunId,
             materialId = material.id,
             template   = "bilibili_download_transcode",
@@ -73,7 +73,7 @@ object WorkflowRunStartRoute : FredicaApi.Route {
             doneTasks  = 0,
             createdAt  = nowSec,
         ))
-        TaskService.repo.createAll(listOf(
+        TaskStatusService.createAll(listOf(
             Task(
                 id            = downloadTaskId,
                 type          = "DOWNLOAD_BILIBILI_VIDEO",

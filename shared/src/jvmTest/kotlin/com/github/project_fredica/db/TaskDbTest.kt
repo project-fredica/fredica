@@ -248,6 +248,126 @@ class TaskDbTest {
         assertEquals("wr2t1", wr2Tasks.first().id, "wr-2 的任务 ID 必须是 wr2t1")
     }
 
+    // ── 测试 6：resetStaleTasks — 取消所有非终态任务 ──────────────────────────
+
+    /**
+     * 证明目的：resetStaleTasks() 在应用重启时，将 running / claimed / pending
+     *           三种非终态任务全部取消，并返回受影响的 workflowRunId 集合。
+     *
+     * 证明过程：
+     *   1. 准备 wr-stale（包含 3 个任务，手动设置为 running/claimed/pending）
+     *      + wr-done（仅含 completed 任务，不应受影响）。
+     *   2. 调用 resetStaleTasks()。
+     *   3. 断言：
+     *      a. 返回值中包含 wr-stale，不包含 wr-done。
+     *      b. wr-stale 的 3 个任务全部变为 cancelled。
+     *      c. wr-done 的任务仍为 completed。
+     *
+     * 修复背景：
+     *   原实现只处理 running→failed 和 claimed→pending，未处理 pending→cancelled。
+     *   pending 任务因上游已取消而永远无法通过 claimNext() 的 DAG 校验，
+     *   会导致 WorkflowRun 永久停留在 running 状态。
+     */
+    @Test
+    fun testResetStaleTasks_cancelsAllNonTerminal() = runBlocking {
+        // wr-stale：含 running / claimed / pending 三种状态的任务
+        workflowRunDb.create(
+            WorkflowRun(
+                id = "wr-stale", materialId = "material-1",
+                template = "TEST", status = "running",
+                totalTasks = 3, doneTasks = 0, createdAt = nowSec(),
+            )
+        )
+        val runningTask = Task(
+            id = "stale-running", type = "DOWNLOAD_VIDEO",
+            workflowRunId = "wr-stale", materialId = "material-1",
+            createdAt = nowSec(),
+        )
+        val claimedTask = Task(
+            id = "stale-claimed", type = "EXTRACT_AUDIO",
+            workflowRunId = "wr-stale", materialId = "material-1",
+            createdAt = nowSec(),
+        )
+        val pendingTask = Task(
+            id = "stale-pending", type = "TRANSCRIBE",
+            workflowRunId = "wr-stale", materialId = "material-1",
+            createdAt = nowSec(),
+        )
+        taskDb.createAll(listOf(runningTask, claimedTask, pendingTask))
+        // 手动将状态设置为 running / claimed（create 后默认 pending）
+        taskDb.updateStatus("stale-running", "running")
+        taskDb.updateStatus("stale-claimed", "claimed")
+        // stale-pending 保持 pending（默认值）
+
+        // wr-done：仅含 completed 任务，不应受影响
+        workflowRunDb.create(
+            WorkflowRun(
+                id = "wr-done", materialId = "material-1",
+                template = "TEST", status = "completed",
+                totalTasks = 1, doneTasks = 1, createdAt = nowSec(),
+            )
+        )
+        val completedTask = Task(
+            id = "done-task", type = "DOWNLOAD_VIDEO",
+            workflowRunId = "wr-done", materialId = "material-1",
+            createdAt = nowSec(),
+        )
+        taskDb.create(completedTask)
+        taskDb.updateStatus("done-task", "completed")
+
+        // 执行
+        val affected = taskDb.resetStaleTasks()
+
+        // 断言 1：返回值正确
+        assertTrue("wr-stale" in affected, "wr-stale 有非终态任务，应出现在返回集合中")
+        assertTrue("wr-done" !in affected, "wr-done 无非终态任务，不应出现在返回集合中")
+
+        // 断言 2：wr-stale 的所有任务均已取消
+        val staleTasks = taskDb.listByWorkflowRun("wr-stale")
+        assertTrue(staleTasks.all { it.status == "cancelled" },
+            "wr-stale 中 running/claimed/pending 三种任务均应被取消，实际状态：${staleTasks.map { "${it.id}:${it.status}" }}"
+        )
+
+        // 断言 3：running 任务的 error 字段包含重启标记
+        val formerRunning = staleTasks.find { it.id == "stale-running" }!!
+        assertEquals("APP_RESTARTED", formerRunning.error, "running 任务取消后应记录 APP_RESTARTED 原因")
+
+        // 断言 4：completed 任务不受影响
+        val doneTask = taskDb.listByWorkflowRun("wr-done").first()
+        assertEquals("completed", doneTask.status, "已完成的任务不应被 resetStaleTasks 修改")
+    }
+
+    // ── 测试 7：快照非终态任务 ────────────────────────────────────────────────
+
+    /**
+     * 证明目的：snapshotNonTerminalTasks() 返回 running / claimed / pending 三种状态的任务，
+     * 已 completed 的任务不出现在结果中。
+     */
+    @Test
+    fun testSnapshotNonTerminalTasks() = runBlocking {
+        // 准备：写入各种状态的任务
+        taskDb.createAll(listOf(
+            Task(id = "snap-pending",   type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+            Task(id = "snap-claimed",   type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+            Task(id = "snap-running",   type = "TRANSCODE_MP4",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+            Task(id = "snap-completed", type = "FETCH_SUBTITLE", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+        ))
+        taskDb.updateStatus("snap-claimed",   "claimed")
+        taskDb.updateStatus("snap-running",   "running")
+        taskDb.updateStatus("snap-completed", "completed")
+
+        // 执行
+        val snapshot = taskDb.snapshotNonTerminalTasks()
+
+        // 断言
+        val ids = snapshot.map { it.id }.toSet()
+        assertTrue("snap-pending" in ids,   "pending 任务应出现在快照中")
+        assertTrue("snap-claimed" in ids,   "claimed 任务应出现在快照中")
+        assertTrue("snap-running" in ids,   "running 任务应出现在快照中")
+        assertTrue("snap-completed" !in ids, "completed 任务不应出现在快照中")
+        assertEquals(3, snapshot.size, "快照应恰好包含 3 条非终态任务")
+    }
+
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L

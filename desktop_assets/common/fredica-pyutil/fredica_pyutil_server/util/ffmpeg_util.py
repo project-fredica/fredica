@@ -89,8 +89,8 @@ def _find_ffmpeg_candidates() -> List[str]:
             r = subprocess.run(["where", "ffmpeg"], capture_output=True, text=True, timeout=5)
             for line in r.stdout.strip().splitlines():
                 add(line.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[ffmpeg_util] 'where ffmpeg' failed: {}", e)
     else:
         try:
             r = subprocess.run(
@@ -101,8 +101,8 @@ def _find_ffmpeg_candidates() -> List[str]:
             if len(parts) == 2:
                 for p in parts[1].split():
                     add(p.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[ffmpeg_util] 'whereis ffmpeg' failed: {}", e)
 
     # 3. 常见安装路径
     if sys == "Windows":
@@ -170,7 +170,8 @@ def _get_version(ffmpeg_path: str) -> str:
         r = _run([ffmpeg_path, "-version"], timeout=5, label="version")
         m = re.search(r"ffmpeg version (\S+)", r.stdout)
         return m.group(1) if m else ""
-    except Exception:
+    except Exception as e:
+        logger.debug("[ffmpeg_util] get_version failed for {!r}: {}", ffmpeg_path, e)
         return ""
 
 
@@ -183,7 +184,8 @@ def _get_hwaccels(ffmpeg_path: str) -> List[str]:
             if line and line != "Hardware acceleration methods:":
                 result.append(line)
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug("[ffmpeg_util] get_hwaccels failed for {!r}: {}", ffmpeg_path, e)
         return []
 
 
@@ -200,7 +202,8 @@ def _get_encoders(ffmpeg_path: str) -> Dict[str, bool]:
     try:
         r = _run([ffmpeg_path, "-encoders"], timeout=10, label="encoders")
         return {enc: (enc in r.stdout) for enc in _ENCODERS_TO_CHECK}
-    except Exception:
+    except Exception as e:
+        logger.debug("[ffmpeg_util] get_encoders failed for {!r}: {}", ffmpeg_path, e)
         return {enc: False for enc in _ENCODERS_TO_CHECK}
 
 
@@ -221,7 +224,8 @@ def _test_encoder(ffmpeg_path: str, encoder: str) -> bool:
     try:
         r = _run(cmd, timeout=8, label=f"test_encoder({encoder})", text=False)
         return r.returncode == 0
-    except Exception:
+    except Exception as e:
+        logger.debug("[ffmpeg_util] test_encoder({!r}) failed: {}", encoder, e)
         return False
 
 

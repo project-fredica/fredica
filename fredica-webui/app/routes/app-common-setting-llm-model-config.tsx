@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { ArrowLeft, Plus, Pencil, Trash2, Save, X, ExternalLink, Compass, FlaskConical, Download, Upload, Copy, Eye, EyeOff } from "lucide-react";
 import type { Route } from "./+types/app-common-setting-llm-model-config";
 import { print_error } from "../util/error_handler";
-import { openExternalUrl, getBridge } from "../util/bridge";
+import { openExternalUrl, callBridge, BridgeUnavailableError } from "../util/bridge";
 import { llmChat, type LlmChatParams, type LlmChatConnectionConfig } from "../util/llm";
 import { useAppConfig } from "~/context/appConfig";
 import { DEFAULT_SERVER_PORT } from "../util/app_fetch";
@@ -65,18 +65,7 @@ const EMPTY_ROLES: LlmDefaultRoles = {
 // ─── Bridge 工具 ──────────────────────────────────────────────────────────────
 
 function bridgeCall(method: string, param: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const bridge = getBridge();
-        if (!bridge) { reject(new Error("kmpJsBridge 不可用")); return; }
-        bridge.callNative(method, param, (result: string) => {
-            try {
-                const parsed = JSON.parse(result);
-                resolve(parsed);
-            } catch (e) {
-                reject(new Error(`bridgeCall(${method}) JSON.parse failed: ${result}`));
-            }
-        });
-    });
+    return callBridge(method, param).then(result => JSON.parse(result));
 }
 
 // ─── 主组件 ──────────────────────────────────────────────────────────────────
@@ -758,7 +747,7 @@ function ConfigCheckDrawer({ model, onClose }: { model: LlmModelConfig; onClose:
     const { appConfig } = useAppConfig();
     const [output, setOutput] = useState("");
     const [loading, setLoading] = useState(false);
-    const hasBridge = typeof window !== "undefined" && !!getBridge();
+    const hasBridge = typeof window !== "undefined" && !!window.kmpJsBridge;
     const defaultMode: LlmChatParams["mode"] = hasBridge ? "router" : "direct";
     const [mode, setMode] = useState<LlmChatParams["mode"]>(defaultMode);
     const hasRun = useRef(false);

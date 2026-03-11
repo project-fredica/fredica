@@ -1,5 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useState } from "react";
-import { getBridge } from "~/util/bridge";
+import { callBridge } from "~/util/bridge";
 
 type WebserverSchema = "http" | "https";
 
@@ -80,17 +80,12 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         setIsStorageLoaded(true);
 
         // WebView 环境：通过 bridge 获取服务器连接信息（含 auth token）
-        const bridge = getBridge();
-        if (bridge) {
-            bridge.callNative("get_server_info", "{}", (raw: string) => {
-                try {
-                    const info = JSON.parse(raw) as Partial<AppConfig>;
-                    setAppConfigState(prev => ({ ...prev, ...info }));
-                } catch {
-                    console.debug("get_server_info parse failed", raw);
-                }
-            });
-        }
+        callBridge("get_server_info").then(raw => {
+            const info = JSON.parse(raw) as Partial<AppConfig>;
+            setAppConfigState(prev => ({ ...prev, ...info }));
+        }).catch(() => {
+            // 浏览器环境或 bridge 未就绪时忽略
+        });
     }, []);
 
     const setAppConfig = (config: Partial<AppConfig>) => {

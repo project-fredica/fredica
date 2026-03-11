@@ -11,6 +11,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.FredicaApiJvmInitOption
+import com.github.project_fredica.api.FredicaApiJvmService
 import com.github.project_fredica.api.init
 import com.github.project_fredica.apputil.createLogger
 import dev.datlag.kcef.KCEFBuilder
@@ -49,52 +50,51 @@ fun main() {
 
     AppUtil.MonkeyPatch.burningwaveExportAllModule()
 
-    runBlocking(Dispatchers.IO) {
+    runBlocking {
         try {
-            listOf(async {
-                logger.debug("start read properties")
-                for (prop in System.getProperties() ?: mapOf()) {
-                    val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
-                        (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                    } else {
-                        prop.value
+            withContext(Dispatchers.IO) {
+                listOf(async {
+                    logger.debug("start read properties")
+                    for (prop in System.getProperties() ?: mapOf()) {
+                        val valueInfo = if (setOf("java.library.path", "java.class.path").contains(prop.key)) {
+                            (prop.value as String).split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                        } else {
+                            prop.value
+                        }
+                        logger.debug("property : ${prop.key} -> $valueInfo")
                     }
-                    logger.debug("property : ${prop.key} -> $valueInfo")
-                }
-                logger.debug("finish read properties")
-                logger.debug("start read env")
-                for (env in System.getenv()) {
-                    val envInfo = if (env.key.lowercase() == "path") {
-                        env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
-                    } else {
-                        env.value
+                    logger.debug("finish read properties")
+                    logger.debug("start read env")
+                    for (env in System.getenv()) {
+                        val envInfo = if (env.key.lowercase() == "path") {
+                            env.value.split(";").sortedBy { it }.joinToString("") { "\n    $it" }
+                        } else {
+                            env.value
+                        }
+                        logger.debug("env : ${env.key} -> $envInfo")
                     }
-                    logger.debug("env : ${env.key} -> $envInfo")
-                }
-                logger.debug("finish read env")
-            }, async {
-                AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
-            }, async {
-                withContext(Dispatchers.IO) {
+                    logger.debug("finish read env")
+                }, async {
+                    AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy()
+                }, async {
                     AppUtil.GlobalVars.globalVertx.setTimer(500) {
                         logger.debug("Vert.X init success")
                     }
-                }
-            }, async {
-                val unsafe = AppUtil.GlobalVars.unsafe
-                logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
-            }, async {
-                if (Platform.getPlatform().isSupportPython) {
-                    PythonUtil.Py314Embed.init()
-                    AppUtil.addShutdownHook("stopPyUtilServer") {
-                        PythonUtil.Py314Embed.PyUtilServer.stop()
+                }, async {
+                    val unsafe = AppUtil.GlobalVars.unsafe
+                    logger.debug("Unsafe is $unsafe , addressSize is ${unsafe.addressSize()}")
+                }, async {
+                    if (Platform.getPlatform().isSupportPython) {
+                        PythonUtil.Py314Embed.init()
+                        AppUtil.addShutdownHook("stopPyUtilServer") {
+                            PythonUtil.Py314Embed.PyUtilServer.stop()
+                        }
+                        PythonUtil.Py314Embed.PyUtilServer.start()
                     }
-                    PythonUtil.Py314Embed.PyUtilServer.start()
-                }
-            }).awaitAll()
-            val fredicaApiOption = FredicaApiJvmInitOption()
+                }).awaitAll()
+            }
             FredicaApi.init(
-                options = fredicaApiOption
+                options = FredicaApiJvmInitOption()
             )
         } catch (err: Throwable) {
             logger.exception("Failed init app", err)
@@ -139,6 +139,7 @@ fun main() {
                             }
                             onInitialized {
                                 initialized = true
+                                FredicaApiJvmService.onAppReady()
                             }
                         }
                         settings {

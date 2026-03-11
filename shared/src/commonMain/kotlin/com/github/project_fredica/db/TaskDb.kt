@@ -442,4 +442,193 @@ class TaskDb(private val db: Database) : TaskRepo {
         isPaused          = rs.getInt("is_paused") != 0,
         isPausable        = rs.getInt("is_pausable") != 0,
     )
+
+    // ── snapshotNonTerminalTasks：快照非终态任务 ──────────────────────────────
+
+    /**
+     * 快照所有非终态任务（pending / claimed / running），在 resetStaleTasks() 之前调用。
+     * 返回包含原始状态的完整任务列表，供 RestartTaskLog 记录使用。
+     */
+    override suspend fun snapshotNonTerminalTasks(): List<Task> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Task>()
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM task WHERE status IN ('running', 'claimed', 'pending')"
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) result.add(rowToTask(rs))
+                }
+            }
+        }
+        result
+    }
+
+    // ── failOrphanedTasks：孤立任务对账 ───────────────────────────────────────
+
+    /**
+     * 找出所有孤立任务（workflow_run_id 不存在于 workflow_run 表中且未终态），
+     * 批量标记为 failed。
+     *
+     * SQL 核心：子查询 `NOT IN (SELECT id FROM workflow_run)` 一次性找出
+     * 全部孤立 Task，避免逐条查询。已终态的任务通过 `NOT IN (terminal statuses)`
+     * 过滤，防止重复更新（幂等）。
+     */
+    override suspend fun failOrphanedTasks(): List<String> = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            val nowSec = System.currentTimeMillis() / 1000L
+            val affected = mutableListOf<String>()
+
+            // 1. 找出所有孤立且非终态的 Task ID
+            conn.prepareStatement(
+                """
+                SELECT id FROM task
+                WHERE status NOT IN ('completed', 'failed', 'cancelled')
+                  AND workflow_run_id NOT IN (SELECT id FROM workflow_run)
+                """.trimIndent()
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) affected.add(rs.getString("id"))
+                }
+            }
+
+            if (affected.isEmpty()) return@useConnection affected
+
+            // 2. 批量标记为 failed（用子查询，不拼接占位符，防止 IN 列表过长）
+            conn.prepareStatement(
+                """
+                UPDATE task
+                SET status = 'failed',
+                    error = 'ORPHANED_NO_WORKFLOW_RUN',
+                    error_type = 'ORPHANED',
+                    completed_at = COALESCE(completed_at, ?)
+                WHERE status NOT IN ('completed', 'failed', 'cancelled')
+                  AND workflow_run_id NOT IN (SELECT id FROM workflow_run)
+                """.trimIndent()
+            ).use { ps ->
+                ps.setLong(1, nowSec)
+                ps.executeUpdate()
+            }
+
+            affected
+        }
+    }
+
+    // ── cancelPendingTasksByWorkflowRun：级联取消等待中的任务 ─────────────────
+
+    /**
+     * 将指定 WorkflowRun 下所有 pending / claimed 任务批量标记为 cancelled。
+     *
+     * running 任务不在处理范围：running 任务已被 Executor 持有，
+     * 必须通过 TaskCancelService 发送取消信号让 Executor 主动退出，
+     * 直接修改 DB 状态会导致 Executor 与 DB 状态不一致。
+     */
+    override suspend fun cancelPendingTasksByWorkflowRun(workflowRunId: String): List<String> =
+        withContext(Dispatchers.IO) {
+            db.useConnection { conn ->
+                val nowSec = System.currentTimeMillis() / 1000L
+                val affected = mutableListOf<String>()
+
+                // 1. 收集待取消的 Task ID（只取等待中的）
+                conn.prepareStatement(
+                    """
+                    SELECT id FROM task
+                    WHERE workflow_run_id = ?
+                      AND status IN ('pending', 'claimed')
+                    """.trimIndent()
+                ).use { ps ->
+                    ps.setString(1, workflowRunId)
+                    ps.executeQuery().use { rs ->
+                        while (rs.next()) affected.add(rs.getString("id"))
+                    }
+                }
+
+                if (affected.isEmpty()) return@useConnection affected
+
+                // 2. 批量取消
+                conn.prepareStatement(
+                    """
+                    UPDATE task
+                    SET status = 'cancelled',
+                        completed_at = COALESCE(completed_at, ?)
+                    WHERE workflow_run_id = ?
+                      AND status IN ('pending', 'claimed')
+                    """.trimIndent()
+                ).use { ps ->
+                    ps.setLong(1, nowSec)
+                    ps.setString(2, workflowRunId)
+                    ps.executeUpdate()
+                }
+
+                affected
+            }
+        }
+
+    // ── resetStaleTasks：启动时清理僵尸任务 ───────────────────────────────────
+
+    /**
+     * 应用重启时将所有非终态任务一律取消，防止任务永久卡在 pending/claimed/running。
+     *
+     * 设计决策：取消（cancelled）而非失败（failed）
+     *   - running：执行被中途打断，结果未知。此前标记为 failed，但这并非任务自身错误，
+     *              而是外部中断，改为 cancelled 语义更准确，也不会触发 WorkflowRun 变 failed。
+     *   - claimed：已被 worker 认领但尚未开始执行，同样取消。
+     *   - pending ：等待依赖的下游任务。由于其上游（running/claimed）已被取消，
+     *              claimNext() 的 DAG 语义要求所有 depends_on 任务均 completed 才可认领，
+     *              上游一旦取消，该任务将永久阻塞——必须同步取消，否则 WorkflowRun 状态
+     *              将永远停留在 running，且 recalculate() 无法将其修正为终态。
+     *
+     * 恢复策略：若用户希望重新执行，应由业务层创建参数相同的新任务（新 WorkflowRun），
+     *           而非尝试恢复原任务。"恢复"操作的入口在任务中心的 UI 层面。
+     *
+     * @return 受影响的 workflowRunId 集合（用于后续调用 recalculate() 修正汇总状态）
+     */
+    override suspend fun resetStaleTasks(): Set<String> = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            val nowSec = System.currentTimeMillis() / 1000L
+            val affected = mutableSetOf<String>()
+
+            // 1. 收集所有非终态任务的 workflowRunId（pending / claimed / running 三种状态）
+            //    pending 必须纳入：其上游将被取消，claimNext DAG 语义决定它永远不会被认领
+            conn.prepareStatement(
+                "SELECT DISTINCT workflow_run_id FROM task WHERE status IN ('running', 'claimed', 'pending')"
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) affected.add(rs.getString(1))
+                }
+            }
+
+            if (affected.isEmpty()) return@useConnection affected
+
+            // 2. running → cancelled（执行中途被中断；取消而非 failed，语义更准确）
+            conn.prepareStatement(
+                """
+                UPDATE task
+                SET status='cancelled', error='APP_RESTARTED', error_type='APP_RESTART',
+                    completed_at=COALESCE(completed_at, ?)
+                WHERE status='running'
+                """.trimIndent()
+            ).use { ps ->
+                ps.setLong(1, nowSec)
+                ps.executeUpdate()
+            }
+
+            // 3. claimed → cancelled（已认领但尚未开始执行，同样取消）
+            conn.prepareStatement(
+                "UPDATE task SET status='cancelled', completed_at=COALESCE(completed_at, ?) WHERE status='claimed'"
+            ).use { ps ->
+                ps.setLong(1, nowSec)
+                ps.executeUpdate()
+            }
+
+            // 4. pending → cancelled（等待中的下游任务，上游已取消，永远无法通过 DAG 校验）
+            conn.prepareStatement(
+                "UPDATE task SET status='cancelled', completed_at=COALESCE(completed_at, ?) WHERE status='pending'"
+            ).use { ps ->
+                ps.setLong(1, nowSec)
+                ps.executeUpdate()
+            }
+
+            affected
+        }
+    }
 }

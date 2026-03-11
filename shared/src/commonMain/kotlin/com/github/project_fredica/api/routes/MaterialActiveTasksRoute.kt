@@ -6,7 +6,7 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 
@@ -15,17 +15,22 @@ import kotlinx.serialization.json.jsonObject
  *
  * 查询指定素材的任务状态快照：每种 type 只返回创建时间最新的一条，
  * 包含 status、progress、error 等字段，供前端模态框轮询展示进度用。
+ *
+ * 启动对账：首次请求时 [TaskStatusService.listAll] 会对该素材下所有非终态
+ * WorkflowRun 调用 recalculate()，确保汇总状态与 Task 实际状态一致。
+ * 后续 3 秒轮询直接跳过对账，零额外开销。
  */
 object MaterialActiveTasksRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
-    override val desc = "查询素材的任务状态（每种 type 取最新一条）"
+    override val desc = "查询素材的任务状态（每种 type 取最新一条，含首次启动对账）"
 
     override suspend fun handler(param: String): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
             ?: return buildValidJson { kv("error", "material_id required") }
 
-        val tasks = TaskService.repo.listAll(materialId = materialId, pageSize = 200).items
+        // listAll 在首次调用时触发 material 维度的 WorkflowRun 对账（StartupReconcileGuard 保护）
+        val tasks = TaskStatusService.listAll(materialId = materialId, pageSize = 200).items
         // One latest task per type, sorted by type name for stable display order
         val latest = tasks
             .groupBy { it.type }
