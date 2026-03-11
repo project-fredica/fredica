@@ -99,25 +99,34 @@ function SubtitleBodyPanel({
     const { apiFetch } = useAppFetch();
     const [loading, setLoading] = useState(true);
     const [result, setResult] = useState<SubtitleBodyResult | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
+        // 取消上一次还在飞的请求
+        abortRef.current?.abort();
+        const abort = new AbortController();
+        abortRef.current = abort;
+
         let cancelled = false;
         setLoading(true);
         setResult(null);
         apiFetch("/api/v1/BilibiliVideoSubtitleBodyRoute", {
             method: "POST",
             body: JSON.stringify({ subtitle_url: metaItem.subtitle_url, is_update: isUpdate }),
-        }, { timeout: 5 * 60 * 1000 })
+        }, { timeout: 5 * 60 * 1000, signal: abort.signal })
             .then(({ data }) => {
                 if (!cancelled) setResult(data as SubtitleBodyResult);
             })
-            .catch(() => {
-                if (!cancelled) setResult({ code: -1, message: "请求失败", body: null });
+            .catch((err) => {
+                if (!cancelled && err?.name !== "AbortError") setResult({ code: -1, message: "请求失败", body: null });
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+            abort.abort();
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [metaItem.subtitle_url, isUpdate]);
 
@@ -166,7 +175,7 @@ export function BilibiliSubtitleModal({
         apiFetch("/api/v1/BilibiliVideoSubtitleRoute", {
             method: "POST",
             body: JSON.stringify({ bvid, page_index: pageIndex, is_update: refreshCount > 0 }),
-        }, { timeout: 60 * 1000 })
+        }, { timeout: 5 * 60 * 1000 })
             .then(({ data }) => {
                 if (!cancelled) {
                     const r = data as SubtitleMetaResult;

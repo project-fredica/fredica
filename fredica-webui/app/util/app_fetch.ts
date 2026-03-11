@@ -165,9 +165,37 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * };
  * ```
  *
+ * ### 4. useEffect 内命令式调用（必须传 signal 以支持取消）
+ * 在 useEffect 里直接调用 apiFetch 时，**必须**通过 `options.signal` 传入 AbortController 的
+ * signal，并在 cleanup 中 abort。否则依赖变化时旧请求无法取消，会导致瞬发多次请求。
+ * AbortError 不会触发 toast（apiFetch 内部已过滤）。
+ *
+ * ```tsx
+ * const { apiFetch } = useAppFetch();
+ * const abortRef = useRef<AbortController | null>(null);
+ *
+ * useEffect(() => {
+ *     abortRef.current?.abort();
+ *     const abort = new AbortController();
+ *     abortRef.current = abort;
+ *
+ *     let cancelled = false;
+ *     setLoading(true);
+ *     apiFetch('/api/v1/SomeRoute', {
+ *         method: 'POST',
+ *         body: JSON.stringify({ id }),
+ *     }, { signal: abort.signal })
+ *         .then(({ data }) => { if (!cancelled) setResult(data); })
+ *         .catch((err) => { if (!cancelled && err?.name !== 'AbortError') setError(true); })
+ *         .finally(() => { if (!cancelled) setLoading(false); });
+ *     return () => { cancelled = true; abort.abort(); };
+ * }, [id]);
+ * ```
+ *
  * ## AI 使用建议
  * - 页面初次加载数据 → 声明式（传 `appPath`），用 `loading` / `error` 驱动 UI。
  * - 按钮点击、表单提交 → 命令式（`apiFetch`），调用方管理自己的 loading 状态。
+ * - **useEffect 内调用 apiFetch → 必须传 `signal` 并在 cleanup 中 abort**（见模式 4）。
  * - 操作后需刷新列表 → 操作完成后再调用一次 `apiFetch` 获取列表，或触发页面刷新。
  * - 不需要声明式状态时，**不传 `appPath`** 以避免挂载时触发多余的请求和 re-render。
  * - 声明式模式中，`init` / `parseJson` / `timeout` 不在 deps 内，更改这些参数
@@ -250,8 +278,9 @@ export function useAppFetch<J = unknown>(param?: {
                 }
                 setError(null);
             } catch (err) {
-                // 组件卸载触发的 AbortError 属于正常 cleanup，不写入错误状态
+                // 组件卸载或外部取消触发的 AbortError 属于正常 cleanup，不写入错误状态
                 if (cancelled) return;
+                if (err instanceof DOMException && err.name === "AbortError") return;
                 print_error({
                     reason: `HTTP 请求失败 : ${appPath}  ---  ${err}`,
                     err,
@@ -277,16 +306,19 @@ export function useAppFetch<J = unknown>(param?: {
         async (
             path: string,
             init?: RequestInit,
-            options?: { parseJson?: boolean; timeout?: number; silent?: boolean },
+            options?: { parseJson?: boolean; timeout?: number; silent?: boolean; signal?: AbortSignal },
         ): Promise<{ resp: Response; data: unknown }> => {
-            const { parseJson = true, timeout = 10_000, silent = false } = options ?? {};
+            const { parseJson = true, timeout = 10_000, silent = false, signal: externalSignal } = options ?? {};
             const { abort, clearTimer } = makeAbortWithTimeout(timeout);
+            const signal = externalSignal
+                ? AbortSignal.any([abort.signal, externalSignal])
+                : abort.signal;
             try {
                 const resp = await fetchWithAuth(
                     `${host}${path}`,
                     init,
                     authToken,
-                    abort.signal,
+                    signal,
                 );
                 clearTimer();
                 if (!resp.ok && !allowNot2XX) {
@@ -299,7 +331,7 @@ export function useAppFetch<J = unknown>(param?: {
                 return { resp, data: null };
             } catch (err) {
                 clearTimer();
-                if (!silent) print_error({
+                if (!(err instanceof DOMException && err.name === "AbortError") && !silent) print_error({
                     reason: `HTTP 请求失败 : ${path}  ---  ${err}`,
                     err,
                     variables: { param, host, path },

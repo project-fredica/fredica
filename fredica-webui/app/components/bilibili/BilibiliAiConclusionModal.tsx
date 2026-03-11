@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Loader, Sparkles, RefreshCw } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 
@@ -50,26 +50,32 @@ export function BilibiliAiConclusionModal({
         }
     }
 
+    const abortRef = useRef<AbortController | null>(null);
+
     useEffect(() => {
+        abortRef.current?.abort();
+        const abort = new AbortController();
+        abortRef.current = abort;
+
         let cancelled = false;
         setLoading(true);
         apiFetch('/api/v1/BilibiliVideoAiConclusionRoute', {
             method: 'POST',
             body: JSON.stringify({ bvid, page_index: pageIndex, is_update: refreshCount > 0 }),
-        }).then(({ data }) => {
+        }, { signal: abort.signal }).then(({ data }) => {
             if (!cancelled) {
                 setRawData(data);
                 setResult2(data as AiConclusionResult);
             }
         }).catch((err) => {
-            if (!cancelled) {
+            if (!cancelled && err?.name !== 'AbortError') {
                 setResult({ code: -1, message: '请求失败', model_result: null });
                 setRawData(`${err}`)
             }
         }).finally(() => {
             if (!cancelled) setLoading(false);
         });
-        return () => { cancelled = true; };
+        return () => { cancelled = true; abort.abort(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [bvid, pageIndex, refreshCount]);
 
