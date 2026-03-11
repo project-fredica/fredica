@@ -7,7 +7,6 @@ import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.BilibiliSubtitleBodyCache
 import com.github.project_fredica.db.BilibiliSubtitleBodyCacheService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -22,44 +21,25 @@ object BilibiliVideoSubtitleBodyRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoSubtitleBodyParam>().getOrThrow()
-        val cache = BilibiliSubtitleBodyCacheService.repo
-
         val urlKey = extractUrlKey(p.subtitleUrl)
         logger.debug("请求 urlKey=$urlKey is_update=${p.isUpdate} original_url=${p.subtitleUrl}")
 
-        if (!p.isUpdate) {
-            val cached = cache.queryBest(urlKey)
-            if (cached != null) {
-                logger.debug("命中缓存 urlKey=$urlKey queried_at=${cached.queriedAt}")
-                return ValidJsonString(cached.rawResult)
-            }
-            logger.debug("无缓存，发起 Python 请求 urlKey=$urlKey")
-        } else {
-            logger.debug("强制刷新，跳过缓存 urlKey=$urlKey")
+        val raw = BilibiliSubtitleBodyCacheService.fetchOrLoad(urlKey, p.isUpdate) {
+            val pyBody = buildValidJson { kv("subtitle_url", p.subtitleUrl) }
+            logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
+            val pyResult = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.str, timeoutMs = 5 * 60_000L)
+            pyResult to computeIsSuccess(pyResult)
         }
+        logger.debug("返回结果 urlKey=$urlKey")
+        return ValidJsonString(raw)
+    }
 
-        val pyBody = buildValidJson {
-            kv("subtitle_url", p.subtitleUrl)
-        }
-        logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
-        val raw = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.str)
-        val isSuccess = runCatching {
+    private fun computeIsSuccess(raw: String): Boolean =
+        runCatching {
             val obj = raw.loadJson().getOrThrow() as? JsonObject
             val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
             code == 0
         }.getOrDefault(false)
-
-        cache.insert(
-            BilibiliSubtitleBodyCache(
-                urlKey = urlKey,
-                queriedAt = System.currentTimeMillis() / 1000L,
-                rawResult = raw,
-                isSuccess = isSuccess,
-            )
-        )
-        logger.info("已写入缓存 urlKey=$urlKey is_success=$isSuccess raw_len=${raw.length}")
-        return ValidJsonString(raw)
-    }
 
     /** 去掉 auth_key / wts 等会过期的 query 参数，保留稳定的路径+其余参数作为缓存 key */
     private fun extractUrlKey(url: String): String {
