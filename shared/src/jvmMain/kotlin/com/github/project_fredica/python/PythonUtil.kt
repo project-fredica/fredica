@@ -60,12 +60,10 @@ object PythonUtil {
 
         /** Creates a ProcessBuilder for the embedded Python with UTF-8 forced on Windows. */
         private fun newPythonProcessBuilder(vararg args: String): ProcessBuilder =
-            ProcessBuilder(executablePath, *args)
-                .directory(File(pyUtilServerProjectPath))
-                .also { pb ->
-                    pb.environment()["PYTHONIOENCODING"] = "utf-8"
-                    pb.environment()["PYTHONUTF8"] = "1"
-                }
+            ProcessBuilder(executablePath, *args).directory(File(pyUtilServerProjectPath)).also { pb ->
+                pb.environment()["PYTHONIOENCODING"] = "utf-8"
+                pb.environment()["PYTHONUTF8"] = "1"
+            }
 
         private suspend fun runPythonSubprocess(
             args: List<String>, timeoutMs: Long? = null, check: Boolean = true
@@ -131,6 +129,12 @@ object PythonUtil {
                     ).await()
                     runPythonSubprocess(
                         listOf("-m", "pip", "install", "--no-input", "-r", requirementsPath)
+                    ).await()
+                    runPythonSubprocess(
+                        listOf("-m", "pip", "list")
+                    ).await()
+                    runPythonSubprocess(
+                        listOf("-m", "pip", "freeze")
                     ).await()
                     logger.debug("${Py314Embed::class.simpleName} init finish")
                     _isInit = true
@@ -270,8 +274,7 @@ object PythonUtil {
                                 it.slice(0..100) + "..."
                             }
                         }
-                    }"
-                )
+                    }")
                 return bodyText
             }
 
@@ -314,7 +317,8 @@ object PythonUtil {
                             try {
                                 send(Frame.Text("""{"command":"cancel"}"""))
                                 logger.debug("websocketTask sent cancel command for $pth")
-                            } catch (_: Exception) { /* WebSocket 可能已关闭，忽略 */ }
+                            } catch (_: Exception) { /* WebSocket 可能已关闭，忽略 */
+                            }
                         }
                     }
 
@@ -325,7 +329,8 @@ object PythonUtil {
                                 try {
                                     send(Frame.Text("""{"command":"pause"}"""))
                                     logger.debug("websocketTask sent pause command for $pth")
-                                } catch (_: Exception) {}
+                                } catch (_: Exception) {
+                                }
                             }
                         }
                     }
@@ -337,7 +342,8 @@ object PythonUtil {
                                 try {
                                     send(Frame.Text("""{"command":"resume"}"""))
                                     logger.debug("websocketTask sent resume command for $pth")
-                                } catch (_: Exception) {}
+                                } catch (_: Exception) {
+                                }
                             }
                         }
                     }

@@ -959,6 +959,40 @@ export default function Component({ }: Route.ComponentProps) {
                     </button>
                 </div>
 
+                {/* ASR 语音识别配置入口 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    padding: "20px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                }}>
+                    <div>
+                        <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: 600, color: "#111827" }}>本地语音识别（ASR）</p>
+                        <p style={{ margin: 0, fontSize: "13px", color: "#9ca3af" }}>配置 faster-whisper 模型、评估 GPU 兼容性、下载模型。</p>
+                    </div>
+                    <button
+                        onClick={() => navigate("/app-desktop-setting-asr-config")}
+                        style={{
+                            flexShrink: 0,
+                            padding: "8px 16px",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            color: "#2563eb",
+                            backgroundColor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        进入配置 →
+                    </button>
+                </div>
+
                 <p style={{ textAlign: "center", fontSize: "12px", color: "#9ca3af", marginTop: "8px" }}>
                     部分设置需要重启应用后生效
                 </p>

@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.db.WorkflowRun
@@ -19,17 +20,23 @@ import java.util.UUID
 /**
  * POST /api/v1/WebenSourceAnalyzeRoute
  *
- * 提交来源进行分析。创建 WebenSource 记录并启动 WorkflowRun 任务链：
- *   Task 1: FETCH_SUBTITLE     — 获取/生成字幕文本
- *   Task 2: WEBEN_CONCEPT_EXTRACT（depends_on: [Task1]）— LLM 概念抽取写图谱
+ * 提交来源进行分析。创建 WebenSource 记录并启动 WorkflowRun 任务链。
  *
- * ## 数据流
- * 1. 解析参数 → 生成 sourceId / workflowRunId / task1Id / task2Id（全部 UUID）
- * 2. INSERT weben_source（analysis_status='pending'，关联 workflowRunId）
- * 3. INSERT workflow_run（total_tasks=2）
- * 4. INSERT task: FETCH_SUBTITLE（无前置依赖）
- * 5. INSERT task: WEBEN_CONCEPT_EXTRACT（depends_on=[task1Id]，DAG 串行）
- * 6. 返回 { ok, source_id, workflow_run_id }
+ * ## 任务链（fasterWhisperModel 已配置时）
+ * ```
+ * DOWNLOAD_WHISPER_MODEL (check_skip=true，模型已存在则自动跳过)
+ *     ↓
+ * FETCH_SUBTITLE
+ *     ↓
+ * WEBEN_CONCEPT_EXTRACT
+ * ```
+ *
+ * ## 任务链（fasterWhisperModel 未配置时）
+ * ```
+ * FETCH_SUBTITLE
+ *     ↓
+ * WEBEN_CONCEPT_EXTRACT
+ * ```
  *
  * 注：workflowRunId 提前确定并写入 WebenSource，是为了让
  * WebenSourceListRoute.reconcileSources() 在启动恢复时能够关联对账。
@@ -42,13 +49,10 @@ object WebenSourceAnalyzeRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<WebenSourceAnalyzeParam>().getOrThrow()
+        val cfg = AppConfigService.repo.getConfig()
         val nowSec = System.currentTimeMillis() / 1000L
         val sourceId = UUID.randomUUID().toString()
-
-        // 提前生成 workflowRunId，用于关联 WebenSource（启动恢复时对账用）
         val workflowRunId = UUID.randomUUID().toString()
-        val task1Id = UUID.randomUUID().toString()
-        val task2Id = UUID.randomUUID().toString()
 
         logger.debug(
             "WebenSourceAnalyzeRoute: 提交分析请求 sourceType=${p.sourceType}" +
@@ -72,26 +76,54 @@ object WebenSourceAnalyzeRoute : FredicaApi.Route {
         WebenSourceService.repo.create(source)
         logger.info("WebenSourceAnalyzeRoute: WebenSource 已创建 sourceId=$sourceId analysisStatus=pending")
 
-        // 构建文件路径（weben_source_dir/{sourceId}/source_text.txt）
         val webenDir = AppUtil.Paths.webenSourceDir(sourceId).absolutePath
         val textPath = "$webenDir/source_text.txt"
-        logger.debug("WebenSourceAnalyzeRoute: 输出文本路径 textPath=$textPath")
 
-        // 创建 WorkflowRun（2 任务：FETCH_SUBTITLE → WEBEN_CONCEPT_EXTRACT）
+        // 是否需要插入 DOWNLOAD_WHISPER_MODEL 前置任务
+        val needDownloadTask = cfg.fasterWhisperModel.isNotBlank()
+        val totalTasks = if (needDownloadTask) 3 else 2
+
         WorkflowRunStatusService.create(
             WorkflowRun(
                 id         = workflowRunId,
                 materialId = p.materialId ?: "",
                 template   = "weben_analyze",
                 status     = "pending",
-                totalTasks = 2,
+                totalTasks = totalTasks,
                 doneTasks  = 0,
                 createdAt  = nowSec,
             )
         )
-        logger.debug("WebenSourceAnalyzeRoute: WorkflowRun 已创建 workflowRunId=$workflowRunId totalTasks=2")
+        logger.debug("WebenSourceAnalyzeRoute: WorkflowRun 已创建 workflowRunId=$workflowRunId totalTasks=$totalTasks")
 
-        // Task 1: FETCH_SUBTITLE（无前置依赖，立即可被 claimNext 认领）
+        // 可选 Task 0: DOWNLOAD_WHISPER_MODEL（check_skip=true，模型已存在则自动跳过）
+        val fetchSubtitleDependsOn: String
+        if (needDownloadTask) {
+            val downloadTaskId = UUID.randomUUID().toString()
+            val downloadPayload = buildValidJson {
+                kv("model_name", cfg.fasterWhisperModel)
+                kv("proxy", cfg.proxyUrl)
+                kv("check_skip", "true")
+            }.str
+            TaskStatusService.create(
+                Task(
+                    id            = downloadTaskId,
+                    type          = "DOWNLOAD_WHISPER_MODEL",
+                    workflowRunId = workflowRunId,
+                    materialId    = p.materialId ?: "",
+                    payload       = downloadPayload,
+                    idempotencyKey = "DOWNLOAD_WHISPER_MODEL:${cfg.fasterWhisperModel}",
+                    createdAt     = nowSec,
+                )
+            )
+            fetchSubtitleDependsOn = """["$downloadTaskId"]"""
+            logger.debug("WebenSourceAnalyzeRoute: Task0(DOWNLOAD_WHISPER_MODEL) 已创建 model=${cfg.fasterWhisperModel}")
+        } else {
+            fetchSubtitleDependsOn = "[]"
+        }
+
+        // Task 1: FETCH_SUBTITLE
+        val task1Id = UUID.randomUUID().toString()
         val task1Payload = buildValidJson {
             kv("source_id",        sourceId)
             kv("bvid",             p.bvid ?: "")
@@ -99,20 +131,21 @@ object WebenSourceAnalyzeRoute : FredicaApi.Route {
             if (p.materialId != null) kv("material_id", p.materialId)
             kv("output_text_path", textPath)
         }.str
-
         TaskStatusService.create(
             Task(
                 id            = task1Id,
                 type          = "FETCH_SUBTITLE",
                 workflowRunId = workflowRunId,
                 materialId    = p.materialId ?: "",
+                dependsOn     = fetchSubtitleDependsOn,
                 payload       = task1Payload,
                 createdAt     = nowSec,
             )
         )
         logger.debug("WebenSourceAnalyzeRoute: Task1(FETCH_SUBTITLE) 已创建 task1Id=$task1Id")
 
-        // Task 2: WEBEN_CONCEPT_EXTRACT（depends_on: [task1Id]，等 Task1 完成后才可认领）
+        // Task 2: WEBEN_CONCEPT_EXTRACT（depends_on: [task1Id]）
+        val task2Id = UUID.randomUUID().toString()
         val task2Payload = buildValidJson {
             kv("source_id",         sourceId)
             kv("text_path",         textPath)
@@ -120,7 +153,6 @@ object WebenSourceAnalyzeRoute : FredicaApi.Route {
             kv("video_description", "")
             if (p.materialId != null) kv("material_id", p.materialId)
         }.str
-
         TaskStatusService.create(
             Task(
                 id            = task2Id,
@@ -132,11 +164,11 @@ object WebenSourceAnalyzeRoute : FredicaApi.Route {
                 createdAt     = nowSec,
             )
         )
-        logger.debug("WebenSourceAnalyzeRoute: Task2(WEBEN_CONCEPT_EXTRACT) 已创建 task2Id=$task2Id dependsOn=[$task1Id]")
+        logger.debug("WebenSourceAnalyzeRoute: Task2(WEBEN_CONCEPT_EXTRACT) 已创建 task2Id=$task2Id")
 
         logger.info(
             "WebenSourceAnalyzeRoute: 分析流水线已启动 sourceId=$sourceId" +
-            " workflowRunId=$workflowRunId task1=$task1Id task2=$task2Id"
+            " workflowRunId=$workflowRunId needDownload=$needDownloadTask"
         )
         return buildValidJson {
             kv("ok", true)

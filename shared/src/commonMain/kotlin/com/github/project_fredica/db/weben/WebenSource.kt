@@ -66,6 +66,8 @@ interface WebenSourceRepo {
     suspend fun create(source: WebenSource)
     suspend fun getById(id: String): WebenSource?
     suspend fun listAll(materialId: String? = null): List<WebenSource>
+    suspend fun listPaged(materialId: String? = null, limit: Int = 20, offset: Int = 0): List<WebenSource>
+    suspend fun count(materialId: String? = null): Int
     suspend fun updateAnalysisStatus(id: String, status: String)
     /** 按主键更新进度（0–100）。 */
     suspend fun updateProgress(id: String, progress: Int)
@@ -209,13 +211,41 @@ class WebenSourceDb(private val db: Database) : WebenSourceRepo {
             "SELECT * FROM weben_source WHERE material_id = ? ORDER BY created_at DESC"
         else
             "SELECT * FROM weben_source ORDER BY created_at DESC"
-        val result = db.useConnection { conn ->
+        db.useConnection { conn ->
             conn.prepareStatement(sql).use { ps ->
                 if (materialId != null) ps.setString(1, materialId)
                 ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.toSource()) } }
             }
         }
-        result
+    }
+
+    override suspend fun listPaged(materialId: String?, limit: Int, offset: Int): List<WebenSource> =
+        withContext(Dispatchers.IO) {
+            val sql = if (materialId != null)
+                "SELECT * FROM weben_source WHERE material_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            else
+                "SELECT * FROM weben_source ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            db.useConnection { conn ->
+                conn.prepareStatement(sql).use { ps ->
+                    var idx = 1
+                    if (materialId != null) ps.setString(idx++, materialId)
+                    ps.setInt(idx++, limit); ps.setInt(idx, offset)
+                    ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.toSource()) } }
+                }
+            }
+        }
+
+    override suspend fun count(materialId: String?): Int = withContext(Dispatchers.IO) {
+        val sql = if (materialId != null)
+            "SELECT COUNT(*) FROM weben_source WHERE material_id = ?"
+        else
+            "SELECT COUNT(*) FROM weben_source"
+        db.useConnection { conn ->
+            conn.prepareStatement(sql).use { ps ->
+                if (materialId != null) ps.setString(1, materialId)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+            }
+        }
     }
 
     override suspend fun updateAnalysisStatus(id: String, status: String) = withContext(Dispatchers.IO) {

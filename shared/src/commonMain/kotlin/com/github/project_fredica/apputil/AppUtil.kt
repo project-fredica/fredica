@@ -65,7 +65,7 @@ object AppUtil {
          * 返回指定素材的媒体工作目录（首次调用时自动创建）：
          * `{appDataDir}/media/{materialId}/`
          */
-        fun materialMediaDir(materialId: String): File =
+        suspend fun materialMediaDir(materialId: String): File =
             appMediaDir.resolve(materialId).also { it.mkdirs() }
 
         /**
@@ -73,14 +73,14 @@ object AppUtil {
          * `{appDataDir}/weben/{sourceId}/`
          */
         fun webenSourceDir(sourceId: String): File =
-            appDataDir.resolve("weben").resolve(sourceId).also { it.mkdirs() }
+            appDataDir.resolve("weben").resolve(filenameSlugify(sourceId)).also { it.mkdirs() }
 
         /**
          * 返回指定视频文件哈希对应的 ASR 缓存目录（首次调用时自动创建）：
-         * `{appDataDir}/weben/asr_cache/{fileHash}/`
+         * `{appDataDir}/asr_cache/{fileHash}/`
          */
-        fun webenAsrCacheDir(fileHash: String): File =
-            appDataDir.resolve("weben").resolve("asr_cache").resolve(fileHash).also { it.mkdirs() }
+        fun asrCacheDir(fileHash: String): File =
+            appDataDir.resolve("asr_cache").resolve(filenameSlugify(fileHash)).also { it.mkdirs() }
     }
 
     /** 猴子补丁扩展函数的命名空间接收者，用于限制内部修复扩展的作用域。 */

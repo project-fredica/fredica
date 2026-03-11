@@ -44,7 +44,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         @SerialName("output_path")  val outputPath: String? = null,
     )
 
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val outputPath = payload.outputPath ?: return false
         val done = File(outputPath).exists()

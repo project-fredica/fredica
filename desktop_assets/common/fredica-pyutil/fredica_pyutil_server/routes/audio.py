@@ -238,7 +238,7 @@ async def extract_split_audio_task(websocket: WebSocket):
       2. 服务端实时推送 progress / done / error 消息
       3. 可随时发送 cancel / pause / resume / status 命令
     """
-    endpoint = ExtractSplitAudioTaskEndpoint(tag="extract-split-audio", websocket=websocket)
+    endpoint = ExtractSplitAudioTaskEndpoint(websocket=websocket)
     await endpoint.start_and_wait()
 
 
@@ -265,5 +265,5 @@ async def transcribe_chunk_task(websocket: WebSocket):
       2. 服务端逐片段推送 segment / done / error 消息
       3. 可随时发送 cancel / pause / resume / status 命令
     """
-    endpoint = FasterWhisperTranscribeTaskEndpoint(tag="transcribe-chunk", websocket=websocket)
+    endpoint = FasterWhisperTranscribeTaskEndpoint(websocket=websocket)
     await endpoint.start_and_wait()

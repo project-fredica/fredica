@@ -27,6 +27,8 @@ import com.github.project_fredica.worker.executors.TranscodeMp4Executor
 import com.github.project_fredica.worker.executors.FetchSubtitleExecutor
 import com.github.project_fredica.worker.executors.ExtractAudioExecutor
 import com.github.project_fredica.worker.executors.TranscribeExecutor
+import com.github.project_fredica.worker.executors.DownloadWhisperModelExecutor
+import com.github.project_fredica.worker.executors.EvaluateWhisperCompatExecutor
 import com.github.project_fredica.worker.executors.WebenConceptExtractExecutor
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
@@ -257,6 +259,8 @@ object FredicaApiJvmService {
                 ExtractAudioExecutor,
                 TranscribeExecutor,
                 WebenConceptExtractExecutor,
+                DownloadWhisperModelExecutor,
+                EvaluateWhisperCompatExecutor,
             ),
         )
         logger.debug("WorkerEngine started")

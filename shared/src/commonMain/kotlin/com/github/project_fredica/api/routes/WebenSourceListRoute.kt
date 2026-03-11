@@ -13,6 +13,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
 // =============================================================================
@@ -137,36 +138,43 @@ object WebenSourceListRoute : FredicaApi.Route {
     private val logger = createLogger { "WebenSourceListRoute" }
 
     override val mode = FredicaApi.Route.Mode.Get
-    override val desc = "来源库列表（可按 material_id 过滤，含双层状态对账 + 首次启动保护）"
+    override val desc = "来源库列表（可按 material_id 过滤，分页，含双层状态对账 + 首次启动保护）"
+
+    @Serializable
+    private data class PageResult(
+        val items: List<WebenSource>,
+        val total: Int,
+        val offset: Int,
+        val limit: Int,
+    )
 
     override suspend fun handler(param: String): ValidJsonString {
         val query      = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
+        val limit      = query["limit"]?.firstOrNull()?.toIntOrNull()?.coerceIn(1, 200) ?: 20
+        val offset     = query["offset"]?.firstOrNull()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
 
-        val sources    = WebenSourceService.repo.listAll(materialId)
+        // 对账需要全量数据，分页只影响最终响应
+        val allSources = WebenSourceService.repo.listAll(materialId)
 
         val anyReconciled: Boolean
         if (materialId != null) {
-            // 有 material_id（知识标签场景）：
-            // 每次 APP 启动只对账一次，两级锁保护并发安全，后续轮询零开销跳过
             var reconciled = false
             WebenSourceReconcileGuard.reconcileOnceIfNeeded(materialId) {
-                reconciled = reconcileSources(sources)
+                reconciled = reconcileSources(allSources)
             }
             anyReconciled = reconciled
         } else {
-            // 全量查询（不传 material_id）：每次均对账（兜底保护）
-            anyReconciled = reconcileSources(sources)
+            anyReconciled = reconcileSources(allSources)
         }
 
-        val finalSources = if (anyReconciled) {
-            // 对账修改了状态，重新查库获取最新数据
+        if (anyReconciled) {
             logger.debug("WebenSourceListRoute: 对账有变更，重新查询 materialId=$materialId")
-            WebenSourceService.repo.listAll(materialId)
-        } else {
-            sources
         }
-        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(finalSources))
+
+        val total = if (anyReconciled) WebenSourceService.repo.count(materialId) else allSources.size
+        val items = WebenSourceService.repo.listPaged(materialId, limit, offset)
+        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(PageResult(items, total, offset, limit)))
     }
 
     /**

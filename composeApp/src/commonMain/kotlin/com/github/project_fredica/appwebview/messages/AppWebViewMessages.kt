@@ -18,6 +18,8 @@ object AppWebViewMessages {
             LlmProxyChatJsMessageHandler(),
             CheckBilibiliCredentialJsMessageHandler(),
             TryRefreshBilibiliCredentialJsMessageHandler(),
+            RunFasterWhisperCompatEvalJsMessageHandler(),
+            RunFasterWhisperModelDownloadJsMessageHandler(),
         )
     }
 }

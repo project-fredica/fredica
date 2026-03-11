@@ -79,7 +79,9 @@ interface WebenConceptRepo {
     suspend fun getById(id: String): WebenConcept?
     suspend fun getByCanonicalName(canonicalName: String): WebenConcept?
     /** 瀑布流分页：可按 conceptType 过滤，按 mastery 升序（掌握度低的优先）。 */
-    suspend fun listAll(conceptType: String? = null, limit: Int = 50, offset: Int = 0): List<WebenConcept>
+    suspend fun listAll(conceptType: String? = null, sourceId: String? = null, limit: Int = 50, offset: Int = 0): List<WebenConcept>
+    /** 返回满足过滤条件的概念总数。 */
+    suspend fun count(conceptType: String? = null, sourceId: String? = null): Int
     /** 更新概念定义与元数据（用户手动修正），同步更新 updated_at。 */
     suspend fun update(concept: WebenConcept)
     /** 【内部】由 WebenFlashcardDb 在每次闪卡评分后调用，更新聚合缓存。 */
@@ -211,20 +213,38 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
         }
     }
 
-    override suspend fun listAll(conceptType: String?, limit: Int, offset: Int): List<WebenConcept> =
+    override suspend fun listAll(conceptType: String?, sourceId: String?, limit: Int, offset: Int): List<WebenConcept> =
         withContext(Dispatchers.IO) {
             db.useConnection { conn ->
-                val sql = if (conceptType != null)
-                    "SELECT * FROM weben_concept WHERE concept_type = ? ORDER BY mastery ASC LIMIT ? OFFSET ?"
-                else
-                    "SELECT * FROM weben_concept ORDER BY mastery ASC LIMIT ? OFFSET ?"
+                val conditions = buildList {
+                    if (sourceId != null) add("c.id IN (SELECT concept_id FROM weben_concept_source WHERE source_id = ?)")
+                    if (conceptType != null) add("c.concept_type = ?")
+                }
+                val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+                val sql = "SELECT c.* FROM weben_concept c $where ORDER BY c.mastery ASC LIMIT ? OFFSET ?"
                 conn.prepareStatement(sql).use { ps ->
-                    if (conceptType != null) {
-                        ps.setString(1, conceptType); ps.setInt(2, limit); ps.setInt(3, offset)
-                    } else {
-                        ps.setInt(1, limit); ps.setInt(2, offset)
-                    }
+                    var idx = 1
+                    if (sourceId != null) ps.setString(idx++, sourceId)
+                    if (conceptType != null) ps.setString(idx++, conceptType)
+                    ps.setInt(idx++, limit); ps.setInt(idx, offset)
                     ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.toConcept()) } }
+                }
+            }
+        }
+
+    override suspend fun count(conceptType: String?, sourceId: String?): Int =
+        withContext(Dispatchers.IO) {
+            db.useConnection { conn ->
+                val conditions = buildList {
+                    if (sourceId != null) add("id IN (SELECT concept_id FROM weben_concept_source WHERE source_id = ?)")
+                    if (conceptType != null) add("concept_type = ?")
+                }
+                val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+                conn.prepareStatement("SELECT COUNT(*) FROM weben_concept $where").use { ps ->
+                    var idx = 1
+                    if (sourceId != null) ps.setString(idx++, sourceId)
+                    if (conceptType != null) ps.setString(idx, conceptType)
+                    ps.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
                 }
             }
         }

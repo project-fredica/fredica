@@ -60,14 +60,14 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
 
     @Serializable
     private data class Payload(
-        @SerialName("source_id")        val sourceId: String,
+        @SerialName("source_id") val sourceId: String,
         val bvid: String,
         val page: Int = 1,
-        @SerialName("material_id")      val materialId: String? = null,
+        @SerialName("material_id") val materialId: String? = null,
         @SerialName("output_text_path") val outputTextPath: String,
     )
 
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val done = AppUtil.Paths.webenSourceDir(payload.sourceId).resolve("fetch_subtitle.done").exists()
         logger.debug("FetchSubtitleExecutor.canSkip: sourceId=${payload.sourceId} done=$done")
@@ -82,8 +82,12 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
         val sourceId = runCatching {
             Json.decodeFromString<Payload>(task.payload).sourceId
         }.getOrNull() ?: return
-        runCatching { WebenSourceService.repo.updateAnalysisStatus(sourceId, "failed") }
-            .onFailure { logger.warn("FetchSubtitleExecutor.onTaskFailed: 更新状态失败 sourceId=$sourceId: ${it.message}") }
+        runCatching {
+            WebenSourceService.repo.updateAnalysisStatus(
+                sourceId,
+                "failed"
+            )
+        }.onFailure { logger.warn("FetchSubtitleExecutor.onTaskFailed: 更新状态失败 sourceId=$sourceId: ${it.message}") }
         logger.info("FetchSubtitleExecutor.onTaskFailed: sourceId=$sourceId → failed (errorType=${result.errorType})")
     }
 
@@ -102,11 +106,16 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
         val sourceDir = AppUtil.Paths.webenSourceDir(payload.sourceId)
         val outputFile = File(payload.outputTextPath)
         outputFile.parentFile?.mkdirs()
+        logger.info("FetchSubtitleExecutor: outputFile=${outputFile.absolutePath} [taskId=${task.id}]")
 
         // Task1 是流水线第一步：此时将来源置为 analyzing（原来只有 WebenConceptExtractExecutor 才设置，
         // 导致 FetchSubtitle 执行期间来源仍显示 pending）
-        runCatching { WebenSourceService.repo.updateAnalysisStatus(payload.sourceId, "analyzing") }
-            .onFailure { logger.warn("FetchSubtitleExecutor: 设置 analyzing 状态失败 sourceId=${payload.sourceId}: ${it.message}") }
+        runCatching {
+            WebenSourceService.repo.updateAnalysisStatus(
+                payload.sourceId,
+                "analyzing"
+            )
+        }.onFailure { logger.warn("FetchSubtitleExecutor: 设置 analyzing 状态失败 sourceId=${payload.sourceId}: ${it.message}") }
 
         // 1. 获取字幕元信息
         val cfg = AppConfigService.repo.getConfig()
@@ -125,7 +134,9 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
             FredicaApi.PyUtil.post("/bilibili/video/subtitle-meta/${payload.bvid}/${payload.page}", credBody.str)
         } catch (e: Throwable) {
             logger.error("FetchSubtitleExecutor: 获取字幕元信息失败 [taskId=${task.id}]: ${e.message}")
-            return@withContext ExecuteResult(error = "获取字幕元信息失败: ${e.message}", errorType = "SUBTITLE_META_ERROR")
+            return@withContext ExecuteResult(
+                error = "获取字幕元信息失败: ${e.message}", errorType = "SUBTITLE_META_ERROR"
+            )
         }
 
         // 2. 解析字幕列表，选最佳字幕轨
@@ -139,12 +150,12 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", bodyBody.str)
             } catch (e: Throwable) {
                 logger.error("FetchSubtitleExecutor: 获取字幕内容失败 [taskId=${task.id}]: ${e.message}")
-                return@withContext ExecuteResult(error = "获取字幕内容失败: ${e.message}", errorType = "SUBTITLE_BODY_ERROR")
+                return@withContext ExecuteResult(
+                    error = "获取字幕内容失败: ${e.message}", errorType = "SUBTITLE_BODY_ERROR"
+                )
             }
             val text = extractSubtitleText(bodyRaw)
-            if (text.isNotBlank()) {
-                text
-            } else {
+            text.ifBlank {
                 logger.warn("FetchSubtitleExecutor: 字幕轨 lan=${bestSubtitle.lan} 内容为空，将兜底 ASR [taskId=${task.id}]")
                 null
             }
@@ -165,6 +176,14 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 outputFile.writeText("")
                 textSource = "none"
             } else {
+                // ASR 模型未配置时提前返回，等待用户配置
+                if (cfg.fasterWhisperModel.isBlank()) {
+                    logger.warn("FetchSubtitleExecutor: $fallbackReason 且 ASR 模型未配置 [taskId=${task.id}]")
+                    return@withContext ExecuteResult(
+                        error = "ASR 模型未配置，请先运行兼容性评估并选择模型",
+                        errorType = "AWAITING_ASR_CONFIG",
+                    )
+                }
                 logger.info("FetchSubtitleExecutor: $fallbackReason，启动 ASR materialId=$materialId [taskId=${task.id}]")
                 val asrText = runAsrFallback(task, materialId, payload.sourceId, cancelSignal, pauseResumeChannels, cfg)
                 if (asrText == null) {
@@ -208,9 +227,8 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
             }
 
             // 优先级：官方 zh-CN > AI（含 "ai"）> 其他
-            tracks.firstOrNull { it.lan == "zh-CN" }
-                ?: tracks.firstOrNull { it.lan.contains("ai") }
-                ?: tracks.firstOrNull()
+            tracks.firstOrNull { it.lan == "zh-CN" } ?: tracks.firstOrNull { it.lan.contains("ai") }
+            ?: tracks.firstOrNull()
         } catch (e: Throwable) {
             logger.warn("FetchSubtitleExecutor.selectBestSubtitle: 解析失败 ${e.message}")
             null
@@ -246,16 +264,14 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
     ): String? = withContext(Dispatchers.IO) {
         // 1. 找视频文件
         val mediaDir = AppUtil.Paths.materialMediaDir(materialId)
-        val videoFile = mediaDir.listFiles()
-            ?.firstOrNull { f -> f.extension in listOf("m4s", "mp4", "flv") }
-            ?: run {
-                logger.warn("FetchSubtitleExecutor: 未找到视频文件 mediaDir=${mediaDir.absolutePath}")
-                return@withContext ""
-            }
+        val videoFile = mediaDir.listFiles()?.firstOrNull { f -> f.extension in listOf("m4s", "mp4", "flv") } ?: run {
+            logger.warn("FetchSubtitleExecutor: 未找到视频文件 mediaDir=${mediaDir.absolutePath}")
+            return@withContext ""
+        }
 
         // 2. 计算 SHA-256
         val hash = computeSha256(videoFile)
-        val cacheDir = AppUtil.Paths.webenAsrCacheDir(hash)
+        val cacheDir = AppUtil.Paths.asrCacheDir(hash)
         val transcribeDone = cacheDir.resolve("transcribe.done")
 
         // 3. 检查整体缓存
@@ -270,8 +286,8 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
 
         // 从 AppConfig 读取硬件加速类型（加速视频 demux 阶段，降低 CPU 开销）
         val hwAccel = runCatching {
-            AppUtil.GlobalVars.json.parseToJsonElement(cfg.ffmpegProbeJson)
-                .jsonObject["selected_accel"]?.jsonPrimitive?.content ?: ""
+            AppUtil.GlobalVars.json.parseToJsonElement(cfg.ffmpegProbeJson).jsonObject["selected_accel"]?.jsonPrimitive?.content
+                ?: ""
         }.getOrDefault("")
         logger.info("FetchSubtitleExecutor: ASR 使用 hwAccel=$hwAccel [taskId=${task.id}]")
 
@@ -301,7 +317,11 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
             ) ?: return@withContext null  // 取消
 
             val parsedChunks = parseExtractResult(extractResult)
-            extractDone.writeText(AppUtil.GlobalVars.json.encodeToString(parsedChunks.map { mapOf("path" to it.path, "index" to it.index.toString()) }))
+            extractDone.writeText(AppUtil.GlobalVars.json.encodeToString(parsedChunks.map {
+                mapOf(
+                    "path" to it.path, "index" to it.index.toString()
+                )
+            }))
             parsedChunks
         }
 
@@ -324,7 +344,11 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
             val transcribeParam = buildValidJson {
                 kv("audio_path", chunk.path)
                 kv("language", "zh")
-                kv("device", "auto")
+                kv("model_name", cfg.fasterWhisperModel.ifBlank { "large-v3" })
+                kv("device", cfg.fasterWhisperDevice)
+                kv("compute_type", cfg.fasterWhisperComputeType)
+                if (cfg.fasterWhisperModelsDir.isNotBlank()) kv("models_dir", cfg.fasterWhisperModelsDir)
+                if (cfg.fasterWhisperInitJson != "{}") kv("whisper_init_extra", cfg.fasterWhisperInitJson)
             }.str
 
             val transcribeResult = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
@@ -406,7 +430,8 @@ object FetchSubtitleExecutor : WebSocketTaskExecutor() {
                 val obj = AppUtil.GlobalVars.json.parseToJsonElement(chunkFile.readText()).jsonObject
                 val text = obj["text"]?.jsonPrimitive?.content ?: ""
                 if (text.isNotBlank()) texts.add(text)
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+            }
             i++
         }
         return texts.joinToString("\n")

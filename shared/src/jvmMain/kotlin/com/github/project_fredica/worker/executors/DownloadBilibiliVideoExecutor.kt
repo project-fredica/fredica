@@ -70,7 +70,7 @@ object DownloadBilibiliVideoExecutor : WebSocketTaskExecutor() {
      * 条件：输出目录下存在 `download_m4s.done`（M4S 双流）或 `download_flv.done`（FLV 单流）。
      * 这两个标志文件由 Python 下载成功后写入，表示原始流文件已就绪。
      */
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val outputDir = if (payload.outputPath != null) {
             File(payload.outputPath).parentFile ?: return false

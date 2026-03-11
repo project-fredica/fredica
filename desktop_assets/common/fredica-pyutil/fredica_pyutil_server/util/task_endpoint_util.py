@@ -57,12 +57,12 @@ class TaskEndpoint(metaclass=abc.ABCMeta):
       - _on_init_param_and_run(param)  参数确认后启动后台任务（默认空实现）
     """
 
-    def __init__(self, *, tag: str, websocket: WebSocket):
+    def __init__(self, *, websocket: WebSocket, tag: Optional[str] = None):
         """
-        :param tag:       任务标识字符串，用于区分日志
         :param websocket: FastAPI/Starlette WebSocket 连接对象
+        :param tag:       任务标识字符串，用于区分日志；默认使用类名
         """
-        self.tag = tag
+        self.tag = tag if tag is not None else type(self).__name__
         self.websocket = websocket
         self._cancel_flag = False
         self._cancel_lock = asyncio.Lock()
@@ -292,8 +292,8 @@ class TaskEndpointInEventLoopThread(TaskEndpoint, metaclass=abc.ABCMeta):
       - 主动推送进度时调用 await self.send_json(data)（已内置锁保护）
     """
 
-    def __init__(self, *, tag: str, websocket: WebSocket):
-        super().__init__(tag=tag, websocket=websocket)
+    def __init__(self, *, websocket: WebSocket, tag: Optional[str] = None):
+        super().__init__(websocket=websocket, tag=tag)
         self._bg_task: Optional[asyncio.Task] = None
         # set = 运行中，clear = 已暂停；wait_if_paused() 阻塞在 clear 状态
         self._not_paused_event: asyncio.Event = asyncio.Event()
@@ -395,8 +395,8 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
       - 通过 status_queue.put(msg) 推送进度
     """
 
-    def __init__(self, *, tag: str, websocket: WebSocket):
-        super().__init__(tag=tag, websocket=websocket)
+    def __init__(self, *, websocket: WebSocket, tag: Optional[str] = None):
+        super().__init__(websocket=websocket, tag=tag)
         self._mp_ctx = multiprocessing.get_context("spawn")
         self._process: Optional[multiprocessing.Process] = None
         self._status_queue = self._mp_ctx.Queue()

@@ -29,6 +29,14 @@ data class AppConfig(
     @SerialName("llm_test_api_key") val llmTestApiKey: String = "",
     @SerialName("llm_test_base_url") val llmTestBaseUrl: String = "",
     @SerialName("llm_test_model") val llmTestModel: String = "",
+    // faster-whisper 本地语音识别配置
+    @SerialName("faster_whisper_model") val fasterWhisperModel: String = "",
+    @SerialName("faster_whisper_compute_type") val fasterWhisperComputeType: String = "auto",
+    @SerialName("faster_whisper_device") val fasterWhisperDevice: String = "auto",
+    @SerialName("faster_whisper_init_json") val fasterWhisperInitJson: String = "{}",
+    // 兼容性评估结果（只读，由 EvaluateWhisperCompatExecutor 写入）
+    @SerialName("faster_whisper_compat_json") val fasterWhisperCompatJson: String = "{}",
+    @SerialName("faster_whisper_models_dir") val fasterWhisperModelsDir: String = "",
     // Bilibili 登录态（留空则匿名请求；仅当出现"账号未登录"类错误时才需要配置）
     @SerialName("bilibili_sessdata") val bilibiliSessdata: String = "",
     @SerialName("bilibili_bili_jct") val bilibiliBiliJct: String = "",

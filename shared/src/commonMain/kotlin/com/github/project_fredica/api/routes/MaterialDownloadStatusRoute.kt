@@ -39,7 +39,7 @@ object MaterialDownloadStatusRoute : FredicaApi.Route {
         }
     }
 
-    private fun isDownloaded(materialId: String): Boolean {
+    private suspend fun isDownloaded(materialId: String): Boolean {
         val dir = AppUtil.Paths.materialMediaDir(materialId)
         if (dir.resolve("download_flv.done").exists() && dir.resolve("video.flv").exists()) {
             return true

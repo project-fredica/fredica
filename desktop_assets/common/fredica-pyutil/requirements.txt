@@ -11,3 +11,4 @@ aiohttp
 pydantic
 psutil
 pynvml
+huggingface_hub

@@ -436,6 +436,6 @@ class WebenConceptExtractExecutorTest {
             createdAt     = System.currentTimeMillis() / 1000L,
         )
 
-        assertTrue(WebenConceptExtractExecutor.canSkip(task), "存在 concept_extract.done 时应 canSkip=true")
+        assertTrue(runBlocking { WebenConceptExtractExecutor.canSkip(task) }, "存在 concept_extract.done 时应 canSkip=true")
     }
 }

@@ -1,272 +1,22 @@
-import { type ReactNode, useState, useEffect, useCallback } from "react";
-import { Trash2, ExternalLink, Plus, X, Loader, Settings, Download, RefreshCw, Pause, Play, Clapperboard, Brain, ArrowRight } from "lucide-react";
-import { Link, useSearchParams } from "react-router";
-import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
+import { useState, useEffect, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router";
+import { useAppFetch } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
-import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
 import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
-import { type WebenSource, getAnalysisStatusInfo } from "~/util/weben";
+import { type WebenSource } from "~/util/weben";
+import {
+    type MaterialVideo, type MaterialCategory, type MaterialTask, type WorkerTask, type BilibiliExtra,
+    POLL_INTERVAL_MS, PAGE_SIZE, MODAL_TASK_POLL_MS,
+} from "~/components/material-library/materialTypes";
+import { MaterialCategoryPanel } from "~/components/material-library/MaterialCategoryPanel";
+import { MaterialVideoRow } from "~/components/material-library/MaterialVideoRow";
+import { MaterialActionModal } from "~/components/material-library/MaterialActionModal";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface MaterialVideo {
-    id: string;
-    source_type: string;
-    source_id: string;
-    title: string;
-    cover_url: string;
-    description: string;
-    duration: number;
-    local_video_path: string;
-    local_audio_path: string;
-    transcript_path: string;
-    extra: string;
-    created_at: number;
-    updated_at: number;
-    category_ids: string[];
-}
-
-interface MaterialCategory {
-    id: string;
-    name: string;
-    description: string;
-    /** Count of all materials (any type) in this category. */
-    material_count: number;
-    created_at: number;
-    updated_at: number;
-}
-
-interface BilibiliExtra {
-    upper_name?: string;
-    upper_face_url?: string;
-    upper_mid?: number;
-    cnt_play?: number;
-    cnt_collect?: number;
-    cnt_danmaku?: number;
-    fav_time?: number;
-    source_fid?: string;
-    page_count?: number;
-    bvid?: string;
-}
-
-interface MaterialTask {
-    id: string;
-    material_id: string;
-    task_type: string;
-    status: string;
-}
-
-/** Task from the Phase-1 worker engine (task table). */
-interface WorkerTask {
-    id: string;
-    type: string;
-    material_id: string;
-    pipeline_id: string;
-    status: string;
-    result: string | null;
-    error: string | null;
-    error_type: string | null;
-    progress: number;
-    is_paused: boolean;
-    /** 任务是否支持暂停；false 时禁用暂停按钮（如 FFmpeg 子进程转码）。默认 true。 */
-    is_pausable: boolean;
-    created_at: number;
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const POLL_INTERVAL_MS = 5_000;
-const PAGE_SIZE = 20;
-
-const SOURCE_BADGE: Record<string, { label: string; className: string }> = {
-    bilibili: { label: 'B站', className: 'bg-pink-100 text-pink-700' },
-    youtube: { label: 'YouTube', className: 'bg-red-100 text-red-700' },
-    local: { label: '本地', className: 'bg-gray-100 text-gray-600' },
-};
-
-
-const WORKER_TASK_STATUS: Record<string, { label: string; className: string }> = {
-    pending: { label: '排队中', className: 'bg-yellow-100 text-yellow-700' },
-    claimed: { label: '执行中', className: 'bg-blue-100 text-blue-700' },
-    running: { label: '执行中', className: 'bg-blue-100 text-blue-700' },
-    completed: { label: '已完成', className: 'bg-green-100 text-green-700' },
-    failed: { label: '失败', className: 'bg-red-100 text-red-700' },
-    cancelled: { label: '已取消', className: 'bg-gray-100 text-gray-400' },
-};
-
-const TASK_TYPE_LABELS: Record<string, string> = {
-    DOWNLOAD_BILIBILI_VIDEO: '下载视频',
-    TRANSCODE_MP4: '转码 MP4',
-};
-
-const MODAL_TASK_POLL_MS = 2_000;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatCount(n: number): string {
-    if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}亿`;
-    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
-    return String(n);
-}
-
-// ─── WebenTab ─────────────────────────────────────────────────────────────────
-
-function WebenTab({ sources, loading, starting, onStartAnalysis }: {
-    sources: WebenSource[];
-    loading: boolean;
-    starting: boolean;
-    onStartAnalysis: () => void;
-}) {
-    const hasActive = sources.some(s => s.analysis_status === 'pending' || s.analysis_status === 'analyzing');
-    const hasCompleted = sources.some(s => s.analysis_status === 'completed');
-
-    return (
-        <div className="space-y-3">
-            {/* Sources list */}
-            {loading ? (
-                <div className="flex justify-center py-6">
-                    <Loader className="w-5 h-5 animate-spin text-gray-400" />
-                </div>
-            ) : sources.length === 0 ? (
-                <div className="py-6 text-center space-y-1">
-                    <Brain className="w-8 h-8 text-gray-200 mx-auto" />
-                    <p className="text-sm text-gray-500">尚未进行知识提取</p>
-                    <p className="text-xs text-gray-400">将从字幕/转录文本中提取概念、关系和闪卡</p>
-                </div>
-            ) : (
-                <div className="space-y-2">
-                    {sources.map(s => {
-                        const st = getAnalysisStatusInfo(s.analysis_status);
-                        return (
-                            <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 rounded-lg">
-                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`} />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium text-gray-700 truncate">{s.title}</p>
-                                    <p className="text-[10px] text-gray-400 mt-0.5">
-                                        {s.analysis_status === 'analyzing' ? '正在提取…' :
-                                         s.analysis_status === 'pending'   ? '排队等待中' :
-                                         s.analysis_status === 'completed' ? '已完成提取' : '提取失败'}
-                                    </p>
-                                </div>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${st.badge}`}>
-                                    {st.label}
-                                </span>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* Result links */}
-            {hasCompleted && (
-                <div className="flex gap-2">
-                    <Link
-                        to="/weben/concepts"
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors"
-                    >
-                        <Brain className="w-3.5 h-3.5" />
-                        查看提取概念
-                    </Link>
-                    <Link
-                        to="/weben"
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                    >
-                        知识网络
-                        <ArrowRight className="w-3 h-3" />
-                    </Link>
-                </div>
-            )}
-
-            {/* Start / re-analyze button */}
-            <div className="flex items-center justify-between gap-3 pt-1 border-t border-gray-100">
-                <div className="min-w-0">
-                    <span className="text-sm text-gray-700">
-                        {sources.length === 0 ? '开始知识提取' : '重新提取'}
-                    </span>
-                    {hasActive && (
-                        <p className="text-xs text-blue-600 mt-0.5">分析任务进行中，可前往任务中心查看进度</p>
-                    )}
-                </div>
-                <button
-                    onClick={onStartAnalysis}
-                    disabled={starting || hasActive}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {starting ? <Loader className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-                    {hasActive ? '分析中…' : sources.length === 0 ? '开始提取' : '重新提取'}
-                </button>
-            </div>
-
-            {/* Task center link when analyzing */}
-            {hasActive && (
-                <Link
-                    to="/tasks"
-                    className="flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-violet-600 transition-colors"
-                >
-                    前往任务中心查看进度 →
-                </Link>
-            )}
-        </div>
-    );
-}
-
-// ─── InfoTab ──────────────────────────────────────────────────────────────────
-
-function InfoTab({ actionTarget, onOpenModal, onOpenSubtitleModal }: {
-    actionTarget: MaterialVideo;
-    onOpenModal: (bvid: string) => void;
-    onOpenSubtitleModal: (bvid: string) => void;
-}) {
-    const bvid = actionTarget.source_type === 'bilibili'
-        ? ((() => { try { return (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid; } catch { return null; } })() ?? actionTarget.source_id)
-        : null;
-
-    if (!bvid) {
-        return <p className="text-sm text-gray-400 py-4 text-center">暂无可拉取的信息</p>;
-    }
-
-    return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3 py-1.5">
-                <div className="min-w-0">
-                    <span className="text-sm text-gray-700">B站 AI 总结</span>
-                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的 B 站 AI 总结内容（需登录凭证）</p>
-                </div>
-                <button
-                    onClick={() => onOpenModal(bvid)}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
-                >
-                    查询
-                </button>
-            </div>
-            <div className="flex items-center justify-between gap-3 py-1.5">
-                <div className="min-w-0">
-                    <span className="text-sm text-gray-700">B站字幕</span>
-                    <p className="text-xs text-gray-400 mt-0.5">查询该视频的字幕内容（需登录凭证）</p>
-                </div>
-                <button
-                    onClick={() => onOpenSubtitleModal(bvid)}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
-                >
-                    查询
-                </button>
-            </div>
-        </div>
-    );
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+const SOURCE_PAGE_SIZE = 5;
 
 export default function LibraryPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -276,7 +26,6 @@ export default function LibraryPage() {
     const [page, setPage] = useState(1);
     const [refreshing, setRefreshing] = useState(false);
 
-    // ── List data (kept across polls — never reset to null mid-flight) ───────
     const [videos, setVideos] = useState<MaterialVideo[] | null>(null);
     const [categories, setCategories] = useState<MaterialCategory[] | null>(null);
     const [downloadStatusMap, setDownloadStatusMap] = useState<Record<string, boolean>>({});
@@ -284,11 +33,9 @@ export default function LibraryPage() {
     const [categoriesLoading, setCategoriesLoading] = useState(true);
     const [videosError, setVideosError] = useState<Error | null>(null);
 
-    // Deletion state
     const [deletingVideoIds, setDeletingVideoIds] = useState<Set<string>>(new Set());
     const [deletingCategoryIds, setDeletingCategoryIds] = useState<Set<string>>(new Set());
 
-    // Action modal state
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
@@ -299,30 +46,21 @@ export default function LibraryPage() {
     const [cancellingPipelineId, setCancellingPipelineId] = useState<string | null>(null);
     const [pausingTaskId, setPausingTaskId] = useState<string | null>(null);
 
-    // Weben knowledge extraction state
     const [webenSources, setWebenSources] = useState<WebenSource[]>([]);
+    const [webenSourcesTotal, setWebenSourcesTotal] = useState(0);
+    const [webenSourcePage, setWebenSourcePage] = useState(1);
     const [webenSourcesLoading, setWebenSourcesLoading] = useState(false);
     const [startingAnalysis, setStartingAnalysis] = useState(false);
 
-    // New category creation
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
 
-    // Task data keyed by material_id
     const [tasksMap, setTasksMap] = useState<Map<string, MaterialTask[]>>(new Map());
 
-    // task_id URL filter: resolve to material_id via API
-    // undefined = resolving, null = no filter / not found, string = matched material_id
     const [taskFilterMaterialId, setTaskFilterMaterialId] = useState<string | null | undefined>(
         taskIdParam ? undefined : null
     );
 
-    const buildProxyUrl = useImageProxyUrl();
-
-    // ── Data fetching ───────────────────────────────────────────────────────
-    // apiFetch is stable (only changes when host/token changes).
-    // We never pass appPath to useAppFetch, so it won't fire declarative requests
-    // or call setData(null). All polling is manual via fetchData().
     const { apiFetch } = useAppFetch();
 
     const fetchData = useCallback(async () => {
@@ -336,7 +74,6 @@ export default function LibraryPage() {
             setVideosError(null);
             setCategories(categoriesResp.data as MaterialCategory[]);
 
-            // Batch-check local download status for all bilibili videos
             const bilibiliIds = fetchedVideos.filter(v => v.source_type === 'bilibili').map(v => v.id);
             if (bilibiliIds.length > 0) {
                 const { resp: dsResp, data: dsData } = await apiFetch(
@@ -354,36 +91,31 @@ export default function LibraryPage() {
         }
     }, [apiFetch]);
 
-    // Initial load + auto-refresh polling
     useEffect(() => {
         fetchData();
         const id = setInterval(fetchData, POLL_INTERVAL_MS);
         return () => clearInterval(id);
     }, [fetchData]);
 
-    // Resolve task_id URL param → material_id
     useEffect(() => {
-        if (!taskIdParam) {
-            setTaskFilterMaterialId(null);
-            return;
-        }
-        setTaskFilterMaterialId(undefined); // resolving
+        if (!taskIdParam) { setTaskFilterMaterialId(null); return; }
+        setTaskFilterMaterialId(undefined);
         const params = new URLSearchParams({ id: taskIdParam, page_size: '1' });
         apiFetch(`/api/v1/WorkerTaskListRoute?${params.toString()}`, { method: 'GET' }, { silent: true })
             .then(({ data }) => {
                 const result = data as { items: Array<{ material_id: string }>; total: number };
-                const mid = result?.items?.[0]?.material_id;
-                setTaskFilterMaterialId(mid ?? null);
+                setTaskFilterMaterialId(result?.items?.[0]?.material_id ?? null);
             })
             .catch(() => setTaskFilterMaterialId(null));
     }, [taskIdParam, apiFetch]);
+
+    useEffect(() => { setPage(1); }, [selectedCategoryId]);
 
     const handleManualRefresh = async () => {
         setRefreshing(true);
         try { await fetchData(); } finally { setRefreshing(false); }
     };
 
-    // Lazily load tasks for videos that are visible
     const loadTasksForMaterial = async (materialId: string) => {
         if (tasksMap.has(materialId)) return;
         try {
@@ -401,7 +133,6 @@ export default function LibraryPage() {
         }
     };
 
-    // Fetch latest task per type for the currently open modal (MaterialActiveTasksRoute)
     const fetchModalTasks = useCallback(async (materialId: string) => {
         try {
             const { resp, data } = await apiFetch(
@@ -409,13 +140,10 @@ export default function LibraryPage() {
                 { method: 'GET' },
                 { silent: true },
             );
-            if (resp.ok) {
-                setModalWorkerTasks(data as WorkerTask[]);
-            }
+            if (resp.ok) setModalWorkerTasks(data as WorkerTask[]);
         } catch { /* ignore polling errors */ }
     }, [apiFetch]);
 
-    // Auto-poll task status while the modal is open
     useEffect(() => {
         if (!actionTarget) return;
         setModalTasksLoading(true);
@@ -424,43 +152,36 @@ export default function LibraryPage() {
         return () => clearInterval(id);
     }, [actionTarget, fetchModalTasks]);
 
-    // Fetch WebenSources for the currently open modal
-    const fetchWebenSources = useCallback(async (materialId: string) => {
+    const fetchWebenSources = useCallback(async (materialId: string, pg: number = 1) => {
         setWebenSourcesLoading(true);
         try {
-            const { data } = await apiFetch(
-                `/api/v1/WebenSourceListRoute?material_id=${encodeURIComponent(materialId)}`,
-                { method: 'GET' },
-                { silent: true },
-            );
-            if (Array.isArray(data)) setWebenSources(data as WebenSource[]);
+            const params = new URLSearchParams();
+            params.set('material_id', materialId);
+            params.set('limit', String(SOURCE_PAGE_SIZE));
+            params.set('offset', String((pg - 1) * SOURCE_PAGE_SIZE));
+            const { data } = await apiFetch(`/api/v1/WebenSourceListRoute?${params}`, { method: 'GET' }, { silent: true });
+            const d = data as { items: WebenSource[]; total: number } | null;
+            if (d?.items) { setWebenSources(d.items); setWebenSourcesTotal(d.total); }
         } catch { /* silent */ } finally {
             setWebenSourcesLoading(false);
         }
     }, [apiFetch]);
 
-    // Poll weben sources while modal is open (analysis can take minutes)
     useEffect(() => {
         if (!actionTarget) return;
-        fetchWebenSources(actionTarget.id);
-        const id = setInterval(() => fetchWebenSources(actionTarget.id), 5_000);
+        fetchWebenSources(actionTarget.id, webenSourcePage);
+        const id = setInterval(() => fetchWebenSources(actionTarget.id, webenSourcePage), 5_000);
         return () => clearInterval(id);
-    }, [actionTarget, fetchWebenSources]);
+    }, [actionTarget, fetchWebenSources, webenSourcePage]);
 
-    // ── Imperative actions ──────────────────────────────────────────────────
+    // ── Handlers ─────────────────────────────────────────────────────────────
 
     const handleDeleteVideo = async (id: string) => {
         setDeletingVideoIds(prev => new Set([...prev, id]));
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialDeleteRoute', {
-                method: 'POST',
-                body: JSON.stringify({ ids: [id] }),
-            });
-            if (resp.ok) {
-                await fetchData();
-            } else {
-                reportHttpError('删除素材失败', resp);
-            }
+            const { resp } = await apiFetch('/api/v1/MaterialDeleteRoute', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
+            if (resp.ok) await fetchData();
+            else reportHttpError('删除素材失败', resp);
         } finally {
             setDeletingVideoIds(prev => { const n = new Set(prev); n.delete(id); return n; });
         }
@@ -469,16 +190,9 @@ export default function LibraryPage() {
     const handleDeleteCategory = async (id: string) => {
         setDeletingCategoryIds(prev => new Set([...prev, id]));
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialCategoryDeleteRoute', {
-                method: 'POST',
-                body: JSON.stringify({ id }),
-            });
-            if (resp.ok) {
-                if (selectedCategoryId === id) setSelectedCategoryId(null);
-                await fetchData();
-            } else {
-                reportHttpError('删除分类失败', resp);
-            }
+            const { resp } = await apiFetch('/api/v1/MaterialCategoryDeleteRoute', { method: 'POST', body: JSON.stringify({ id }) });
+            if (resp.ok) { if (selectedCategoryId === id) setSelectedCategoryId(null); await fetchData(); }
+            else reportHttpError('删除分类失败', resp);
         } finally {
             setDeletingCategoryIds(prev => { const n = new Set(prev); n.delete(id); return n; });
         }
@@ -489,19 +203,10 @@ export default function LibraryPage() {
         if (!name || creatingCategory) return;
         setCreatingCategory(true);
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialCategoryCreateRoute', {
-                method: 'POST',
-                body: JSON.stringify({ name }),
-            });
-            if (resp.ok) {
-                setNewCategoryName('');
-                await fetchData();
-            } else {
-                reportHttpError('创建分类失败', resp);
-            }
-        } finally {
-            setCreatingCategory(false);
-        }
+            const { resp } = await apiFetch('/api/v1/MaterialCategoryCreateRoute', { method: 'POST', body: JSON.stringify({ name }) });
+            if (resp.ok) { setNewCategoryName(''); await fetchData(); }
+            else reportHttpError('创建分类失败', resp);
+        } finally { setCreatingCategory(false); }
     };
 
     const handleOpenAction = (video: MaterialVideo) => {
@@ -509,7 +214,8 @@ export default function LibraryPage() {
         setModalWorkerTasks([]);
         setRunningTaskType(null);
         setWebenSources([]);
-        // Polling is handled by the useEffect that watches actionTarget
+        setWebenSourcesTotal(0);
+        setWebenSourcePage(1);
     };
 
     const handleCloseAction = () => {
@@ -519,6 +225,8 @@ export default function LibraryPage() {
         setCancellingPipelineId(null);
         setPausingTaskId(null);
         setWebenSources([]);
+        setWebenSourcesTotal(0);
+        setWebenSourcePage(1);
         setStartingAnalysis(false);
     };
 
@@ -526,90 +234,50 @@ export default function LibraryPage() {
         if (!actionTarget || runningTaskType) return;
         setRunningTaskType(taskType);
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialRunTaskRoute', {
-                method: 'POST',
-                body: JSON.stringify({ material_id: actionTarget.id, task_type: taskType }),
-            });
-            if (resp.ok) {
-                await fetchModalTasks(actionTarget.id);
-            } else {
-                reportHttpError('提交任务失败', resp);
-            }
-        } finally {
-            setRunningTaskType(null);
-        }
+            const { resp } = await apiFetch('/api/v1/MaterialRunTaskRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, task_type: taskType }) });
+            if (resp.ok) await fetchModalTasks(actionTarget.id);
+            else reportHttpError('提交任务失败', resp);
+        } finally { setRunningTaskType(null); }
     };
 
     const handleCancelDownload = async (taskId: string) => {
         if (cancellingPipelineId) return;
         setCancellingPipelineId(taskId);
         try {
-            const { resp } = await apiFetch('/api/v1/TaskCancelRoute', {
-                method: 'POST',
-                body: JSON.stringify({ task_id: taskId }),
-            });
-            if (resp.ok) {
-                if (actionTarget) await fetchModalTasks(actionTarget.id);
-            } else {
-                reportHttpError('取消下载失败', resp);
-            }
-        } finally {
-            setCancellingPipelineId(null);
-        }
+            const { resp } = await apiFetch('/api/v1/TaskCancelRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
+            else reportHttpError('取消下载失败', resp);
+        } finally { setCancellingPipelineId(null); }
     };
 
     const handlePauseTask = async (taskId: string) => {
         if (pausingTaskId) return;
         setPausingTaskId(taskId);
         try {
-            const { resp } = await apiFetch('/api/v1/TaskPauseRoute', {
-                method: 'POST',
-                body: JSON.stringify({ task_id: taskId }),
-            });
-            if (resp.ok) {
-                if (actionTarget) await fetchModalTasks(actionTarget.id);
-            } else {
-                reportHttpError('暂停任务失败', resp);
-            }
-        } finally {
-            setPausingTaskId(null);
-        }
+            const { resp } = await apiFetch('/api/v1/TaskPauseRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
+            else reportHttpError('暂停任务失败', resp);
+        } finally { setPausingTaskId(null); }
     };
 
     const handleResumeTask = async (taskId: string) => {
         if (pausingTaskId) return;
         setPausingTaskId(taskId);
         try {
-            const { resp } = await apiFetch('/api/v1/TaskResumeRoute', {
-                method: 'POST',
-                body: JSON.stringify({ task_id: taskId }),
-            });
-            if (resp.ok) {
-                if (actionTarget) await fetchModalTasks(actionTarget.id);
-            } else {
-                reportHttpError('恢复任务失败', resp);
-            }
-        } finally {
-            setPausingTaskId(null);
-        }
+            const { resp } = await apiFetch('/api/v1/TaskResumeRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
+            else reportHttpError('恢复任务失败', resp);
+        } finally { setPausingTaskId(null); }
     };
 
     const handleStartWorkflow = async (template: string) => {
         if (!actionTarget || runningTaskType) return;
         setRunningTaskType(template);
         try {
-            const { resp } = await apiFetch('/api/v1/WorkflowRunStartRoute', {
-                method: 'POST',
-                body: JSON.stringify({ material_id: actionTarget.id, template }),
-            });
-            if (resp.ok) {
-                await fetchModalTasks(actionTarget.id);
-            } else {
-                reportHttpError('启动工作流失败', resp);
-            }
-        } finally {
-            setRunningTaskType(null);
-        }
+            const { resp } = await apiFetch('/api/v1/WorkflowRunStartRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, template }) });
+            if (resp.ok) await fetchModalTasks(actionTarget.id);
+            else reportHttpError('启动工作流失败', resp);
+        } finally { setRunningTaskType(null); }
     };
 
     const handleStartAnalysis = async () => {
@@ -633,44 +301,32 @@ export default function LibraryPage() {
                     quality_score: 0.8,
                 }),
             });
-            if (resp.ok) {
-                await fetchWebenSources(actionTarget.id);
-            } else {
-                reportHttpError('启动知识提取失败', resp);
-            }
-        } finally {
-            setStartingAnalysis(false);
-        }
+            if (resp.ok) { setWebenSourcePage(1); await fetchWebenSources(actionTarget.id, 1); }
+            else reportHttpError('启动知识提取失败', resp);
+        } finally { setStartingAnalysis(false); }
     };
 
-    // ── Filtering ───────────────────────────────────────────────────────────
+    // ── Filtering & pagination ────────────────────────────────────────────────
 
     const filtered = (videos ?? []).filter(v => {
         if (selectedCategoryId && !v.category_ids.includes(selectedCategoryId)) return false;
-        // task_id filter: undefined = resolving (show all); null = no filter OR task not found
         if (taskIdParam && taskFilterMaterialId !== null && taskFilterMaterialId !== undefined) {
             if (v.id !== taskFilterMaterialId) return false;
         }
-        if (taskIdParam && taskFilterMaterialId === null) return false; // task not found
+        if (taskIdParam && taskFilterMaterialId === null) return false;
         return true;
     });
 
-    // Reset to page 1 when category filter changes
-    useEffect(() => { setPage(1); }, [selectedCategoryId]);
-
-    // Client-side pagination
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const pagedVideos = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-    // Validate that the selected category still exists after a refresh
     const categoryExists = categories?.some(c => c.id === selectedCategoryId) ?? true;
     const effectiveCategoryId = categoryExists ? selectedCategoryId : null;
 
-    // ── Render ──────────────────────────────────────────────────────────────
+    // ── Render ────────────────────────────────────────────────────────────────
 
     return (
         <>
-            {/* ── AI conclusion modal ── */}
             {aiConclusionTarget && (
                 <BilibiliAiConclusionModal
                     bvid={aiConclusionTarget.bvid}
@@ -678,8 +334,6 @@ export default function LibraryPage() {
                     onClose={() => setAiConclusionTarget(null)}
                 />
             )}
-
-            {/* ── Subtitle modal ── */}
             {subtitleTarget && (
                 <BilibiliSubtitleModal
                     bvid={subtitleTarget.bvid}
@@ -687,233 +341,43 @@ export default function LibraryPage() {
                     onClose={() => setSubtitleTarget(null)}
                 />
             )}
-
-            {/* ── Action modal ── */}
             {actionTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    <div className="absolute inset-0 bg-black/40" onClick={handleCloseAction} />
-                    <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
-
-                        {/* Header */}
-                        <div className="flex items-start justify-between gap-2 px-5 pt-5 pb-3">
-                            <div className="min-w-0">
-                                <p className="text-xs text-gray-400 mb-0.5">操作</p>
-                                <h2 className="text-sm font-semibold text-gray-900 line-clamp-2">
-                                    {actionTarget.title || actionTarget.source_id}
-                                </h2>
-                            </div>
-                            <button
-                                onClick={handleCloseAction}
-                                className="flex-shrink-0 p-1 rounded-lg hover:bg-gray-100 transition-colors"
-                            >
-                                <X className="w-4 h-4 text-gray-500" />
-                            </button>
-                        </div>
-
-                        {/* Tabs */}
-                        <div className="flex border-b border-gray-200 px-5">
-                            {(['workflow', 'info', 'weben'] as const).map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActionTab(tab)}
-                                    className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${actionTab === tab
-                                        ? 'border-purple-500 text-purple-700'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                                    }`}
-                                >
-                                    {tab === 'workflow' ? '一键流程' : tab === 'info' ? '信息拉取' : '知识提取'}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Body */}
-                        <div className="px-5 py-4">
-                            {actionTab === 'workflow' && (modalTasksLoading ? (
-                                <div className="flex justify-center py-6">
-                                    <Loader className="w-5 h-5 animate-spin text-gray-400" />
-                                </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    {/* Bilibili: 下载并转码 */}
-                                    {actionTarget.source_type === 'bilibili' && (() => {
-                                        const hasActive = modalWorkerTasks.some(
-                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
-                                                ['pending', 'claimed', 'running'].includes(t.status)
-                                        );
-                                        const isDisabled = hasActive || !!runningTaskType;
-                                        return (
-                                            <div className="flex items-center justify-between gap-3 py-1.5">
-                                                <div className="min-w-0">
-                                                    <span className="text-sm text-gray-700">视频转码</span>
-                                                    <p className="text-xs text-gray-400 mt-0.5">下载完成后自动转码，已下载则跳过</p>
-                                                </div>
-                                                <button
-                                                    onClick={() => handleStartWorkflow('bilibili_download_transcode')}
-                                                    disabled={isDisabled}
-                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {isDisabled ? <Loader className="w-3 h-3 animate-spin" /> : <Clapperboard className="w-3 h-3" />}
-                                                    {hasActive ? '进行中…' : '下载并转码'}
-                                                </button>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* Bilibili: 仅下载 */}
-                                    {actionTarget.source_type === 'bilibili' && (() => {
-                                        const activeDownload = modalWorkerTasks.find(
-                                            t => t.type === 'DOWNLOAD_BILIBILI_VIDEO' &&
-                                                ['pending', 'claimed', 'running'].includes(t.status)
-                                        );
-                                        const isDisabled = !!activeDownload || !!runningTaskType;
-                                        return (
-                                            <div className="flex items-center justify-between gap-3 py-1.5">
-                                                <span className="text-sm text-gray-700">视频下载</span>
-                                                <button
-                                                    onClick={() => handleRunTask('DOWNLOAD_BILIBILI_VIDEO')}
-                                                    disabled={isDisabled}
-                                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {isDisabled ? <Loader className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                                                    {activeDownload ? '下载中…' : '仅下载'}
-                                                </button>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* 统一控件区：有任何活跃任务时显示暂停/恢复/取消全部 */}
-                                    {actionTarget.source_type === 'bilibili' && (() => {
-                                        // 优先控制正在运行的任务（下载或转码），用于暂停/恢复
-                                        const runningTask = modalWorkerTasks.find(
-                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
-                                                t.status === 'running'
-                                        );
-                                        // 任意活跃任务（用于取消全部）
-                                        const anyActiveTask = modalWorkerTasks.find(
-                                            t => ['DOWNLOAD_BILIBILI_VIDEO', 'TRANSCODE_MP4'].includes(t.type) &&
-                                                ['pending', 'claimed', 'running'].includes(t.status)
-                                        );
-                                        if (!anyActiveTask) return null;
-                                        return (
-                                            <div className="flex items-center justify-center gap-2 py-1 px-2 bg-gray-50 rounded-lg">
-                                                {runningTask && (
-                                                    runningTask.is_paused ? (
-                                                        <button
-                                                            onClick={() => handleResumeTask(runningTask.id)}
-                                                            disabled={!!pausingTaskId}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            {pausingTaskId ? <Loader className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-                                                            恢复
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handlePauseTask(runningTask.id)}
-                                                            disabled={!!pausingTaskId || !runningTask.is_pausable}
-                                                            title={!runningTask.is_pausable ? '此任务不支持暂停' : undefined}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            {pausingTaskId ? <Loader className="w-3 h-3 animate-spin" /> : <Pause className="w-3 h-3" />}
-                                                            暂停
-                                                        </button>
-                                                    )
-                                                )}
-                                                <button
-                                                    onClick={() => handleCancelDownload(anyActiveTask.id)}
-                                                    disabled={!!cancellingPipelineId}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {cancellingPipelineId ? <Loader className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
-                                                    取消全部
-                                                </button>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* Task progress list */}
-                                    {modalWorkerTasks.some(t => t.type in TASK_TYPE_LABELS) && (
-                                        <div className="space-y-1.5 pt-1">
-                                            {modalWorkerTasks.filter(t => t.type in TASK_TYPE_LABELS).map(task => {
-                                                const isSkipped = task.status === 'completed' &&
-                                                    (() => { try { return (JSON.parse(task.result ?? '{}') as Record<string, unknown>).skipped === true; } catch { return false; } })();
-                                                const statusInfo = isSkipped
-                                                    ? { label: '已跳过（已完成）', className: 'bg-green-100 text-green-700' }
-                                                    : (WORKER_TASK_STATUS[task.status] ?? { label: task.status, className: 'bg-gray-100 text-gray-600' });
-                                                const typeLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
-                                                const showBar = !isSkipped && (task.status === 'running' || task.status === 'claimed' || task.status === 'completed');
-                                                const barPct = task.status === 'completed' ? 100 : task.progress;
-                                                return (
-                                                    <div key={task.id} className="space-y-0.5">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <span className="text-xs text-gray-600">{typeLabel}</span>
-                                                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${statusInfo.className}`}>
-                                                                {statusInfo.label}{!isSkipped && task.status === 'running' && task.progress > 0 ? ` ${task.progress}%` : ''}
-                                                            </span>
-                                                        </div>
-                                                        {showBar && (
-                                                            <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                                                                <div
-                                                                    className={`h-full rounded-full transition-all ${task.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'}`}
-                                                                    style={{ width: `${barPct}%` }}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                        {task.status === 'failed' && task.error && (
-                                                            <p className="text-[10px] text-red-500 truncate">{task.error}</p>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-
-                                    <div className="pt-3 border-t border-gray-100">
-                                        <Link
-                                            to={`/tasks?material_id=${encodeURIComponent(actionTarget.id)}`}
-                                            className="text-xs text-blue-600 hover:underline"
-                                            onClick={handleCloseAction}
-                                        >
-                                            前往任务中心查看详情 →
-                                        </Link>
-                                    </div>
-
-                                    {/* Danger zone */}
-                                    <div className="pt-3 border-t border-red-100">
-                                        <button
-                                            onClick={async () => {
-                                                handleCloseAction();
-                                                await handleDeleteVideo(actionTarget.id);
-                                            }}
-                                            disabled={deletingVideoIds.has(actionTarget.id)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {deletingVideoIds.has(actionTarget.id) ? <Loader className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                                            移除素材库（但不删除数据）
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-
-                            {actionTab === 'info' && (
-                                <InfoTab actionTarget={actionTarget} onOpenModal={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })} onOpenSubtitleModal={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })} />
-                            )}
-
-                            {actionTab === 'weben' && (
-                                <WebenTab
-                                    sources={webenSources}
-                                    loading={webenSourcesLoading && webenSources.length === 0}
-                                    starting={startingAnalysis}
-                                    onStartAnalysis={handleStartAnalysis}
-                                />
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <MaterialActionModal
+                    actionTarget={actionTarget}
+                    actionTab={actionTab}
+                    onTabChange={setActionTab}
+                    onClose={handleCloseAction}
+                    workflow={{
+                        tasksLoading: modalTasksLoading,
+                        tasks: modalWorkerTasks,
+                        runningTaskType,
+                        pausingTaskId,
+                        cancellingPipelineId,
+                        deletingVideoIds,
+                        onStartWorkflow: handleStartWorkflow,
+                        onRunTask: handleRunTask,
+                        onPauseTask: handlePauseTask,
+                        onResumeTask: handleResumeTask,
+                        onCancelDownload: handleCancelDownload,
+                        onDeleteVideo: handleDeleteVideo,
+                    }}
+                    onOpenAiConclusion={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })}
+                    onOpenSubtitle={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })}
+                    weben={{
+                        total: webenSourcesTotal,
+                        sources: webenSources,
+                        page: webenSourcePage,
+                        loading: webenSourcesLoading,
+                        starting: startingAnalysis,
+                        onPageChange: setWebenSourcePage,
+                        onStartAnalysis: handleStartAnalysis,
+                    }}
+                />
             )}
+
             <SidebarLayout>
                 <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
 
-                    {/* ── Header ── */}
                     <div className="flex items-center justify-between">
                         <div>
                             <h1 className="text-xl font-semibold text-gray-900">素材库</h1>
@@ -931,126 +395,21 @@ export default function LibraryPage() {
                         </button>
                     </div>
 
-                    {/* ── Category management ── */}
-                    <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 space-y-3">
-                        <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-700">分类</span>
-                            {categoriesLoading && (
-                                <Loader className="w-3.5 h-3.5 animate-spin text-gray-400" />
-                            )}
-                        </div>
+                    <MaterialCategoryPanel
+                        categories={categories}
+                        categoriesLoading={categoriesLoading}
+                        videos={videos}
+                        effectiveCategoryId={effectiveCategoryId}
+                        deletingCategoryIds={deletingCategoryIds}
+                        newCategoryName={newCategoryName}
+                        creatingCategory={creatingCategory}
+                        taskFilterMaterialId={taskFilterMaterialId}
+                        onSelectCategory={setSelectedCategoryId}
+                        onDeleteCategory={handleDeleteCategory}
+                        onNewCategoryNameChange={setNewCategoryName}
+                        onCreateCategory={handleCreateCategory}
+                    />
 
-                        {/* Category filter pills */}
-                        <div className="flex flex-wrap gap-2">
-                            {/* "全部" pill */}
-                            <button
-                                onClick={() => setSelectedCategoryId(null)}
-                                className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${!effectiveCategoryId
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                全部{videos ? ` (${videos.length})` : ''}
-                            </button>
-
-                            {/* Category pills */}
-                            {(categories ?? []).map(cat => {
-                                const isActive = effectiveCategoryId === cat.id;
-                                const isDeleting = deletingCategoryIds.has(cat.id);
-                                return (
-                                    <span
-                                        key={cat.id}
-                                        className={`inline-flex items-center gap-1 pl-3 pr-1.5 py-1 text-xs font-medium rounded-full transition-colors ${isActive
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                            } ${isDeleting ? 'opacity-50' : ''}`}
-                                    >
-                                        <button
-                                            onClick={() => setSelectedCategoryId(isActive ? null : cat.id)}
-                                            className="leading-none"
-                                        >
-                                            {cat.name} ({cat.material_count})
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteCategory(cat.id)}
-                                            disabled={isDeleting}
-                                            className={`rounded-full p-0.5 transition-colors ${isActive ? 'hover:bg-blue-500' : 'hover:bg-gray-300'
-                                                } disabled:cursor-not-allowed`}
-                                            title={`删除分类「${cat.name}」`}
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </button>
-                                    </span>
-                                );
-                            })}
-                        </div>
-
-                        {/* New category input */}
-                        <div className="flex gap-2 pt-1">
-                            <input
-                                type="text"
-                                value={newCategoryName}
-                                onChange={e => setNewCategoryName(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleCreateCategory()}
-                                placeholder="新建分类名称…"
-                                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                            />
-                            <button
-                                onClick={handleCreateCategory}
-                                disabled={!newCategoryName.trim() || creatingCategory}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {creatingCategory
-                                    ? <Loader className="w-3.5 h-3.5 animate-spin" />
-                                    : <Plus className="w-3.5 h-3.5" />
-                                }
-                                创建
-                            </button>
-                        </div>
-
-                        {/* Task ID filter */}
-                        <div className="flex gap-2 pt-1 border-t border-gray-100">
-                            <input
-                                type="text"
-                                value={taskIdParam}
-                                onChange={e => {
-                                    setSearchParams(prev => {
-                                        const n = new URLSearchParams(prev);
-                                        if (e.target.value) n.set('task_id', e.target.value);
-                                        else n.delete('task_id');
-                                        return n;
-                                    });
-                                }}
-                                placeholder="按任务 ID 筛选素材…"
-                                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
-                            />
-                            {taskIdParam && (
-                                <button
-                                    onClick={() => setSearchParams(prev => {
-                                        const n = new URLSearchParams(prev);
-                                        n.delete('task_id');
-                                        return n;
-                                    })}
-                                    className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                                >
-                                    <X className="w-3.5 h-3.5" />
-                                    清除
-                                </button>
-                            )}
-                        </div>
-                        {taskIdParam && (
-                            <p className="text-xs text-purple-600 mt-0.5">
-                                {taskFilterMaterialId === undefined
-                                    ? '正在解析任务…'
-                                    : taskFilterMaterialId === null
-                                        ? '未找到该任务对应的素材'
-                                        : `已筛选至素材：${taskFilterMaterialId}`
-                                }
-                            </p>
-                        )}
-                    </div>
-
-                    {/* ── Loading / error ── */}
                     {videosLoading && (
                         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-gray-400">
                             加载中…
@@ -1061,8 +420,6 @@ export default function LibraryPage() {
                             <p className="text-sm text-red-600">{videosError.message}</p>
                         </div>
                     )}
-
-                    {/* ── Empty state ── */}
                     {!videosLoading && !videosError && filtered.length === 0 && (
                         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-gray-400">
                             {!videos || videos.length === 0
@@ -1071,149 +428,26 @@ export default function LibraryPage() {
                         </div>
                     )}
 
-                    {/* ── Video list ── */}
                     {filtered.length > 0 && (
                         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-                            {pagedVideos.map(video => {
-                                const sourceBadge = SOURCE_BADGE[video.source_type]
-                                    ?? { label: video.source_type, className: 'bg-gray-100 text-gray-600' };
-                                const isDeleting = deletingVideoIds.has(video.id);
-                                const videoTasks = tasksMap.get(video.id);
-
-                                // Category pills shown on the video row
-                                const videoCats = (categories ?? []).filter(c =>
-                                    video.category_ids.includes(c.id)
-                                );
-
-                                let extraInfo: ReactNode = null;
-                                try {
-                                    const ext = JSON.parse(video.extra) as BilibiliExtra;
-                                    if (video.source_type === 'bilibili') {
-                                        extraInfo = (
-                                            <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                {ext.upper_name && <span>UP: {ext.upper_name}</span>}
-                                                {ext.cnt_play !== undefined && <span>播放 {formatCount(ext.cnt_play)}</span>}
-                                                {ext.cnt_collect !== undefined && <span>收藏 {formatCount(ext.cnt_collect)}</span>}
-                                            </div>
-                                        );
-                                    }
-                                } catch { /* TODO */ }
-
-                                const bilibiliPage = video.source_type === 'bilibili'
-                                    ? parseInt(video.id.match(/__P(\d+)$/)?.[1] ?? '1', 10)
-                                    : 1;
-                                const bilibiliUrl = video.source_type === 'bilibili'
-                                    ? `https://www.bilibili.com/video/${video.source_id}${bilibiliPage > 1 ? `?p=${bilibiliPage}` : ''}`
-                                    : null;
-
-                                return (
-                                    <div
-                                        key={video.id}
-                                        className={`flex gap-3 p-3 sm:p-4 transition-colors hover:bg-gray-50 ${isDeleting ? 'opacity-50' : ''}`}
-                                        onMouseEnter={() => loadTasksForMaterial(video.id)}
-                                    >
-                                        {/* Cover */}
-                                        <div className="relative flex-shrink-0">
-                                            <img
-                                                src={video.cover_url ? buildProxyUrl(video.cover_url) : ''}
-                                                alt={video.title}
-                                                className="w-32 sm:w-40 h-[72px] sm:h-[90px] object-cover rounded-lg bg-gray-100"
-                                            />
-                                            {video.duration > 0 && (
-                                                <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1 py-0.5 rounded font-mono leading-none">
-                                                    {formatDuration(video.duration)}
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        {/* Content */}
-                                        <div className="flex-1 min-w-0 flex flex-col justify-between gap-1">
-                                            <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
-                                                {video.title || video.source_id}
-                                            </h3>
-                                            {extraInfo}
-
-                                            {/* Source + category badges */}
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sourceBadge.className}`}>
-                                                    {sourceBadge.label}
-                                                </span>
-                                                {video.source_type === 'bilibili' && video.id in downloadStatusMap && (
-                                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${downloadStatusMap[video.id]
-                                                        ? 'bg-green-100 text-green-700'
-                                                        : 'bg-gray-100 text-gray-500'
-                                                        }`}>
-                                                        {downloadStatusMap[video.id] ? '已下载' : '未下载'}
-                                                    </span>
-                                                )}
-                                                {videoCats.map(cat => (
-                                                    <span
-                                                        key={cat.id}
-                                                        onClick={() => setSelectedCategoryId(cat.id)}
-                                                        className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 cursor-pointer hover:bg-indigo-100"
-                                                    >
-                                                        {cat.name}
-                                                    </span>
-                                                ))}
-                                            </div>
-
-                                            <span className="text-xs text-gray-400 font-mono">{video.source_id}</span>
-
-                                            {/* Task badges */}
-                                            {videoTasks && videoTasks.length > 0 && (
-                                                <div className="flex items-center gap-1 flex-wrap">
-                                                    {videoTasks.map(task => (
-                                                        <MaterialTaskBadge
-                                                            key={task.id}
-                                                            taskType={task.task_type}
-                                                            status={task.status}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Actions */}
-                                        <div className="flex flex-col gap-1.5 flex-shrink-0 justify-center">
-                                            {bilibiliUrl && (
-                                                <button
-                                                    onClick={() => window.open(bilibiliUrl, '_blank')}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap"
-                                                >
-                                                    <ExternalLink className="w-3.5 h-3.5" />
-                                                    打开
-                                                </button>
-                                            )}
-                                            {video.source_type === 'bilibili' && (
-                                                <BilibiliAiConclusionButton
-                                                    bvid={video.source_id}
-                                                    pageIndex={bilibiliPage - 1}
-                                                    onClick={() => setAiConclusionTarget({ bvid: video.source_id, pageIndex: bilibiliPage - 1 })}
-                                                />
-                                            )}
-                                            <button
-                                                onClick={() => { handleOpenAction(video); setActionTab('weben'); }}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors whitespace-nowrap"
-                                                title="知识提取"
-                                            >
-                                                <Brain className="w-3.5 h-3.5" />
-                                                知识
-                                            </button>
-                                            <button
-                                                onClick={() => handleOpenAction(video)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"
-                                            >
-                                                <Settings className="w-3.5 h-3.5" />
-                                                操作
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                            {pagedVideos.map(video => (
+                                <div key={video.id} onMouseEnter={() => loadTasksForMaterial(video.id)}>
+                                    <MaterialVideoRow
+                                        video={video}
+                                        categories={categories}
+                                        downloadStatusMap={downloadStatusMap}
+                                        tasksMap={tasksMap}
+                                        deletingVideoIds={deletingVideoIds}
+                                        onOpenAction={handleOpenAction}
+                                        onOpenActionWeben={(v) => { handleOpenAction(v); setActionTab('weben'); }}
+                                        onOpenAiConclusion={(bvid, pageIndex) => setAiConclusionTarget({ bvid, pageIndex })}
+                                        onSelectCategory={setSelectedCategoryId}
+                                    />
+                                </div>
+                            ))}
                         </div>
                     )}
 
-                    {/* ── Pagination ── */}
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-3">
                             <button

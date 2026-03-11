@@ -80,7 +80,7 @@ object TranscodeMp4Executor : WebSocketTaskExecutor() {
      * 条件：output_dir（或 output_path 的父目录）下存在 `transcode.done` 标志文件。
      * 该文件由 Python FFmpeg 转码成功后写入，表示 .mp4 已生成完毕。
      */
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val dir = when {
             payload.outputDir.isNotBlank() -> File(payload.outputDir)

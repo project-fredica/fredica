@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Activity, CheckCircle, XCircle, Clock, Loader } from "lucide-react";
+import { Link } from "react-router";
+import { X, Activity, CheckCircle, XCircle, Clock, Loader, AlertTriangle, Settings } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import type { WebenSource } from "~/util/weben";
 import { getAnalysisStatusInfo } from "~/util/weben";
@@ -13,6 +14,7 @@ interface WorkerTask {
     status: string;
     progress: number;
     error: string | null;
+    error_type: string | null;
     started_at: number | null;
     completed_at: number | null;
 }
@@ -26,21 +28,22 @@ interface TaskListResult {
 
 /** 已知任务类型的显示名称，未知类型直接展示原始 type 字段。 */
 const TASK_TYPE_LABELS: Record<string, string> = {
-    FETCH_SUBTITLE:         '获取字幕',
-    WEBEN_CONCEPT_EXTRACT:  '知识提取',
-    DOWNLOAD_BILIBILI_VIDEO:'下载视频',
-    TRANSCODE_MP4:          '转码 MP4',
-    EXTRACT_AUDIO:          '提取音频',
-    TRANSCRIBE:             '语音识别',
+    FETCH_SUBTITLE:           '获取字幕',
+    WEBEN_CONCEPT_EXTRACT:    '知识提取',
+    DOWNLOAD_BILIBILI_VIDEO:  '下载视频',
+    TRANSCODE_MP4:            '转码 MP4',
+    EXTRACT_AUDIO:            '提取音频',
+    TRANSCRIBE:               '语音识别',
+    DOWNLOAD_WHISPER_MODEL:   '下载 ASR 模型',
 };
 
 const TASK_STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-    pending:   { label: '等待中', icon: <Clock className="w-3.5 h-3.5"   />, color: 'text-gray-400'  },
-    claimed:   { label: '排队中', icon: <Clock className="w-3.5 h-3.5"   />, color: 'text-yellow-500'},
-    running:   { label: '进行中', icon: <Loader className="w-3.5 h-3.5 animate-spin" />, color: 'text-blue-500'  },
-    completed: { label: '已完成', icon: <CheckCircle className="w-3.5 h-3.5" />, color: 'text-green-500' },
-    failed:    { label: '失败',   icon: <XCircle className="w-3.5 h-3.5"  />, color: 'text-red-500'   },
-    cancelled: { label: '已取消', icon: <XCircle className="w-3.5 h-3.5"  />, color: 'text-gray-400'  },
+    pending:   { label: '等待中',   icon: <Clock className="w-3.5 h-3.5"   />, color: 'text-gray-400'   },
+    claimed:   { label: '排队中',   icon: <Clock className="w-3.5 h-3.5"   />, color: 'text-yellow-500' },
+    running:   { label: '进行中',   icon: <Loader className="w-3.5 h-3.5 animate-spin" />, color: 'text-blue-500'   },
+    completed: { label: '已完成',   icon: <CheckCircle className="w-3.5 h-3.5" />, color: 'text-green-500'  },
+    failed:    { label: '失败',     icon: <XCircle className="w-3.5 h-3.5"  />, color: 'text-red-500'    },
+    cancelled: { label: '已取消',   icon: <XCircle className="w-3.5 h-3.5"  />, color: 'text-gray-400'   },
 };
 
 // ─── Sub-components ─────────────────────────────────────────────────────────────
@@ -58,10 +61,13 @@ function ProgressBar({ value, color = 'bg-blue-500' }: { value: number; color?: 
 
 function TaskRow({ task }: { task: WorkerTask }) {
     const label  = TASK_TYPE_LABELS[task.type] ?? task.type;
-    const status = TASK_STATUS_CONFIG[task.status] ?? TASK_STATUS_CONFIG.pending;
+    const isAwaitingAsr = task.error_type === 'AWAITING_ASR_CONFIG';
+    const status = isAwaitingAsr
+        ? { label: '等待配置', icon: <AlertTriangle className="w-3.5 h-3.5" />, color: 'text-amber-500' }
+        : (TASK_STATUS_CONFIG[task.status] ?? TASK_STATUS_CONFIG.pending);
     const isRunning   = task.status === 'running';
     const isCompleted = task.status === 'completed';
-    const barColor = isCompleted ? 'bg-green-500' : isRunning ? 'bg-blue-500' : 'bg-gray-300';
+    const barColor = isCompleted ? 'bg-green-500' : isRunning ? 'bg-blue-500' : isAwaitingAsr ? 'bg-amber-300' : 'bg-gray-300';
     const pct = isCompleted ? 100 : task.progress;
 
     return (
@@ -77,9 +83,20 @@ function TaskRow({ task }: { task: WorkerTask }) {
                 </span>
             </div>
             <ProgressBar value={pct} color={barColor} />
-            {task.error && (
+            {isAwaitingAsr ? (
+                <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+                    <p className="text-xs text-amber-800 mb-2">该视频无 Bilibili 字幕，需配置本地语音识别（ASR）才能继续分析。</p>
+                    <Link
+                        to="/settings?section=asr"
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-900 transition-colors"
+                    >
+                        <Settings className="w-3.5 h-3.5" />
+                        前往 ASR 设置
+                    </Link>
+                </div>
+            ) : task.error ? (
                 <p className="mt-1 text-xs text-red-500 truncate" title={task.error}>{task.error}</p>
-            )}
+            ) : null}
         </div>
     );
 }

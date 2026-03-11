@@ -36,5 +36,5 @@ async def transcode_mp4_task(websocket: WebSocket):
       2. 服务端实时推送 progress / done / error 消息
       3. 可随时发送 cancel / pause / resume / status 命令
     """
-    endpoint = FfmpegTranscodeMp4TaskEndpoint(tag="transcode-mp4", websocket=websocket)
+    endpoint = FfmpegTranscodeMp4TaskEndpoint(websocket=websocket)
     await endpoint.start_and_wait()

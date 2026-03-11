@@ -11,6 +11,7 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     BilibiliVideoGetPagesRoute,
     BilibiliVideoSubtitleBodyRoute,
     BilibiliVideoSubtitleRoute,
+    FasterWhisperConfigInfoRoute,
     ImageProxyRoute,
     MaterialActiveTasksRoute,
     MaterialCategoryCreateRoute,

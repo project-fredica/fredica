@@ -75,7 +75,7 @@ object WebenConceptExtractExecutor : WebSocketTaskExecutor() {
         @SerialName("material_id")         val materialId: String? = null,
     )
 
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val done = AppUtil.Paths.webenSourceDir(payload.sourceId).resolve("concept_extract.done").exists()
         logger.debug("WebenConceptExtractExecutor.canSkip: sourceId=${payload.sourceId} done=$done")

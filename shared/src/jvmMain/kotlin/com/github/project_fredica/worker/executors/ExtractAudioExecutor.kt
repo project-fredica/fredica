@@ -42,7 +42,7 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
         @SerialName("chunk_duration_sec") val chunkDurationSec: Int = 300,
     )
 
-    override fun canSkip(task: Task): Boolean {
+    override suspend fun canSkip(task: Task): Boolean {
         val payload = runCatching { Json.decodeFromString<Payload>(task.payload) }.getOrNull() ?: return false
         val done = File(payload.outputDir).resolve("extract_audio.done").exists()
         logger.debug("ExtractAudioExecutor.canSkip: outputDir=${payload.outputDir} done=$done")

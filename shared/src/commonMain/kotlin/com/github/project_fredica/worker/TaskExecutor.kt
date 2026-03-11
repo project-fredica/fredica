@@ -48,7 +48,7 @@ interface TaskExecutor {
      * 仅当 payload 中 check_skip=true 时由 WorkerEngine 调用。
      * 默认返回 false，子类按需覆写。
      */
-    fun canSkip(task: Task): Boolean = false
+    suspend fun canSkip(task: Task): Boolean = false
 
     /**
      * 任务最终失败或取消时的回调（由 WorkerEngine 在写入 failed/cancelled 状态后调用）。

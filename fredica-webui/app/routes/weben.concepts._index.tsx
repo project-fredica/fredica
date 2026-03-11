@@ -128,17 +128,17 @@ export default function WebenConceptsPage() {
                 { method: 'GET' },
                 { silent: true },
             );
-            if (Array.isArray(data)) {
+            const page_data = data as { items: WebenConcept[]; total: number } | null;
+            if (page_data?.items) {
                 // Client-side search filter (API doesn't support text search yet)
-                const all = data as WebenConcept[];
                 const filtered = searchQuery
-                    ? all.filter(c =>
+                    ? page_data.items.filter(c =>
                         c.canonical_name.includes(searchQuery) ||
                         c.brief_definition?.includes(searchQuery)
                     )
-                    : all;
+                    : page_data.items;
                 setConcepts(filtered);
-                setTotal(filtered.length);
+                setTotal(searchQuery ? filtered.length : page_data.total);
             }
         } catch { /* silent */ } finally {
             setLoading(false);
