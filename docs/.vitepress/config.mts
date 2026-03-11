@@ -13,7 +13,7 @@ function create_sidebar_item(): DefaultTheme.SidebarItem[] {
     useFolderLinkFromIndexFile: true,
     collapseDepth: 2,
     collapsed: true,
-    sortMenusOrderNumericallyFromTitle: true,
+    sortMenusByFrontmatterOrder: true,
     underscoreToSpace: true,
   });
 }

@@ -94,39 +94,7 @@ npm run docs:build
 
 ## 运行测试
 
-所有单元测试位于 `shared/src/jvmTest/`，通过 Gradle 在 JVM 上运行。
-
-### 运行全部测试
-
-```shell
-./gradlew :shared:jvmTest
-```
-
-### 运行单个测试类
-
-```shell
-./gradlew :shared:jvmTest --tests "com.github.project_fredica.db.TaskDbTest"
-./gradlew :shared:jvmTest --tests "com.github.project_fredica.worker.WorkerEngineTest"
-```
-
-### 测试文件一览
-
-| 测试文件 | 覆盖范围 |
-|---------|---------|
-| `db/TaskDbTest.kt` | 任务队列 CRUD、DAG 依赖 `claimNext` 逻辑 |
-| `db/PipelineDbTest.kt` | Pipeline 生命周期、`recalculate()` 状态机 |
-| `worker/WorkerEngineTest.kt` | Worker 并发限制、任务执行流程 |
-| `worker/DagEngineTest.kt` | DAG 拓扑调度正确性 |
-| `python/PythonUtilTest.kt` | Python 服务 HTTP 通信（需要 Python 服务运行） |
-
-::: warning SQLite 测试隔离
-数据库测试使用临时文件（`File.createTempFile`），而非内存数据库。
-原因：ktorm 连接池每次 `useConnection{}` 开新连接，内存库每条连接是独立空库，会导致测试间数据不共享。
-:::
-
-::: warning WorkerEngine 测试隔离
-`WorkerEngine` 是全局单例，每次 `start()` 都会新增轮询协程。测试类须在 `@AfterTest` 中取消所有通过 `activeScopes` 记录的 `CoroutineScope`，避免上一个测试的协程抢占下一个测试的任务。
-:::
+详见 [测试指南](./testing)。
 
 ---
 

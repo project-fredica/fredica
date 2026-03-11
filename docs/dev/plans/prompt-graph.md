@@ -1,5 +1,6 @@
 ---
 title: 提示词图（Prompt Graph）架构设计
+order: 3
 ---
 
 # 提示词图（Prompt Graph）架构设计
