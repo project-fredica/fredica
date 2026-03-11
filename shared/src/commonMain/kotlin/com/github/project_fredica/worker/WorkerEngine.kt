@@ -10,10 +10,16 @@ package com.github.project_fredica.worker
 //   3. 用 Semaphore(maxWorkers) 限制同时执行的任务数量上限
 //   4. 队列为空时，轮询间隔自动退避到 IDLE_BACKOFF_MS，减少空轮询开销
 //
-// 任务完成后的状态流转：
-//   执行成功 → status=completed → 触发 pipeline recalculate
-//   执行失败 + 还有重试次数 → retry_count++ → status=pending（重新入队）
-//   执行失败 + 无重试次数  → status=failed → 触发 pipeline recalculate
+// Task 状态机（完整流转）：
+//   创建          → pending
+//   claimNext()   → pending  → claimed   （Worker 原子认领，DAG 依赖全部 completed 才可认领）
+//   dispatch()    → claimed  → running   （Executor 开始执行）
+//   执行成功      → running  → completed → 触发 WorkflowRun recalculate
+//   用户取消      → running  → cancelled → 触发 WorkflowRun recalculate
+//   失败可重试    → running  → pending   （retry_count++，重新入队等待 claimNext）
+//   失败不可重试  → running  → failed    → 触发 WorkflowRun recalculate
+//   级联取消      → pending/claimed → cancelled（WorkflowRun 取消时批量处理）
+//   启动恢复      → running/claimed/pending → cancelled（APP 重启时清理僵尸任务）
 //
 // 多平台说明：
 //   WorkerEngine 本身位于 commonMain，仅依赖 kotlinx.coroutines（多平台）。
@@ -116,7 +122,7 @@ object WorkerEngine {
                 }
 
                 idling = false
-                logger.debug("WorkerEngine: 认领任务 ${task.id}（type=${task.type}）")
+                logger.info("WorkerEngine: [pending→claimed] 认领任务 ${task.id}（type=${task.type}）")
 
                 // 启动独立协程执行任务，轮询协程不等待它完成，继续认领下一个
                 scope.launch {
@@ -234,8 +240,8 @@ object WorkerEngine {
             return
         }
 
-        // 步骤 2：标记为执行中
-        logger.debug("WorkerEngine: 任务 ${task.id}（${task.type}）开始执行，workflowRunId=${task.workflowRunId}")
+        // 步骤 2：claimed → running（Executor 开始执行）
+        logger.info("WorkerEngine: [claimed→running] 任务 ${task.id}（${task.type}），workflowRunId=${task.workflowRunId}")
         TaskService.repo.updateStatus(task.id, "running")
 
         // 步骤 3：执行任务（捕获所有异常，防止协程崩溃导致引擎停止）
@@ -250,23 +256,24 @@ object WorkerEngine {
         // 步骤 4：根据结果更新状态
         when {
             execResult.errorType == "CANCELLED" -> {
-                // 用户主动取消：不触发重试，直接标记 cancelled
+                // running → cancelled：用户主动取消，不触发重试
                 TaskService.repo.updateStatus(task.id, "cancelled", error = execResult.error, errorType = "CANCELLED")
-                logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）已被用户取消")
+                logger.info("WorkerEngine: [running→cancelled] 任务 ${task.id}（${task.type}）已被用户取消")
                 // 通知 Executor 处理业务副作用（如重置 WebenSource 状态）
                 runCatching { executor.onTaskFailed(task, execResult) }
                     .onFailure { logger.error("WorkerEngine: onTaskFailed 回调异常，任务 ${task.id}", it) }
             }
             execResult.isSuccess -> {
+                // running → completed
                 TaskService.repo.updateStatus(task.id, "completed", result = execResult.result)
-                logger.info("WorkerEngine: 任务 ${task.id}（${task.type}）执行成功")
+                logger.info("WorkerEngine: [running→completed] 任务 ${task.id}（${task.type}）执行成功")
             }
             else -> {
                 // AWAITING_CREDENTIAL：等待用户配置凭据，不自动重试（需用户手动干预）
                 val canRetry = task.retryCount < task.maxRetries &&
                         execResult.errorType != "AWAITING_CREDENTIAL"
                 if (canRetry) {
-                    // 记录重试次数 +1，然后重置回 pending（让 claimNext 再次认领）
+                    // running → pending（失败可重试，retry_count++，重新入队）
                     TaskService.repo.incrementRetry(task.id)
                     TaskService.repo.updateStatus(
                         id = task.id,
@@ -275,7 +282,7 @@ object WorkerEngine {
                         errorType = execResult.errorType,
                     )
                     logger.warn(
-                        "WorkerEngine: 任务 ${task.id}（${task.type}）失败，将重试" +
+                        "WorkerEngine: [running→pending] 任务 ${task.id}（${task.type}）失败，将重试" +
                         "（第 ${task.retryCount + 1}/${task.maxRetries} 次）: ${execResult.error}"
                     )
                 } else {
@@ -297,8 +304,9 @@ object WorkerEngine {
      * 调用时机：重试次数耗尽，或 errorType 为不可重试类型（如 AWAITING_CREDENTIAL）。
      */
     private suspend fun finishFailed(task: Task, error: String?, errorType: String?) {
+        // running → failed（重试耗尽或不可重试类型）
         TaskService.repo.updateStatus(task.id, "failed", error = error, errorType = errorType)
-        logger.error("WorkerEngine: 任务 ${task.id}（${task.type}）永久失败（重试耗尽）: $error [errorType=$errorType]")
+        logger.error("WorkerEngine: [running→failed] 任务 ${task.id}（${task.type}）永久失败: $error [errorType=$errorType]")
     }
 
     /**
