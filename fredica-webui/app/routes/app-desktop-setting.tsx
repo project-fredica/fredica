@@ -184,6 +184,8 @@ export default function Component({ }: Route.ComponentProps) {
     const navigate = useNavigate();
     const [values, setValues] = useState<Record<string, string | number | boolean>>(buildInitialValues);
     const [saved, setSaved] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const [showLeaveModal, setShowLeaveModal] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [deviceInfo, setDeviceInfo] = useState<any>(null);
     const [ffmpegProbe, setFfmpegProbe] = useState<any>(null);
@@ -373,6 +375,7 @@ export default function Component({ }: Route.ComponentProps) {
     const handleChange = (key: string, value: string | number | boolean) => {
         setValues((prev) => ({ ...prev, [key]: value }));
         setSaved(false);
+        setIsDirty(true);
     };
 
     const handleSave = async () => {
@@ -381,6 +384,7 @@ export default function Component({ }: Route.ComponentProps) {
             const updated = JSON.parse(result) as Record<string, string | number | boolean>;
             setValues(prev => ({ ...prev, ...updated }));
             setSaved(true);
+            setIsDirty(false);
             setTimeout(() => setSaved(false), 2000);
         } catch (e) {
             console.error("保存设置失败：", e);
@@ -411,6 +415,36 @@ export default function Component({ }: Route.ComponentProps) {
 
     return (
         <div style={{ minHeight: "100vh", backgroundColor: "#f9fafb", fontFamily: "system-ui, sans-serif" }}>
+            {/* 离开确认模态框 */}
+            {showLeaveModal && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.4)" }} onClick={() => setShowLeaveModal(false)} />
+                    <div style={{ position: "relative", backgroundColor: "#fff", borderRadius: "12px", padding: "24px", width: "320px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
+                        <h3 style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: 600, color: "#111827" }}>还未保存</h3>
+                        <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#6b7280" }}>当前设置已修改但尚未保存，是否保存后再返回？</p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <button
+                                onClick={async () => { await handleSave(); navigate("/app-desktop-home"); }}
+                                style={{ padding: "9px 16px", fontSize: "14px", fontWeight: 500, color: "#fff", backgroundColor: "#7c3aed", border: "none", borderRadius: "8px", cursor: "pointer" }}
+                            >
+                                保存设置并返回
+                            </button>
+                            <button
+                                onClick={() => { setShowLeaveModal(false); navigate("/app-desktop-home"); }}
+                                style={{ padding: "9px 16px", fontSize: "14px", fontWeight: 500, color: "#374151", backgroundColor: "#f3f4f6", border: "none", borderRadius: "8px", cursor: "pointer" }}
+                            >
+                                直接返回
+                            </button>
+                            <button
+                                onClick={() => setShowLeaveModal(false)}
+                                style={{ padding: "9px 16px", fontSize: "14px", fontWeight: 500, color: "#6b7280", backgroundColor: "transparent", border: "1px solid #d1d5db", borderRadius: "8px", cursor: "pointer" }}
+                            >
+                                取消返回
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* 顶部导航 */}
             <div style={{
                 display: "flex",
@@ -425,7 +459,7 @@ export default function Component({ }: Route.ComponentProps) {
             }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <button
-                        onClick={() => navigate("/app-desktop-home")}
+                        onClick={() => isDirty ? setShowLeaveModal(true) : navigate("/app-desktop-home")}
                         style={{
                             display: "flex",
                             alignItems: "center",

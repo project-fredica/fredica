@@ -81,10 +81,7 @@ export const WORKER_TASK_STATUS: Record<string, { label: string; className: stri
     cancelled: { label: '已取消', className: 'bg-gray-100 text-gray-400' },
 };
 
-export const TASK_TYPE_LABELS: Record<string, string> = {
-    DOWNLOAD_BILIBILI_VIDEO: '下载视频',
-    TRANSCODE_MP4:           '转码 MP4',
-};
+export { TASK_TYPE_LABELS } from "~/components/ui/WorkflowInfoPanel";
 
 export function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);

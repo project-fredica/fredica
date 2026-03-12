@@ -3,14 +3,13 @@ import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
-import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
 import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
 import { type WebenSource } from "~/util/weben";
 import {
-    type MaterialVideo, type MaterialCategory, type MaterialTask, type WorkerTask, type BilibiliExtra,
-    POLL_INTERVAL_MS, PAGE_SIZE, MODAL_TASK_POLL_MS,
+    type MaterialVideo, type MaterialCategory, type MaterialTask,
+    POLL_INTERVAL_MS, PAGE_SIZE,
 } from "~/components/material-library/materialTypes";
 import { MaterialCategoryPanel } from "~/components/material-library/MaterialCategoryPanel";
 import { MaterialVideoRow } from "~/components/material-library/MaterialVideoRow";
@@ -40,17 +39,12 @@ export default function LibraryPage() {
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [actionTab, setActionTab] = useState<'workflow' | 'info' | 'weben'>('workflow');
-    const [modalWorkerTasks, setModalWorkerTasks] = useState<WorkerTask[]>([]);
-    const [modalTasksLoading, setModalTasksLoading] = useState(false);
     const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
-    const [cancellingPipelineId, setCancellingPipelineId] = useState<string | null>(null);
-    const [pausingTaskId, setPausingTaskId] = useState<string | null>(null);
 
     const [webenSources, setWebenSources] = useState<WebenSource[]>([]);
     const [webenSourcesTotal, setWebenSourcesTotal] = useState(0);
     const [webenSourcePage, setWebenSourcePage] = useState(1);
     const [webenSourcesLoading, setWebenSourcesLoading] = useState(false);
-    const [startingAnalysis, setStartingAnalysis] = useState(false);
 
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
@@ -133,25 +127,6 @@ export default function LibraryPage() {
         }
     };
 
-    const fetchModalTasks = useCallback(async (materialId: string) => {
-        try {
-            const { resp, data } = await apiFetch(
-                `/api/v1/MaterialActiveTasksRoute?material_id=${encodeURIComponent(materialId)}`,
-                { method: 'GET' },
-                { silent: true },
-            );
-            if (resp.ok) setModalWorkerTasks(data as WorkerTask[]);
-        } catch { /* ignore polling errors */ }
-    }, [apiFetch]);
-
-    useEffect(() => {
-        if (!actionTarget) return;
-        setModalTasksLoading(true);
-        fetchModalTasks(actionTarget.id).finally(() => setModalTasksLoading(false));
-        const id = setInterval(() => fetchModalTasks(actionTarget.id), MODAL_TASK_POLL_MS);
-        return () => clearInterval(id);
-    }, [actionTarget, fetchModalTasks]);
-
     const fetchWebenSources = useCallback(async (materialId: string, pg: number = 1) => {
         setWebenSourcesLoading(true);
         try {
@@ -211,7 +186,6 @@ export default function LibraryPage() {
 
     const handleOpenAction = (video: MaterialVideo) => {
         setActionTarget(video);
-        setModalWorkerTasks([]);
         setRunningTaskType(null);
         setWebenSources([]);
         setWebenSourcesTotal(0);
@@ -222,12 +196,9 @@ export default function LibraryPage() {
         setActionTarget(null);
         setActionTab('workflow');
         setRunningTaskType(null);
-        setCancellingPipelineId(null);
-        setPausingTaskId(null);
         setWebenSources([]);
         setWebenSourcesTotal(0);
         setWebenSourcePage(1);
-        setStartingAnalysis(false);
     };
 
     const handleRunTask = async (taskType: string) => {
@@ -235,39 +206,8 @@ export default function LibraryPage() {
         setRunningTaskType(taskType);
         try {
             const { resp } = await apiFetch('/api/v1/MaterialRunTaskRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, task_type: taskType }) });
-            if (resp.ok) await fetchModalTasks(actionTarget.id);
-            else reportHttpError('提交任务失败', resp);
+            if (!resp.ok) reportHttpError('提交任务失败', resp);
         } finally { setRunningTaskType(null); }
-    };
-
-    const handleCancelDownload = async (taskId: string) => {
-        if (cancellingPipelineId) return;
-        setCancellingPipelineId(taskId);
-        try {
-            const { resp } = await apiFetch('/api/v1/TaskCancelRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
-            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
-            else reportHttpError('取消下载失败', resp);
-        } finally { setCancellingPipelineId(null); }
-    };
-
-    const handlePauseTask = async (taskId: string) => {
-        if (pausingTaskId) return;
-        setPausingTaskId(taskId);
-        try {
-            const { resp } = await apiFetch('/api/v1/TaskPauseRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
-            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
-            else reportHttpError('暂停任务失败', resp);
-        } finally { setPausingTaskId(null); }
-    };
-
-    const handleResumeTask = async (taskId: string) => {
-        if (pausingTaskId) return;
-        setPausingTaskId(taskId);
-        try {
-            const { resp } = await apiFetch('/api/v1/TaskResumeRoute', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
-            if (resp.ok) { if (actionTarget) await fetchModalTasks(actionTarget.id); }
-            else reportHttpError('恢复任务失败', resp);
-        } finally { setPausingTaskId(null); }
     };
 
     const handleStartWorkflow = async (template: string) => {
@@ -275,35 +215,12 @@ export default function LibraryPage() {
         setRunningTaskType(template);
         try {
             const { resp } = await apiFetch('/api/v1/WorkflowRunStartRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, template }) });
-            if (resp.ok) await fetchModalTasks(actionTarget.id);
-            else reportHttpError('启动工作流失败', resp);
+            if (!resp.ok) reportHttpError('启动工作流失败', resp);
         } finally { setRunningTaskType(null); }
     };
 
-    const handleStartAnalysis = async () => {
-        if (!actionTarget || startingAnalysis) return;
-        let bvid: string | null = null;
-        if (actionTarget.source_type === 'bilibili') {
-            try { bvid = (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid ?? actionTarget.source_id; }
-            catch { bvid = actionTarget.source_id; }
-        }
-        setStartingAnalysis(true);
-        try {
-            const { resp } = await apiFetch('/api/v1/WebenSourceAnalyzeRoute', {
-                method: 'POST',
-                body: JSON.stringify({
-                    material_id: actionTarget.id,
-                    url: bvid ? `https://www.bilibili.com/video/${bvid}` : '',
-                    title: actionTarget.title || actionTarget.source_id,
-                    source_type: actionTarget.source_type === 'bilibili' ? 'bilibili_video' : 'local_file',
-                    ...(bvid ? { bvid } : {}),
-                    ...(actionTarget.duration ? { duration_sec: actionTarget.duration } : {}),
-                    quality_score: 0.8,
-                }),
-            });
-            if (resp.ok) { setWebenSourcePage(1); await fetchWebenSources(actionTarget.id, 1); }
-            else reportHttpError('启动知识提取失败', resp);
-        } finally { setStartingAnalysis(false); }
+    const buildAnalyzeUrl = (video: MaterialVideo): string => {
+        return `/weben-analyze/${video.id}`;
     };
 
     // ── Filtering & pagination ────────────────────────────────────────────────
@@ -348,17 +265,11 @@ export default function LibraryPage() {
                     onTabChange={setActionTab}
                     onClose={handleCloseAction}
                     workflow={{
-                        tasksLoading: modalTasksLoading,
-                        tasks: modalWorkerTasks,
+                        materialId: actionTarget.id,
                         runningTaskType,
-                        pausingTaskId,
-                        cancellingPipelineId,
                         deletingVideoIds,
                         onStartWorkflow: handleStartWorkflow,
                         onRunTask: handleRunTask,
-                        onPauseTask: handlePauseTask,
-                        onResumeTask: handleResumeTask,
-                        onCancelDownload: handleCancelDownload,
                         onDeleteVideo: handleDeleteVideo,
                     }}
                     onOpenAiConclusion={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })}
@@ -368,9 +279,8 @@ export default function LibraryPage() {
                         sources: webenSources,
                         page: webenSourcePage,
                         loading: webenSourcesLoading,
-                        starting: startingAnalysis,
                         onPageChange: setWebenSourcePage,
-                        onStartAnalysis: handleStartAnalysis,
+                        analyzeUrl: buildAnalyzeUrl(actionTarget),
                     }}
                 />
             )}

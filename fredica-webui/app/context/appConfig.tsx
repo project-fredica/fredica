@@ -11,11 +11,7 @@ interface AppConfig {
     webserver_port: string | null;
     /** 协议，null 时默认使用 "http"。 */
     webserver_schema: WebserverSchema | null;
-    /**
-     * Bearer Token 鉴权令牌。
-     * 注意：出于安全考虑，此字段**不持久化**到 localStorage，
-     * 仅在内存中保留，页面刷新后需重新输入。
-     */
+    /** Bearer Token 鉴权令牌，持久化到 localStorage。 */
     webserver_auth_token: string | null;
 }
 
@@ -23,10 +19,7 @@ interface AppConfig {
 interface AppConfigContextType {
     /** 当前生效的配置对象（初始值为 defaultConfig，localStorage 加载完成后更新）。 */
     appConfig: AppConfig;
-    /**
-     * 更新配置的部分字段，内部会 merge 到当前配置并写入 localStorage。
-     * 传入 `webserver_auth_token` 时同样会写入，但 localStorage 读取时会忽略该字段。
-     */
+    /** 更新配置的部分字段，内部会 merge 到当前配置并写入 localStorage。 */
     setAppConfig: (config: Partial<AppConfig>) => void;
     /**
      * localStorage 是否已完成初始化加载。
@@ -52,7 +45,6 @@ const AppConfigContext = createContext<AppConfigContextType>({
  *
  * - 始终以 `defaultConfig` 初始化，避免 SSR hydration 不一致。
  * - 使用 `useLayoutEffect` 在首次绘制前同步读取 localStorage，不产生 UI 闪烁。
- * - `webserver_auth_token` 不从 localStorage 恢复，需在每次会话中重新设置。
  *
  * 在 `root.tsx` 中包裹整个应用：
  * ```tsx
@@ -71,8 +63,8 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         try {
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
-                // webserver_auth_token 不从 localStorage 恢复
-                setAppConfigState(JSON.parse(stored) as AppConfig);
+                const parsed = JSON.parse(stored) as AppConfig;
+                setAppConfigState(parsed);
             }
         } catch {
             console.debug(`failed load local storage key`, STORAGE_KEY);
@@ -93,6 +85,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
             const next = { ...prev, ...config };
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                console.debug('[appConfig] saved to localStorage:', next);
             } catch { }
             return next;
         });

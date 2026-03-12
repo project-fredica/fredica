@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppConfig } from "~/context/appConfig";
 import { print_error, reportHttpError } from "./error_handler";
 
@@ -215,7 +215,11 @@ export function useAppFetch<J = unknown>(param?: {
 }) {
     const { allowNot2XX = false } = param ?? {};
 
-    const { appConfig } = useAppConfig();
+    const { appConfig, isStorageLoaded } = useAppConfig();
+    const isStorageLoadedRef = useRef(isStorageLoaded);
+    isStorageLoadedRef.current = isStorageLoaded;
+    const authTokenRef = useRef(appConfig.webserver_auth_token);
+    authTokenRef.current = appConfig.webserver_auth_token;
     const [data, setData] = useState<J | null>(null);
     const [loading, setLoading] = useState<boolean>(() =>
         param?.appPath != null
@@ -229,8 +233,8 @@ export function useAppFetch<J = unknown>(param?: {
         appConfig.webserver_port,
         appConfig.webserver_schema,
     );
-    // url 为 null 时跳过声明式请求
-    const url = param?.appPath != null ? `${host}${param.appPath}` : null;
+    // storage 未加载完或 url 为 null 时跳过声明式请求
+    const url = param?.appPath != null && isStorageLoaded ? `${host}${param.appPath}` : null;
 
     // ── 声明式自动请求 ────────────────────────────────────────────────────────
     // deps 只跟踪 url 和 authToken：这两者是"应该重新获取数据"的信号。
@@ -309,6 +313,11 @@ export function useAppFetch<J = unknown>(param?: {
             options?: { parseJson?: boolean; timeout?: number; silent?: boolean; signal?: AbortSignal },
         ): Promise<{ resp: Response; data: unknown }> => {
             const { parseJson = true, timeout = 10_000, silent = false, signal: externalSignal } = options ?? {};
+            // 等待 storage 加载完成，确保 authToken 已从 localStorage 恢复
+            await new Promise<void>(resolve => {
+                if (isStorageLoadedRef.current) { resolve(); return; }
+                const id = setInterval(() => { if (isStorageLoadedRef.current) { clearInterval(id); resolve(); } }, 10);
+            });
             const { abort, clearTimer } = makeAbortWithTimeout(timeout);
             const signal = externalSignal
                 ? AbortSignal.any([abort.signal, externalSignal])
@@ -317,7 +326,7 @@ export function useAppFetch<J = unknown>(param?: {
                 const resp = await fetchWithAuth(
                     `${host}${path}`,
                     init,
-                    authToken,
+                    authTokenRef.current,
                     signal,
                 );
                 clearTimer();

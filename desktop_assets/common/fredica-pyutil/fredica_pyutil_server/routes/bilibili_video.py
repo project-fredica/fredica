@@ -35,7 +35,7 @@ async def _make_credential(
             ac_time_value=ac_time_value or None,
             proxy=proxy or None,
         )
-        if await c.check_refresh():
+        if ac_time_value and await c.check_refresh():
             logger.info("credential refresh ... old value is {}", str(c))
             await c.refresh()
             logger.info("credential refresh success , new value is {}", str(c))

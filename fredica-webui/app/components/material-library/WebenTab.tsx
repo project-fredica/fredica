@@ -1,17 +1,17 @@
-import { Loader, Brain, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { Brain, ArrowRight, ChevronLeft, ChevronRight, Loader } from "lucide-react";
 import { Link } from "react-router";
 import { type WebenSource, getAnalysisStatusInfo } from "~/util/weben";
 
 const SOURCE_PAGE_SIZE = 5;
 
-export function WebenTab({ total, sources, sourcePage, sourceLoading, onPageChange, starting, onStartAnalysis }: {
+export function WebenTab({ total, sources, sourcePage, sourceLoading, onPageChange, analyzeUrl }: {
     total: number;
     sources: WebenSource[];
     sourcePage: number;
     sourceLoading: boolean;
     onPageChange: (page: number) => void;
-    starting: boolean;
-    onStartAnalysis: () => void;
+    /** 跳转到知识提取配置页的 URL（含所有必要 query params） */
+    analyzeUrl: string;
 }) {
     const hasActive = sources.some(s => s.analysis_status === 'pending' || s.analysis_status === 'analyzing');
     const hasCompleted = sources.some(s => s.analysis_status === 'completed');
@@ -105,14 +105,17 @@ export function WebenTab({ total, sources, sourcePage, sourceLoading, onPageChan
                         <p className="text-xs text-blue-600 mt-0.5">分析任务进行中，可前往任务中心查看进度</p>
                     )}
                 </div>
-                <button
-                    onClick={onStartAnalysis}
-                    disabled={starting || hasActive}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                <Link
+                    to={analyzeUrl}
+                    target="_blank"
+                    className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                        ${hasActive
+                            ? 'text-gray-400 bg-gray-50 pointer-events-none'
+                            : 'text-violet-700 bg-violet-50 hover:bg-violet-100'}`}
                 >
-                    {starting ? <Loader className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                    <Brain className="w-3 h-3" />
                     {hasActive ? '分析中…' : sources.length === 0 ? '开始提取' : '重新提取'}
-                </button>
+                </Link>
             </div>
 
             {hasActive && (
