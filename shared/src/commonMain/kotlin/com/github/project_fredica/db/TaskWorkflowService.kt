@@ -354,6 +354,24 @@ object TaskStatusService {
         return ids
     }
 
+    /**
+     * 依赖失败级联取消：将指定 WorkflowRun 下所有被阻塞的 pending 任务标记为 cancelled。
+     *
+     * "被阻塞"指 depends_on 中存在 failed 或 cancelled 的前置任务，
+     * 这类任务永远无法通过 claimNext() 的 DAG 校验。
+     * 由 WorkflowRunDb.recalculate() 在统计状态前调用。
+     *
+     * @param workflowRunId 目标工作流运行实例 ID
+     * @return 被取消的 Task ID 列表
+     */
+    suspend fun cancelBlockedTasks(workflowRunId: String): List<String> {
+        val ids = TaskService.repo.cancelBlockedTasks(workflowRunId)
+        if (ids.isNotEmpty()) {
+            logger.info("cancelBlockedTasks: wfId=$workflowRunId 级联取消 ${ids.size} 个被阻塞的 pending 任务")
+        }
+        return ids
+    }
+
     // ── 读操作：首次访问触发启动对账 ─────────────────────────────────────────
 
     /**

@@ -20,6 +20,7 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     MaterialDeleteRoute,
     MaterialDownloadStatusRoute,
     MaterialImportRoute,
+    MaterialGetRoute,
     MaterialListRoute,
     MaterialRunTaskRoute,
     MaterialSetCategoriesRoute,

@@ -563,6 +563,83 @@ class TaskDb(private val db: Database) : TaskRepo {
             }
         }
 
+    // ── cancelBlockedTasks：依赖失败级联取消 ──────────────────────────────────
+
+    /**
+     * 将指定 WorkflowRun 下所有"被阻塞"的 pending 任务批量标记为 cancelled。
+     *
+     * "被阻塞"定义：depends_on 中存在至少一个状态为 failed 或 cancelled 的前置任务。
+     *
+     * SQL 核心逻辑：
+     * ```sql
+     * UPDATE task SET status='cancelled', ...
+     * WHERE workflow_run_id = ?
+     *   AND status = 'pending'
+     *   AND EXISTS (
+     *     SELECT 1 FROM task dep
+     *     JOIN json_each(task.depends_on) je ON dep.id = je.value
+     *     WHERE dep.status IN ('failed', 'cancelled')
+     *   )
+     * ```
+     * `json_each(task.depends_on)` 展开 JSON 数组，JOIN task 表检查前置任务状态。
+     * `EXISTS(前置任务已终止)` 找出所有被阻塞的 pending 任务。
+     *
+     * 注意：只处理 pending 任务，不干预 claimed/running（已被 worker 持有）。
+     * 由 WorkflowRunDb.recalculate() 在统计状态前调用，确保状态一致性。
+     */
+    override suspend fun cancelBlockedTasks(workflowRunId: String): List<String> =
+        withContext(Dispatchers.IO) {
+            db.useConnection { conn ->
+                val nowSec = System.currentTimeMillis() / 1000L
+                val affected = mutableListOf<String>()
+
+                // 1. 找出所有被阻塞的 pending 任务 ID
+                conn.prepareStatement(
+                    """
+                    SELECT id FROM task
+                    WHERE workflow_run_id = ?
+                      AND status = 'pending'
+                      AND EXISTS (
+                        SELECT 1 FROM task dep
+                        JOIN json_each(task.depends_on) je ON dep.id = je.value
+                        WHERE dep.status IN ('failed', 'cancelled')
+                      )
+                    """.trimIndent()
+                ).use { ps ->
+                    ps.setString(1, workflowRunId)
+                    ps.executeQuery().use { rs ->
+                        while (rs.next()) affected.add(rs.getString("id"))
+                    }
+                }
+
+                if (affected.isEmpty()) return@useConnection affected
+
+                // 2. 批量取消（用子查询，避免拼接 IN 列表）
+                conn.prepareStatement(
+                    """
+                    UPDATE task
+                    SET status = 'cancelled',
+                        error = 'DEPENDENCY_FAILED',
+                        error_type = 'DEPENDENCY_FAILED',
+                        completed_at = COALESCE(completed_at, ?)
+                    WHERE workflow_run_id = ?
+                      AND status = 'pending'
+                      AND EXISTS (
+                        SELECT 1 FROM task dep
+                        JOIN json_each(task.depends_on) je ON dep.id = je.value
+                        WHERE dep.status IN ('failed', 'cancelled')
+                      )
+                    """.trimIndent()
+                ).use { ps ->
+                    ps.setLong(1, nowSec)
+                    ps.setString(2, workflowRunId)
+                    ps.executeUpdate()
+                }
+
+                affected
+            }
+        }
+
     // ── resetStaleTasks：启动时清理僵尸任务 ───────────────────────────────────
 
     /**

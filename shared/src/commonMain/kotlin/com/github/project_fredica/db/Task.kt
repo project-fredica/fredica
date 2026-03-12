@@ -10,10 +10,18 @@ import kotlinx.serialization.Serializable
 // 生命周期：
 //   pending → claimed → running → completed
 //                              ↘ failed（retry_count < max_retries → 回到 pending）
-//   pending/running → cancelled（用户主动取消）
+//   pending/running → cancelled（用户主动取消，或依赖失败级联取消）
 //
 // depends_on 是 JSON 数组，存放前置任务 ID，如 `["task-a","task-b"]`。
 // claimNext() 只会认领"所有前置任务都已 completed"的任务，从而实现 DAG 调度。
+//
+// 依赖失败处理：
+//   当前置任务进入 failed 或 cancelled 终态后，依赖它的下游 pending 任务将永远
+//   无法通过 claimNext() 的 DAG 校验。WorkflowRunDb.recalculate() 在每次统计前
+//   会调用 TaskRepo.cancelBlockedTasks()，将这类被阻塞的 pending 任务批量取消，
+//   确保 WorkflowRun 能正确推进到终态（failed），而非永久停留在 running。
+//   多级依赖链（A→B→C）的传播通过 WorkerEngine 每次任务终态变更触发 recalculate()
+//   来逐轮完成。
 // =============================================================================
 
 @Serializable
@@ -259,6 +267,30 @@ interface TaskRepo {
      * @return               被取消的 Task ID 列表
      */
     suspend fun cancelPendingTasksByWorkflowRun(workflowRunId: String): List<String>
+
+    /**
+     * 依赖失败级联取消：将指定 WorkflowRun 下所有"被阻塞"的 pending 任务标记为 cancelled。
+     *
+     * "被阻塞"定义：depends_on 中存在至少一个状态为 failed 或 cancelled 的前置任务。
+     * 这类任务永远无法通过 claimNext() 的 DAG 校验（要求所有前置任务均 completed），
+     * 若不主动取消，它们会永久停留在 pending 状态，导致 WorkflowRun 无法进入终态。
+     *
+     * 实现方式：单条 SQL 递归展开 depends_on JSON 数组，找出所有被阻塞的 pending 任务
+     * 并批量更新为 cancelled。由 WorkflowRunDb.recalculate() 在统计状态前调用，
+     * 确保 recalculate 看到的是已清理后的一致状态。
+     *
+     * 注意：
+     *   - 只处理 pending 状态的任务（claimed/running 任务已被 worker 持有，不干预）。
+     *   - 幂等安全：已是终态的任务不受影响。
+     *   - 不递归处理多级依赖：每次调用只处理"直接依赖已终止"的任务；
+     *     多级链（A→B→C，A 失败）需要 recalculate() 多次触发，
+     *     但实际上 WorkerEngine 每次任务终态变更都会调用 recalculate()，
+     *     因此链式传播会在后续轮次中自然完成。
+     *
+     * @param workflowRunId  目标工作流运行实例 ID
+     * @return               被取消的 Task ID 列表
+     */
+    suspend fun cancelBlockedTasks(workflowRunId: String): List<String>
 }
 
 // =============================================================================

@@ -368,6 +368,318 @@ class TaskDbTest {
         assertEquals(3, snapshot.size, "快照应恰好包含 3 条非终态任务")
     }
 
+    // ── 测试 8：cancelBlockedTasks — 依赖失败级联取消 ─────────────────────────
+
+    /**
+     * 证明目的：cancelBlockedTasks() 能正确找出"依赖中存在 failed 任务"的 pending 任务
+     *           并将其取消，同时不影响无依赖或依赖已完成的任务。
+     *
+     * 场景：A → B → C（B 依赖 A，C 依赖 B）
+     *   - A 执行失败（failed）
+     *   - B 依赖 A，应被级联取消
+     *   - C 依赖 B，B 取消后 C 也应被级联取消（第二次调用）
+     *   - D 无依赖，不受影响
+     *
+     * 证明过程：
+     *   1. 创建 A/B/C/D 四个任务，设置依赖关系。
+     *   2. 将 A 标记为 failed。
+     *   3. 第一次调用 cancelBlockedTasks()：B 应被取消（依赖 A=failed）。
+     *   4. 第二次调用 cancelBlockedTasks()：C 应被取消（依赖 B=cancelled）。
+     *   5. D 始终保持 pending。
+     */
+    @Test
+    fun testCancelBlockedTasks_chainPropagation() = runBlocking {
+        // 准备：A → B → C，D 无依赖
+        val taskA = Task(id = "chain-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "chain-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["chain-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "chain-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["chain-b"]""", createdAt = nowSec() + 2)
+        val taskD = Task(id = "chain-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 3)
+        taskDb.createAll(listOf(taskA, taskB, taskC, taskD))
+
+        // A 执行失败
+        taskDb.updateStatus("chain-a", "failed", error = "模拟失败")
+
+        // 第一次级联取消：B 依赖 A(failed)，应被取消
+        val round1 = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("chain-b"), round1.sorted(), "第一轮应取消 chain-b（依赖 chain-a=failed）")
+
+        val afterRound1 = taskDb.listByWorkflowRun("wr-1")
+        assertEquals("failed",    afterRound1.find { it.id == "chain-a" }!!.status)
+        assertEquals("cancelled", afterRound1.find { it.id == "chain-b" }!!.status)
+        assertEquals("pending",   afterRound1.find { it.id == "chain-c" }!!.status, "C 尚未被取消（B 刚变 cancelled）")
+        assertEquals("pending",   afterRound1.find { it.id == "chain-d" }!!.status, "D 无依赖，不受影响")
+
+        // 第二次级联取消：C 依赖 B(cancelled)，应被取消
+        val round2 = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("chain-c"), round2.sorted(), "第二轮应取消 chain-c（依赖 chain-b=cancelled）")
+
+        val afterRound2 = taskDb.listByWorkflowRun("wr-1")
+        assertEquals("cancelled", afterRound2.find { it.id == "chain-c" }!!.status)
+        assertEquals("pending",   afterRound2.find { it.id == "chain-d" }!!.status, "D 始终不受影响")
+    }
+
+    // ── 测试 9：cancelBlockedTasks — 依赖取消级联取消 ─────────────────────────
+
+    /**
+     * 证明目的：cancelBlockedTasks() 对"依赖中存在 cancelled 任务"的 pending 任务
+     *           同样生效（不仅限于 failed）。
+     *
+     * 场景：A（cancelled）→ B（pending），调用后 B 应被取消。
+     */
+    @Test
+    fun testCancelBlockedTasks_cancelledDependency() = runBlocking {
+        val taskA = Task(id = "dep-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "dep-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dep-a"]""", createdAt = nowSec() + 1)
+        taskDb.createAll(listOf(taskA, taskB))
+
+        taskDb.updateStatus("dep-a", "cancelled")
+
+        val cancelled = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("dep-b"), cancelled, "依赖 cancelled 任务的 pending 任务应被取消")
+
+        val b = taskDb.listByWorkflowRun("wr-1").find { it.id == "dep-b" }!!
+        assertEquals("cancelled",        b.status,    "dep-b 状态应为 cancelled")
+        assertEquals("DEPENDENCY_FAILED", b.errorType, "error_type 应标记为 DEPENDENCY_FAILED")
+        assertEquals("DEPENDENCY_FAILED", b.error,     "error 应标记为 DEPENDENCY_FAILED")
+    }
+
+    // ── 测试 10：cancelBlockedTasks — 不影响无依赖或依赖已完成的任务 ───────────
+
+    /**
+     * 证明目的：cancelBlockedTasks() 的幂等性与精确性——
+     *   - 无依赖的 pending 任务不受影响
+     *   - 依赖全部 completed 的 pending 任务不受影响
+     *   - 已是终态的任务不受影响
+     */
+    @Test
+    fun testCancelBlockedTasks_doesNotAffectUnblockedTasks() = runBlocking {
+        val taskA = Task(id = "safe-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "safe-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["safe-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "safe-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
+        taskDb.createAll(listOf(taskA, taskB, taskC))
+
+        // A 完成，B 依赖 A(completed)，C 无依赖
+        taskDb.updateStatus("safe-a", "completed")
+
+        val cancelled = taskDb.cancelBlockedTasks("wr-1")
+        assertTrue(cancelled.isEmpty(), "没有被阻塞的任务，返回列表应为空")
+
+        val tasks = taskDb.listByWorkflowRun("wr-1")
+        assertEquals("completed", tasks.find { it.id == "safe-a" }!!.status)
+        assertEquals("pending",   tasks.find { it.id == "safe-b" }!!.status, "B 依赖已完成，不应被取消")
+        assertEquals("pending",   tasks.find { it.id == "safe-c" }!!.status, "C 无依赖，不应被取消")
+    }
+
+    // ── 测试 11：cancelBlockedTasks — 菱形依赖，A 失败后 B/C/D 均被级联取消 ────
+
+    /**
+     * 证明目的：菱形依赖结构中，根节点失败后所有下游节点均被正确级联取消。
+     *
+     * 场景（菱形 DAG）：
+     *        A（失败）
+     *       / \
+     *      B   C
+     *       \ /
+     *        D
+     *
+     * B 依赖 A，C 依赖 A，D 依赖 B 和 C。
+     * A 失败后：
+     *   - 第一轮 cancelBlockedTasks：B 和 C 被取消（直接依赖 A=failed）
+     *   - 第二轮 cancelBlockedTasks：D 被取消（依赖 B=cancelled 且 C=cancelled）
+     *
+     * 证明过程：
+     *   1. 创建菱形依赖结构。
+     *   2. A 标记为 failed。
+     *   3. 第一轮：断言 B、C 被取消，D 仍为 pending。
+     *   4. 第二轮：断言 D 被取消。
+     */
+    @Test
+    fun testCancelBlockedTasks_diamondDependency() = runBlocking {
+        val taskA = Task(id = "dia-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "dia-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-a"]""",         createdAt = nowSec() + 1)
+        val taskC = Task(id = "dia-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-a"]""",         createdAt = nowSec() + 2)
+        val taskD = Task(id = "dia-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-b","dia-c"]""", createdAt = nowSec() + 3)
+        taskDb.createAll(listOf(taskA, taskB, taskC, taskD))
+
+        taskDb.updateStatus("dia-a", "failed", error = "根节点失败")
+
+        // 第一轮：B 和 C 被取消
+        val round1 = taskDb.cancelBlockedTasks("wr-1").sorted()
+        assertEquals(listOf("dia-b", "dia-c"), round1, "第一轮应取消 B 和 C（均直接依赖 A=failed）")
+
+        val afterRound1 = taskDb.listByWorkflowRun("wr-1").associateBy { it.id }
+        assertEquals("pending", afterRound1["dia-d"]!!.status, "D 的直接依赖 B/C 刚变 cancelled，第一轮不处理 D")
+
+        // 第二轮：D 被取消
+        val round2 = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("dia-d"), round2, "第二轮应取消 D（依赖 B=cancelled 且 C=cancelled）")
+
+        val afterRound2 = taskDb.listByWorkflowRun("wr-1").associateBy { it.id }
+        assertEquals("cancelled", afterRound2["dia-d"]!!.status)
+        assertEquals("DEPENDENCY_FAILED", afterRound2["dia-d"]!!.errorType)
+    }
+
+    // ── 测试 12：cancelBlockedTasks — 部分依赖失败（多前置任务中有一个失败）────
+
+    /**
+     * 证明目的：任务 B 依赖 A 和 X，A 失败但 X 已完成，B 仍应被取消。
+     *
+     * 语义：DAG 调度要求所有前置任务均 completed 才能执行，
+     *       只要有一个前置任务失败，该任务就永远无法执行，应被取消。
+     *
+     * 场景：
+     *   A（failed）─┐
+     *               ├→ B（pending，应被取消）
+     *   X（completed）─┘
+     */
+    @Test
+    fun testCancelBlockedTasks_partialDependencyFailed() = runBlocking {
+        val taskA = Task(id = "part-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskX = Task(id = "part-x", type = "STEP_X", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 1)
+        val taskB = Task(id = "part-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["part-a","part-x"]""", createdAt = nowSec() + 2)
+        taskDb.createAll(listOf(taskA, taskX, taskB))
+
+        taskDb.updateStatus("part-a", "failed")
+        taskDb.updateStatus("part-x", "completed")
+
+        val cancelled = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("part-b"), cancelled, "B 的前置任务 A 已失败，即使 X 完成，B 也应被取消")
+
+        val b = taskDb.listByWorkflowRun("wr-1").find { it.id == "part-b" }!!
+        assertEquals("cancelled",        b.status)
+        assertEquals("DEPENDENCY_FAILED", b.errorType)
+    }
+
+    // ── 测试 13：cancelBlockedTasks — 混合终态，成功链不受影响 ─────────────────
+
+    /**
+     * 证明目的：同一 WorkflowRun 中，失败链的级联取消不影响独立的成功链。
+     *
+     * 场景：
+     *   失败链：F1（failed）→ F2（pending，应被取消）
+     *   成功链：S1（completed）→ S2（pending，不受影响，可被认领）
+     *   独立任务：I（pending，无依赖，不受影响）
+     */
+    @Test
+    fun testCancelBlockedTasks_mixedChains_successChainUnaffected() = runBlocking {
+        // 失败链
+        val taskF1 = Task(id = "mix-f1", type = "FAIL_STEP", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskF2 = Task(id = "mix-f2", type = "FAIL_DOWN", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["mix-f1"]""", createdAt = nowSec() + 1)
+        // 成功链
+        val taskS1 = Task(id = "mix-s1", type = "OK_STEP",   workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
+        val taskS2 = Task(id = "mix-s2", type = "OK_DOWN",   workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["mix-s1"]""", createdAt = nowSec() + 3)
+        // 独立任务
+        val taskI  = Task(id = "mix-i",  type = "INDEP",     workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 4)
+        taskDb.createAll(listOf(taskF1, taskF2, taskS1, taskS2, taskI))
+
+        taskDb.updateStatus("mix-f1", "failed")
+        taskDb.updateStatus("mix-s1", "completed")
+
+        val cancelled = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("mix-f2"), cancelled, "只有 F2 应被取消")
+
+        val tasks = taskDb.listByWorkflowRun("wr-1").associateBy { it.id }
+        assertEquals("cancelled", tasks["mix-f2"]!!.status, "F2 应被取消")
+        assertEquals("pending",   tasks["mix-s2"]!!.status, "S2 依赖已完成的 S1，不应被取消")
+        assertEquals("pending",   tasks["mix-i"]!!.status,  "I 无依赖，不应被取消")
+    }
+
+    // ── 测试 14：cancelBlockedTasks — 多 WorkflowRun 隔离 ────────────────────
+
+    /**
+     * 证明目的：cancelBlockedTasks(wfId) 只处理指定 WorkflowRun 的任务，
+     *           不影响其他 WorkflowRun 中的同名依赖结构。
+     *
+     * 场景：
+     *   wr-1：A1（failed）→ B1（pending，应被取消）
+     *   wr-2：A2（failed）→ B2（pending，不应被 wr-1 的调用影响）
+     */
+    @Test
+    fun testCancelBlockedTasks_multiWorkflowIsolation() = runBlocking {
+        // 创建第二个 WorkflowRun
+        workflowRunDb.create(
+            WorkflowRun(id = "wr-2", materialId = "material-2", template = "TEST", status = "running", totalTasks = 2, doneTasks = 0, createdAt = nowSec())
+        )
+
+        // wr-1 的任务链
+        val taskA1 = Task(id = "iso-a1", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB1 = Task(id = "iso-b1", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["iso-a1"]""", createdAt = nowSec() + 1)
+        // wr-2 的任务链（结构相同，但属于不同 WF）
+        val taskA2 = Task(id = "iso-a2", type = "STEP_A", workflowRunId = "wr-2", materialId = "material-2", createdAt = nowSec())
+        val taskB2 = Task(id = "iso-b2", type = "STEP_B", workflowRunId = "wr-2", materialId = "material-2", dependsOn = """["iso-a2"]""", createdAt = nowSec() + 1)
+        taskDb.createAll(listOf(taskA1, taskB1, taskA2, taskB2))
+
+        taskDb.updateStatus("iso-a1", "failed")
+        taskDb.updateStatus("iso-a2", "failed")
+
+        // 只对 wr-1 调用 cancelBlockedTasks
+        val cancelled = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(listOf("iso-b1"), cancelled, "只应取消 wr-1 的 B1")
+
+        val b2 = taskDb.listByWorkflowRun("wr-2").find { it.id == "iso-b2" }!!
+        assertEquals("pending", b2.status, "wr-2 的 B2 不应受 wr-1 调用的影响")
+    }
+
+    // ── 测试 15：claimNext 不认领被阻塞的任务 ────────────────────────────────
+
+    /**
+     * 证明目的：依赖失败后，被阻塞的 pending 任务不会被 claimNext() 认领，
+     *           只有无依赖或依赖已完成的任务才能被认领。
+     *
+     * 场景：
+     *   A（failed）→ B（pending，被阻塞，不可认领）
+     *   C（pending，无依赖，可认领）
+     *
+     * 证明过程：
+     *   1. 创建 A/B/C，A 标记为 failed。
+     *   2. 调用 claimNext()，断言认领到的是 C 而非 B。
+     *   3. 再次调用 claimNext()，断言返回 null（B 被阻塞，C 已被认领）。
+     */
+    @Test
+    fun testClaimNext_doesNotClaimBlockedTask() = runBlocking {
+        val taskA = Task(id = "blk-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "blk-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["blk-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "blk-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
+        taskDb.createAll(listOf(taskA, taskB, taskC))
+
+        taskDb.updateStatus("blk-a", "failed")
+
+        // 第一次认领：应得到 C（无依赖），不应得到 B（依赖 A=failed）
+        val first = taskDb.claimNext("worker-1")
+        assertNotNull(first, "应能认领到 C")
+        assertEquals("blk-c", first.id, "认领到的应是无依赖的 C，而非被阻塞的 B")
+
+        // 第二次认领：B 被阻塞，队列为空
+        val second = taskDb.claimNext("worker-1")
+        assertTrue(second == null, "B 被阻塞无法认领，队列应为空")
+    }
+
+    // ── 测试 16：cancelBlockedTasks 幂等性 ───────────────────────────────────
+
+    /**
+     * 证明目的：多次调用 cancelBlockedTasks() 是幂等的——
+     *           第一次取消后，后续调用不会重复处理已是终态的任务。
+     */
+    @Test
+    fun testCancelBlockedTasks_idempotent() = runBlocking {
+        val taskA = Task(id = "idem2-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
+        val taskB = Task(id = "idem2-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["idem2-a"]""", createdAt = nowSec() + 1)
+        taskDb.createAll(listOf(taskA, taskB))
+        taskDb.updateStatus("idem2-a", "failed")
+
+        // 第一次：B 被取消
+        val first = taskDb.cancelBlockedTasks("wr-1")
+        assertEquals(1, first.size, "第一次应取消 1 个任务")
+
+        // 第二次：B 已是 cancelled，不应重复处理
+        val second = taskDb.cancelBlockedTasks("wr-1")
+        assertTrue(second.isEmpty(), "第二次调用应返回空列表（幂等）")
+
+        // 第三次：同上
+        val third = taskDb.cancelBlockedTasks("wr-1")
+        assertTrue(third.isEmpty(), "第三次调用应返回空列表（幂等）")
+    }
+
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L

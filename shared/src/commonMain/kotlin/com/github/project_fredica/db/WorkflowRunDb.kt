@@ -92,13 +92,24 @@ class WorkflowRunDb(private val db: Database) : WorkflowRunRepo {
      * 根据子任务的当前状态，重新计算并更新 workflow_run 的 done_tasks、
      * total_tasks 和 status 字段。每次任务状态变更后由 WorkerEngine 触发。
      *
+     * 执行顺序：
+     * 1. 先调用 [TaskService.repo.cancelBlockedTasks]，将所有"依赖已失败/取消"的
+     *    pending 任务级联取消。这一步确保 recalculate 统计时不会看到永久阻塞的 pending 任务，
+     *    从而能正确将 WorkflowRun 推进到终态。
+     * 2. 再统计各状态任务数量，按优先级推导 WorkflowRun 新状态。
+     *
      * 状态判定规则（优先级从高到低）：
      * 1. 有任何 failed 任务           → workflow_run = failed
      * 2. 所有任务都 completed         → workflow_run = completed（同时记录 completed_at）
      * 3. 有任务 running 或 pending    → workflow_run = running
-     * 4. 其他（全部 cancelled 等）    → workflow_run = pending
+     * 4. 全部 cancelled               → workflow_run = cancelled
+     * 5. 其他（空等）                 → workflow_run = pending
      */
     override suspend fun recalculate(workflowRunId: String): Unit = withContext(Dispatchers.IO) {
+        // 先级联取消被阻塞的 pending 任务，再统计状态
+        // 这样 recalculate 不会因为永久阻塞的 pending 任务而误判为 "running"
+        TaskService.repo.cancelBlockedTasks(workflowRunId)
+
         db.useConnection { conn ->
             var total        = 0
             var done         = 0

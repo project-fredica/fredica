@@ -32,7 +32,8 @@ object FasterWhisperConfigInfoRoute : FredicaApi.Route {
             kv("model", cfg.fasterWhisperModel)
             kv("compute_type", cfg.fasterWhisperComputeType)
             kv("device", cfg.fasterWhisperDevice)
-            kv("models_dir", cfg.fasterWhisperModelsDir)
+            // routeApi 用户侧不应该知晓模型的存储目录。
+            // kv("models_dir", cfg.fasterWhisperModelsDir)
             kv("compat_json", cfg.fasterWhisperCompatJson)
         }
     }
