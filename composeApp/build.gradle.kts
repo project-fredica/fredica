@@ -91,6 +91,7 @@ compose.desktop {
             packageName = "Fredica"
             packageVersion = "1.0.0"
 
+            // TODO: 应当在打包前移动安装包中的 torch。
             appResourcesRootDir = rootDir.resolve("desktop_assets")
 
             description = packageName
@@ -122,17 +123,4 @@ compose.resources {
     packageOfResClass = "com.github.project_fredica.resources"
     generateResClass = auto
 }
-
-//afterEvaluate {
-//    tasks.withType<JavaExec> {
-//        jvmArgs("--add-opens", "java.desktop/sun.awt=ALL-UNNAMED")
-//        jvmArgs("--add-opens", "java.desktop/java.awt.peer=ALL-UNNAMED")
-//
-//        if (System.getProperty("os.name").contains("Mac")) {
-//            jvmArgs("--add-opens", "java.desktop/sun.awt=ALL-UNNAMED")
-//            jvmArgs("--add-opens", "java.desktop/sun.lwawt=ALL-UNNAMED")
-//            jvmArgs("--add-opens", "java.desktop/sun.lwawt.macosx=ALL-UNNAMED")
-//        }
-//    }
-//}
 

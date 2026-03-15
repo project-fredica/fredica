@@ -1027,6 +1027,40 @@ export default function Component({ }: Route.ComponentProps) {
                     </button>
                 </div>
 
+                {/* PyTorch 环境配置入口 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    padding: "20px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                }}>
+                    <div>
+                        <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: 600, color: "#111827" }}>PyTorch 环境</p>
+                        <p style={{ margin: 0, fontSize: "13px", color: "#9ca3af" }}>为 faster-whisper 配置 GPU 加速的 torch 版本，检测 GPU 并下载对应 wheel。</p>
+                    </div>
+                    <button
+                        onClick={() => navigate("/app-desktop-setting-torch-config")}
+                        style={{
+                            flexShrink: 0,
+                            padding: "8px 16px",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            color: "#2563eb",
+                            backgroundColor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        进入配置 →
+                    </button>
+                </div>
+
                 <p style={{ textAlign: "center", fontSize: "12px", color: "#9ca3af", marginTop: "8px" }}>
                     部分设置需要重启应用后生效
                 </p>

@@ -5,12 +5,13 @@ Whisper 兼容性评估子进程 worker。
 在独立子进程中运行，避免主进程导入 torch / faster_whisper。
 由 routes/asr.py 的 EvaluateWhisperCompatTaskEndpoint 调用。
 """
+from loguru import logger
 
 _WHISPER_MODELS_ORDER = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
 _COMPUTE_TYPES = ["float16", "int8_float16", "int8", "float32"]
 
 
-def evaluate_compat_worker(param: dict, status_queue, cancel_event, resume_event):
+def evaluate_faster_whisper_compat_worker(param: dict, status_queue, cancel_event, resume_event):
     """
     评估本地 GPU 对 Whisper 各 compute_type / 模型的兼容性。
 
@@ -34,6 +35,11 @@ def evaluate_compat_worker(param: dict, status_queue, cancel_event, resume_event
 
     proxy: str = param.get("proxy", "")
     models_dir: str = param.get("models_dir", "")
+
+    if proxy:
+        logger.info("faster whisper compat worker proxy : {}", proxy)
+        os.environ["HTTPS_PROXY"] = proxy
+        os.environ["HTTP_PROXY"] = proxy
 
     def _put(msg):
         status_queue.put(msg)
@@ -65,15 +71,13 @@ def evaluate_compat_worker(param: dict, status_queue, cancel_event, resume_event
                     if _model in _WHISPER_MODELS_ORDER:
                         found.add(_model)
         return sorted(found, key=lambda m: _WHISPER_MODELS_ORDER.index(m)
-                      if m in _WHISPER_MODELS_ORDER else 99)
+        if m in _WHISPER_MODELS_ORDER else 99)
 
     def _try_load_whisper(model_name, device, compute_type) -> tuple:
         try:
             import torch
             from faster_whisper import WhisperModel
-            if proxy:
-                os.environ["HTTPS_PROXY"] = proxy
-                os.environ["HTTP_PROXY"] = proxy
+
             kwargs = {"device": device, "compute_type": compute_type}
             if models_dir:
                 kwargs["download_root"] = models_dir
@@ -86,14 +90,15 @@ def evaluate_compat_worker(param: dict, status_queue, cancel_event, resume_event
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return True, "", _vram_mb
-        except Exception as e:
+        except Exception:
+            logger.exception("error on try load whisper")
             gc.collect()
             try:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except Exception:
-                pass
+                logger.exception("error on torch.cuda.empty_cache()")
             return False, str(e), 0
 
     def _check_download_reachable() -> bool:

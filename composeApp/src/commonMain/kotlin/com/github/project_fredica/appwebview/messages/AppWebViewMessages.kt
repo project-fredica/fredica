@@ -20,6 +20,15 @@ object AppWebViewMessages {
             TryRefreshBilibiliCredentialJsMessageHandler(),
             RunFasterWhisperCompatEvalJsMessageHandler(),
             RunFasterWhisperModelDownloadJsMessageHandler(),
+            GetTorchInfoJsMessageHandler(),
+            GetTorchCheckJsMessageHandler(),
+            GetTorchPipCommandJsMessageHandler(),
+            RunTorchDetectJsMessageHandler(),
+            SaveTorchConfigJsMessageHandler(),
+            DownloadTorchJsMessageHandler(),
+            GetTorchMirrorCheckJsMessageHandler(),
+            GetTorchMirrorVersionsJsMessageHandler(),
+            GetTorchAllMirrorVariantsJsMessageHandler(),
         )
     }
 }

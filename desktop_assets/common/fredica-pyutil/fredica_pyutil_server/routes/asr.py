@@ -14,7 +14,7 @@ from loguru import logger
 from starlette.websockets import WebSocket
 
 from fredica_pyutil_server.subprocess.download_model import download_model_worker
-from fredica_pyutil_server.subprocess.evaluate_compat import evaluate_compat_worker
+from fredica_pyutil_server.subprocess.evaluate_faster_whisper_compat_worker import evaluate_faster_whisper_compat_worker
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInSubProcess
 
 _router = APIRouter(prefix="/asr")
@@ -67,7 +67,7 @@ async def download_model_task(websocket: WebSocket):
 # evaluate-compat-task：评估 Whisper 兼容性（5 个 Step）
 # =============================================================================
 
-class EvaluateWhisperCompatTaskEndpoint(TaskEndpointInSubProcess):
+class EvaluateFasterWhisperCompatTaskEndpoint(TaskEndpointInSubProcess):
     """
     评估本地 GPU 对 Whisper 各 compute_type / 模型兼容性的 WebSocket 任务端点。
     评估逻辑在子进程中运行，避免主进程导入 torch / faster_whisper。
@@ -77,15 +77,15 @@ class EvaluateWhisperCompatTaskEndpoint(TaskEndpointInSubProcess):
     """
 
     def _get_process_target(self):
-        return evaluate_compat_worker
+        return evaluate_faster_whisper_compat_worker
 
     async def _on_subprocess_message(self, msg: Any):
         self._current_status = msg
         await self.send_json(msg)
 
 
-@_router.websocket("/evaluate-compat-task")
-async def evaluate_compat_task(websocket: WebSocket):
+@_router.websocket("/evaluate-faster-whisper-compat-task")
+async def evaluate_faster_whisper_compat_task(websocket: WebSocket):
     """
     Whisper 兼容性评估任务端点（WebSocket）。
 
@@ -96,5 +96,5 @@ async def evaluate_compat_task(websocket: WebSocket):
          download_check / model_support / done
       3. 可随时发送 cancel
     """
-    endpoint = EvaluateWhisperCompatTaskEndpoint(websocket=websocket)
+    endpoint = EvaluateFasterWhisperCompatTaskEndpoint(websocket=websocket)
     await endpoint.start_and_wait()

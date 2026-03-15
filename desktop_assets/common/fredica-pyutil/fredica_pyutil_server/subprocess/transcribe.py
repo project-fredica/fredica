@@ -50,7 +50,7 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
     t_load = time.monotonic()
 
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        model = WhisperModel(model_name, device=device, compute_type=compute_type, local_files_only=True)
         _log("info", f"[whisper] 模型加载完成 耗时={time.monotonic() - t_load:.1f}s  文件={audio_path!r}")
 
         t_trans = time.monotonic()

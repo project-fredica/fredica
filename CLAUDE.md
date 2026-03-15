@@ -47,7 +47,7 @@ desktop_assets/common/fredica-pyutil/  # Python 服务源代码
     └── util/       # TaskEndpoint 基类 + device_util + ffmpeg_util
 
 docs/               # VitePress 文档站（sortMenusByFrontmatterOrder）
-├── dev/            # 开发文档（setup / architecture / task-model / build / testing / plans/）
+├── dev/            # 开发文档（setup / architecture / task-model / build / testing / error-handling / plans/）
 ├── guide/          # 用户文档
 └── product/        # 产品文档
 ```
@@ -83,7 +83,7 @@ cd fredica-webui && npm install && npm run dev
 
 | 文件 | 主要 API |
 |------|---------|
-| `jsons.kt` | `encodeJson<T>()` · `decodeJson<T>()` · `buildValidJson { }` DSL |
+| `jsons.kt` | `buildValidJson { kv() }` · `loadJsonModel<T>()` · `dumpJsonStr()` · `asT<T>()` · 详见 [docs/dev/json-handling.md](docs/dev/json-handling.md) |
 | `commonUtil.kt` | `Result.wrap { }` · `wrapAsync { }` · `Double.toFixed(n)` |
 | `logger.kt` | `createLogger("name")` → `logger.error(msg, throwable)` 需显式导入扩展函数 |
 | `AppUtil.kt` | `Paths`（应用路径）· `GlobalVars`（全局 HTTP 客户端）· 时间工具 |
@@ -131,3 +131,24 @@ cd fredica-webui && npm install && npm run dev
 - `kv()` / `obj()` 是 `buildValidJson { }` DSL 作用域方法，不可顶层 import
 - `PromptGraphDb` / `PromptGraphEngine` 在 commonMain（非 jvmMain）
 - `assertNotNull(x)` 返回 `T`（非 Unit），作为 runBlocking 末尾语句需加 `Unit`
+
+### 错误处理约定
+
+详见 [docs/dev/error-handling.md](docs/dev/error-handling.md)，核心规则：
+
+- **Python**：预期失败用 `logger.warning`；意外异常用 `logger.exception`；工具函数不抛异常，用 `TypedDict` 标注返回类型并写 docstring，统一含 `"error"` 字段；路由层 `except` 返回 `JSONResponse({"error": ...})`
+- **Kotlin JsBridge**：Python 调用失败用 `logger.warn` + `callback({"error": "..."})`；发起调用前打一条入参日志
+- **Kotlin Route API**：`try/catch` 包裹业务逻辑，异常时 `respond({"error": ...})`
+- **前端 catch 块**：无响应信息用 `print_error`，有 HTTP 响应用 `reportHttpError`（自动附加状态码）；`BridgeUnavailableError` 静默；bridge 返回后检查 `res.error` 字段
+
+### JSON 处理约定
+
+详见 [docs/dev/json-handling.md](docs/dev/json-handling.md)，核心规则：
+
+- **Kotlin 构建 JSON**：用 `buildValidJson { kv("k", v) }`，禁止字符串插值拼接 JSON
+- **Kotlin 序列化**：优先用扩展函数 `elem.dumpJsonStr()` / `AppUtil.dumpJsonStr(obj)`，不直接调 `AppUtil.GlobalVars.json.encodeToString(...)`
+- **Kotlin 反序列化**：优先用扩展函数 `str.loadJson()` / `str.loadJsonModel<T>()`，不直接调 `AppUtil.GlobalVars.json.decodeFromString(...)`
+- **Kotlin 提取字段**：`jsonObj["key"].asT<String>()`
+- 全局实例 `AppUtil.GlobalVars.json` 需显式 import `com.github.project_fredica.apputil.json`，仅在无扩展函数可用时直接使用
+- **Python 工具函数**：返回值用 `TypedDict` 标注，字段含义写在 docstring 中
+- **前端**：`JSON.parse(raw) as T` 解析 bridge 返回；`reportHttpError` 处理 HTTP 错误响应

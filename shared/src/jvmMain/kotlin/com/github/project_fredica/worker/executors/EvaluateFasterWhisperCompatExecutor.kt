@@ -2,6 +2,7 @@ package com.github.project_fredica.worker.executors
 
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
@@ -12,7 +13,6 @@ import com.github.project_fredica.worker.WebSocketTaskExecutor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -34,8 +34,8 @@ import kotlinx.serialization.json.Json
  * ## 结果写入
  * Python 推送 done 消息后，将兼容性 JSON 写入 AppConfig.fasterWhisperCompatJson。
  */
-object EvaluateWhisperCompatExecutor : WebSocketTaskExecutor() {
-    override val taskType = "EVALUATE_WHISPER_COMPAT"
+object EvaluateFasterWhisperCompatExecutor : WebSocketTaskExecutor() {
+    override val taskType = "EVALUATE_FASTER_WHISPER_COMPAT"
     private val logger = createLogger()
 
     @Serializable
@@ -43,7 +43,11 @@ object EvaluateWhisperCompatExecutor : WebSocketTaskExecutor() {
         val proxy: String = "",
     )
 
-    override suspend fun canSkip(task: Task) = false
+    override suspend fun canSkip(task: Task): Boolean {
+//        val config = AppConfigService.repo.getConfig()
+//        config.fasterWhisperCompatJson
+        return false
+    }
 
     override suspend fun executeWithSignals(
         task: Task,
@@ -59,10 +63,10 @@ object EvaluateWhisperCompatExecutor : WebSocketTaskExecutor() {
             if (cfg.fasterWhisperModelsDir.isNotBlank()) kv("models_dir", cfg.fasterWhisperModelsDir)
         }.str
 
-        logger.info("EvaluateWhisperCompatExecutor: 开始兼容性评估 [taskId=${task.id}]")
+        logger.info("EvaluateFasterWhisperCompatExecutor: 开始兼容性评估 [taskId=${task.id}]")
 
         val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
-            pth = "/asr/evaluate-compat-task",
+            pth = "/asr/evaluate-faster-whisper-compat-task",
             paramJson = paramJson,
             onProgress = { pct -> TaskService.repo.updateProgress(task.id, pct) },
             cancelSignal = cancelSignal,
@@ -71,12 +75,10 @@ object EvaluateWhisperCompatExecutor : WebSocketTaskExecutor() {
         ) ?: return@withContext ExecuteResult(error = "用户已取消", errorType = "CANCELLED")
 
         // 将兼容性结果写入 AppConfig
-        runCatching {
-            val updated = AppConfigService.repo.getConfig().copy(fasterWhisperCompatJson = result)
-            AppConfigService.repo.updateConfig(updated)
-        }.onFailure { logger.warn("EvaluateWhisperCompatExecutor: 写入 fasterWhisperCompatJson 失败: ${it.message}") }
+        val updated = AppConfigService.repo.getConfig().copy(fasterWhisperCompatJson = result)
+        AppConfigService.repo.updateConfig(updated)
 
-        logger.info("EvaluateWhisperCompatExecutor: 评估完成 [taskId=${task.id}]")
+        logger.info("EvaluateFasterWhisperCompatExecutor: 评估完成 [taskId=${task.id}]")
         ExecuteResult(result = result)
     }
 }

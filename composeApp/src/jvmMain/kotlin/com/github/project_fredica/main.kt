@@ -13,12 +13,14 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.FredicaApiJvmInitOption
 import com.github.project_fredica.api.FredicaApiJvmService
 import com.github.project_fredica.api.init
+import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.apputil.createLogger
 import dev.datlag.kcef.KCEFBuilder
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.JVMPlatform
 import com.github.project_fredica.apputil.Platform
 import com.github.project_fredica.apputil.addShutdownHook
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.burningwaveExportAllModule
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.getPlatform
@@ -96,6 +98,32 @@ fun main() {
             FredicaApi.init(
                 options = FredicaApiJvmInitOption()
             )
+            // FredicaApi.init() 完成后 AppConfigService 已就绪，
+            // 此时 Python 服务也已启动，可以安全地触发符号链接建立。
+            if (Platform.getPlatform().isSupportPython) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val cfg = AppConfigService.repo.getConfig()
+                        val variant = cfg.torchVariant
+                        if (variant.isNotBlank()) {
+                            val downloadDir = "${AppUtil.Paths.appDataDir.absolutePath}/download/torch"
+                            PythonUtil.Py314Embed.PyUtilServer.requestText(
+                                io.ktor.http.HttpMethod.Post,
+                                "/torch/setup-links",
+                                buildValidJson {
+                                    kv("download_dir", downloadDir)
+                                    kv("variant", variant)
+                                }.str
+                            )
+                            logger.debug("[startup] torch setup-links done: variant=$variant")
+                        } else {
+                            logger.debug("[startup] torch variant not set, skip setup-links")
+                        }
+                    } catch (e: Throwable) {
+                        logger.warn("[startup] torch setup-links failed: ${e.message}")
+                    }
+                }
+            }
         } catch (err: Throwable) {
             logger.exception("Failed init app", err)
             exitProcess(1)

@@ -61,6 +61,9 @@ object AppUtil {
         /** 媒体文件根目录：`{appDataDir}/media` */
         val appMediaDir: File get() = appDataDir.resolve("media")
 
+        /** torch 隔离下载根目录：`{appDataDir}/download/torch` */
+        val torchDownloadDir: File get() = appDataDir.resolve("download").resolve("torch")
+
         /**
          * 返回指定素材的媒体工作目录（首次调用时自动创建）：
          * `{appDataDir}/media/{materialId}/`

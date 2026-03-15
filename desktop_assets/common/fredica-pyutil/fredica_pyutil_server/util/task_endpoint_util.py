@@ -316,6 +316,29 @@ class TaskEndpointInEventLoopThread(TaskEndpoint, metaclass=abc.ABCMeta):
         """
         await self._not_paused_event.wait()
 
+    async def request_pause(self, reason: str = ""):
+        """
+        从 _run() 内部调用，主动请求 Kotlin 侧暂停此 Task。
+
+        发送 pause_request 消息后自身进入等待，直到 Kotlin 回发 resume 命令。
+        适用场景：GPU 显存不足、外部资源未就绪等需要等待用户或系统介入的情况。
+
+        :param reason: 暂停原因，透传给 Kotlin 的 onPauseRequest 回调
+        """
+        await self.send_json({"type": "pause_request", "reason": reason})
+        await self.call_pause()
+        await self.wait_if_paused()
+
+    async def request_resume(self):
+        """
+        从 _run() 内部调用，通知 Kotlin 侧任务已自行恢复。
+
+        适用场景：等待的资源已就绪，无需用户介入即可继续执行。
+        调用后 Kotlin 的 onResumeRequest 回调会同步 is_paused 状态。
+        """
+        await self.call_resume()
+        await self.send_json({"type": "resume_request"})
+
     def report_status(self, status: Any):
         """
         从 _run() 内部调用，更新供 status 命令查询的状态快照。
@@ -427,10 +450,26 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
 
     async def _on_subprocess_message(self, msg: Any):
         """
-        处理子进程发来的一条消息，默认仅更新状态快照。
-        子类可覆盖以主动推送 WebSocket 消息（await self.send_json(...)）。
+        处理子进程发来的一条消息。
+
+        识别子进程通过 subprocess_request_pause() 发出的特殊消息类型：
+          - {"type": "pause_request", "reason": ...}  → 转发给 WebSocket，同步 _is_pause 状态
+          - {"type": "resume_request"}                → 转发给 WebSocket，同步 _is_pause 状态
+
+        其他消息默认仅更新状态快照；子类可覆盖以主动推送 WebSocket 消息。
         :param msg: status_queue.put() 的内容
         """
+        if isinstance(msg, dict):
+            msg_type = msg.get("type")
+            if msg_type == "pause_request":
+                await self.send_json({"type": "pause_request", "reason": msg.get("reason", "")})
+                # 子进程已自行 clear resume_event，这里只同步父进程的 _is_pause 标志位
+                self._is_pause = True
+                return
+            if msg_type == "resume_request":
+                await self.send_json({"type": "resume_request"})
+                self._is_pause = False
+                return
         self._current_status = msg
 
     async def _on_init_param_and_run(self, param: Any):
@@ -504,6 +543,26 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
     async def _call_resume(self):
         """设置 resume_event，唤醒子进程。"""
         await run_blocking(self._resume_mp_event.set)
+
+
+def subprocess_request_pause(
+        status_queue: Any,
+        resume_event: Any,
+        reason: str = "",
+) -> None:
+    """
+    子进程内调用：主动请求父进程（及 Kotlin 侧）暂停此 Task，然后挂起等待恢复。
+
+    时序保证：先 clear resume_event，再 put 消息，再 wait。
+    这样即使父进程处理消息有延迟，子进程的 wait() 也一定会阻塞，不会提前返回。
+
+    :param status_queue:  TaskEndpointInSubProcess 传入的 multiprocessing.Queue
+    :param resume_event:  TaskEndpointInSubProcess 传入的 multiprocessing.Event（set=运行，clear=暂停）
+    :param reason:        暂停原因，透传给 Kotlin 的 onPauseRequest 回调
+    """
+    resume_event.clear()
+    status_queue.put({"type": "pause_request", "reason": reason})
+    resume_event.wait()
 
 
 if __name__ == '__main__':

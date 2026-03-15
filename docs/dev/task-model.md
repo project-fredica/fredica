@@ -243,6 +243,84 @@ data class TaskPauseResumeChannels(
 
 Executor 在长任务循环中监听 `pauseChannel`，收到信号后挂起等待 `resumeChannel`。
 
+### Python 主动发起暂停（pause_request / resume_request）
+
+上述暂停/恢复信号均由**外部（前端/Kotlin）主动下发**给 Python。但某些场景下 Python 需要反向通知 Kotlin，例如：
+
+- GPU 显存不足，需要等待资源释放后再继续
+- 子进程检测到外部依赖未就绪，主动挂起等待
+
+为此，WebSocket 协议新增两种**服务端推送消息**（Python → Kotlin）：
+
+```json
+{"type": "pause_request", "reason": "gpu_oom"}
+{"type": "resume_request"}
+```
+
+#### 信号流
+
+**EventLoop 版**（`TaskEndpointInEventLoopThread`）：
+
+```
+_run() 调 await self.request_pause(reason)
+  → send_json({"type":"pause_request", "reason":...})  → Kotlin onPauseRequest 回调
+  → wait_if_paused()  ← 挂起，等 Kotlin 回发 resume 命令（用户手动恢复）
+```
+
+**SubProcess 版**（`TaskEndpointInSubProcess`）：
+
+```
+子进程调 subprocess_request_pause(status_queue, resume_event, reason)
+  → resume_event.clear()（子进程自己先清，确保后续 wait() 会阻塞）
+  → status_queue.put({"type":"pause_request", "reason":...})
+      ↓
+父进程 _on_subprocess_message 识别特殊消息
+  → send_json({"type":"pause_request"})  → Kotlin onPauseRequest 回调
+  → 同步 _is_pause 标志位
+      ↓
+子进程 resume_event.wait()  ← 挂起
+  ← 用户手动恢复 → Kotlin 发 resume 命令 → call_resume() set resume_event → 子进程解除
+```
+
+> 子进程版本的关键时序：**先 `clear` 再 `put` 再 `wait`**，避免父进程还未处理消息时子进程的 `wait()` 因 event 仍为 set 而直接返回。
+
+#### Kotlin 侧（websocketTask 新增参数）
+
+```kotlin
+suspend fun websocketTask(
+    // ...原有参数...
+    onPauseRequest: (suspend (reason: String) -> Unit)? = null,
+    onResumeRequest: (suspend () -> Unit)? = null,
+): String?
+```
+
+#### Executor 使用示例
+
+```kotlin
+val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
+    pth = "/asr/transcribe",
+    paramJson = "...",
+    onProgress = { pct -> TaskService.repo.updateProgress(task.id, pct) },
+    onPauseRequest = { reason ->
+        TaskService.repo.updatePaused(task.id, true)
+        logger.info("Task ${task.id} self-paused by Python: $reason")
+    },
+    onResumeRequest = {
+        TaskService.repo.updatePaused(task.id, false)
+    },
+    cancelSignal = cancelSignal,
+    pauseChannel = channels.pause,
+    resumeChannel = channels.resume,
+)
+```
+
+#### 两种子场景
+
+| 场景 | Python 行为 | Kotlin 回调职责 |
+|------|------------|----------------|
+| 主动暂停，等用户手动恢复 | 发 `pause_request` + `wait_if_paused()` | `onPauseRequest` 更新 `is_paused=true`；用户点恢复后正常走 `TaskPauseResumeService.resume()` |
+| 自行暂停又自行恢复（等资源） | 发 `pause_request` + `wait`，资源就绪后发 `resume_request` | `onPauseRequest`/`onResumeRequest` 仅同步 `is_paused` 状态，无需用户介入 |
+
 ### 信号注册生命周期
 
 `WebSocketTaskExecutor` 基类统一管理信号的注册与注销，Executor 子类无需手动处理：

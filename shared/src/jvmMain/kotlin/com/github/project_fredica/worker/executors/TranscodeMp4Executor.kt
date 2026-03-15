@@ -3,6 +3,7 @@ package com.github.project_fredica.worker.executors
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.Task
@@ -217,7 +218,8 @@ object TranscodeMp4Executor : WebSocketTaskExecutor() {
         return try {
             val json = AppUtil.GlobalVars.json.parseToJsonElement(ffmpegProbeJson).jsonObject
             json["selected_accel"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: "cpu"
-        } catch (_: Throwable) {
+        } catch (err: Throwable) {
+            logger.exception("failed to resolve auto hw_accel", err)
             "cpu"
         }
     }

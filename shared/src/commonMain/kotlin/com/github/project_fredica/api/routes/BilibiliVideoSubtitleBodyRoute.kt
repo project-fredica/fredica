@@ -17,46 +17,10 @@ object BilibiliVideoSubtitleBodyRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "获取 B 站视频字幕内容"
 
-    private val logger = createLogger { "BilibiliVideoSubtitleBodyRoute" }
-
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoSubtitleBodyParam>().getOrThrow()
-        val urlKey = extractUrlKey(p.subtitleUrl)
-        logger.debug("请求 urlKey=$urlKey is_update=${p.isUpdate} original_url=${p.subtitleUrl}")
-
-        val raw = BilibiliSubtitleBodyCacheService.fetchOrLoad(urlKey, p.isUpdate) {
-            val pyBody = buildValidJson { kv("subtitle_url", p.subtitleUrl) }
-            logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
-            val pyResult = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.str, timeoutMs = 5 * 60_000L)
-            pyResult to computeIsSuccess(pyResult)
-        }
-        logger.debug("返回结果 urlKey=$urlKey")
+        val raw = BilibiliSubtitleBodyCacheService.fetchBilibiliSubtitleBody(p.subtitleUrl, isUpdate = false)
         return ValidJsonString(raw)
-    }
-
-    private fun computeIsSuccess(raw: String): Boolean =
-        runCatching {
-            val obj = raw.loadJson().getOrThrow() as? JsonObject
-            val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
-            code == 0
-        }.getOrDefault(false)
-
-    /** 去掉 auth_key / wts 等会过期的 query 参数，保留稳定的路径+其余参数作为缓存 key */
-    private fun extractUrlKey(url: String): String {
-        val normalized = if (url.startsWith("//")) "https:$url" else url
-        return try {
-            val uri = java.net.URI(normalized)
-            val stableParams = (uri.query ?: "")
-                .split("&")
-                .filter { part ->
-                    val key = part.substringBefore("=")
-                    key !in setOf("auth_key", "wts", "w_rid", "e")
-                }
-                .joinToString("&")
-            "${uri.host}${uri.path}${if (stableParams.isNotEmpty()) "?$stableParams" else ""}"
-        } catch (_: Exception) {
-            normalized
-        }
     }
 }
 

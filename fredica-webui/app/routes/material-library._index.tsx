@@ -204,8 +204,14 @@ export default function LibraryPage() {
     const handleRunTask = async (taskType: string) => {
         if (!actionTarget || runningTaskType) return;
         setRunningTaskType(taskType);
+        const routeMap: Record<string, string> = {
+            'DOWNLOAD_BILIBILI_VIDEO': '/api/v1/BilibiliVideoDownloadRoute',
+            'TRANSCODE_MP4': '/api/v1/BilibiliVideoMaterialTranscodeMp4Route',
+        };
+        const route = routeMap[taskType];
+        if (!route) { setRunningTaskType(null); return; }
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialRunTaskRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, task_type: taskType }) });
+            const { resp } = await apiFetch(route, { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id }) });
             if (!resp.ok) reportHttpError('提交任务失败', resp);
         } finally { setRunningTaskType(null); }
     };

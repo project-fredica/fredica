@@ -16,6 +16,8 @@ order: 1
 | [构建指南](./build) | 各模块构建命令与产物说明 |
 | [测试指南](./testing) | 测试文件一览、运行命令、SQLite 与 WorkerEngine 隔离约定 |
 | [任务模型](./task-model) | Task / WorkflowRun 数据模型、状态机、DAG 调度与任务控制 |
+| [错误处理指南](./error-handling) | Python / Kotlin / 前端各层的异常处理约定与反模式 |
+| [JSON 处理指南](./json-handling) | Kotlin / Python / 前端各层的 JSON 工具与序列化约定 |
 
 ## 架构计划
 

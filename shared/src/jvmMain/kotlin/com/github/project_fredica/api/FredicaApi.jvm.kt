@@ -1,66 +1,16 @@
 package com.github.project_fredica.api
 
+import com.github.project_fredica.api.FredicaApiJvmService.init
+import com.github.project_fredica.api.routes.*
 import com.github.project_fredica.apputil.*
-import com.github.project_fredica.db.AppConfigDb
-import com.github.project_fredica.db.AppConfigService
-import com.github.project_fredica.db.MaterialCategoryDb
-import com.github.project_fredica.db.MaterialCategoryService
-import com.github.project_fredica.db.MaterialDb
-import com.github.project_fredica.db.MaterialService
-import com.github.project_fredica.db.MaterialTaskDb
-import com.github.project_fredica.db.MaterialTaskService
-import com.github.project_fredica.db.MaterialVideoDb
-import com.github.project_fredica.db.MaterialVideoService
-import com.github.project_fredica.db.BilibiliAiConclusionCacheDb
-import com.github.project_fredica.db.BilibiliAiConclusionCacheService
-import com.github.project_fredica.db.WorkflowRunDb
-import com.github.project_fredica.db.WorkflowRunService
-import com.github.project_fredica.db.TaskDb
-import com.github.project_fredica.db.TaskService
-import com.github.project_fredica.db.RestartTaskLogDb
-import com.github.project_fredica.db.RestartTaskLogService
+import com.github.project_fredica.db.*
+import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
-import com.github.project_fredica.worker.executors.DownloadBilibiliVideoExecutor
-import com.github.project_fredica.worker.executors.TranscodeMp4Executor
-import com.github.project_fredica.worker.executors.FetchSubtitleExecutor
-import com.github.project_fredica.worker.executors.ExtractAudioExecutor
-import com.github.project_fredica.worker.executors.TranscribeExecutor
-import com.github.project_fredica.worker.executors.DownloadWhisperModelExecutor
-import com.github.project_fredica.worker.executors.EvaluateWhisperCompatExecutor
-import com.github.project_fredica.worker.executors.WebenConceptExtractExecutor
+import com.github.project_fredica.worker.executors.*
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
-import com.github.project_fredica.api.routes.ImageProxyResponse
-import com.github.project_fredica.api.routes.LlmProxyChatRoute
-import com.github.project_fredica.db.BilibiliSubtitleMetaCacheDb
-import com.github.project_fredica.db.BilibiliSubtitleMetaCacheService
-import com.github.project_fredica.db.BilibiliSubtitleBodyCacheDb
-import com.github.project_fredica.db.BilibiliSubtitleBodyCacheService
-import com.github.project_fredica.db.weben.WebenConceptDb
-import com.github.project_fredica.db.weben.WebenConceptService
-import com.github.project_fredica.db.weben.WebenFlashcardDb
-import com.github.project_fredica.db.weben.WebenFlashcardService
-import com.github.project_fredica.db.weben.WebenNoteDb
-import com.github.project_fredica.db.weben.WebenNoteService
-import com.github.project_fredica.db.weben.WebenRelationDb
-import com.github.project_fredica.db.weben.WebenRelationService
-import com.github.project_fredica.db.weben.WebenSegmentDb
-import com.github.project_fredica.db.weben.WebenSegmentService
-import com.github.project_fredica.db.weben.WebenSourceDb
-import com.github.project_fredica.db.weben.WebenSourceService
-import com.github.project_fredica.db.promptgraph.PromptGraphDefDb
-import com.github.project_fredica.db.promptgraph.PromptGraphDefService
-import com.github.project_fredica.db.promptgraph.PromptGraphRunDb
-import com.github.project_fredica.db.promptgraph.PromptGraphRunService
-import com.github.project_fredica.db.promptgraph.PromptNodeRunDb
-import com.github.project_fredica.db.promptgraph.PromptNodeRunService
-import com.github.project_fredica.promptgraph.PromptGraphEngine
-import com.github.project_fredica.api.routes.WebenSourceListRoute
-import com.github.project_fredica.api.routes.PromptGraphEngineService
-import com.github.project_fredica.api.routes.PromptGraphRunner
-import com.github.project_fredica.llm.LlmSseClient
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -68,15 +18,11 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.request.receiveText
-import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondText
+import io.ktor.server.request.*
+import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import io.ktor.util.toMap
+import io.ktor.util.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -165,75 +111,31 @@ object FredicaApiJvmService {
                 driver = "org.sqlite.JDBC",
             )
 
-            suspend fun <T> boot(label: String, repo: T, init: suspend T.() -> Unit, register: (T) -> Unit) {
-                repo.init()
-                register(repo)
-                logger.debug("$label initialized")
-            }
+            // AppConfig（最先，其他服务可能依赖配置）
+            AppConfigDb(database).also { it.initialize(); AppConfigService.initialize(it) }
+                .let { logger.debug("AppConfigService initialized, db path: $dbPath") }
+            // Material（顺序有依赖：base → video → category → task）
+            MaterialDb(database).also          { it.initialize(); MaterialService.initialize(it) }
+            MaterialVideoDb(database).also     { it.initialize(); MaterialVideoService.initialize(it) }
+            MaterialCategoryDb(database).also  { it.initialize(); MaterialCategoryService.initialize(it) }
+            MaterialTaskDb(database).also      { it.initialize(); MaterialTaskService.initialize(it) }
+            // Worker 任务队列
+            TaskDb(database).also              { it.initialize(); TaskService.initialize(it) }
+            WorkflowRunDb(database).also       { it.initialize(); WorkflowRunService.initialize(it) }
+            RestartTaskLogDb(database).also    { it.initialize(); RestartTaskLogService.initialize(it) }
+            // Bilibili 缓存
+            BilibiliAiConclusionCacheDb(database).also  { it.initialize(); BilibiliAiConclusionCacheService.initialize(it) }
+            BilibiliSubtitleMetaCacheDb(database).also  { it.initialize(); BilibiliSubtitleMetaCacheService.initialize(it) }
+            BilibiliSubtitleBodyCacheDb(database).also  { it.initialize(); BilibiliSubtitleBodyCacheService.initialize(it) }
+            // Weben 知识图谱（flashcard 依赖 concept 表存在）
+            WebenSourceDb(database).also    { it.initialize(); WebenSourceService.initialize(it) }
+            WebenConceptDb(database).also   { it.initialize(); WebenConceptService.initialize(it) }
+            WebenRelationDb(database).also  { it.initialize(); WebenRelationService.initialize(it) }
+            WebenSegmentDb(database).also   { it.initialize(); WebenSegmentService.initialize(it) }
+            WebenFlashcardDb(database).also { it.initialize(); WebenFlashcardService.initialize(it) }
+            WebenNoteDb(database).also      { it.initialize(); WebenNoteService.initialize(it) }
 
-            boot(
-                "AppConfigService, db path: $dbPath",
-                AppConfigDb(database),
-                { initialize() }) { AppConfigService.initialize(it) }
-            // 1. Base material table + all type-specific detail table stubs (must come first)
-            boot("MaterialService", MaterialDb(database), { initialize() }) { MaterialService.initialize(it) }
-            // 2. Video detail table (depends on material base table existing)
-            boot("MaterialVideoService", MaterialVideoDb(database), { initialize() }) {
-                MaterialVideoService.initialize(
-                    it
-                )
-            }
-            // 3. Category definitions + material_category_rel junction table
-            boot(
-                "MaterialCategoryService",
-                MaterialCategoryDb(database),
-                { initialize() }) { MaterialCategoryService.initialize(it) }
-            // 4. Task table (references material.id)
-            boot(
-                "MaterialTaskService",
-                MaterialTaskDb(database),
-                { initialize() }) { MaterialTaskService.initialize(it) }
-            // 5. Async worker task queue (pipeline_instance + task + task_event tables)
-            boot("TaskService", TaskDb(database), { initialize() }) { TaskService.initialize(it) }
-            boot("WorkflowRunService", WorkflowRunDb(database), { initialize() }) { WorkflowRunService.initialize(it) }
-            boot("RestartTaskLogService", RestartTaskLogDb(database), { initialize() }) { RestartTaskLogService.initialize(it) }
-            boot("BilibiliAiConclusionCacheService", BilibiliAiConclusionCacheDb(database), { initialize() }) { BilibiliAiConclusionCacheService.initialize(it) }
-            boot("BilibiliSubtitleMetaCacheService", BilibiliSubtitleMetaCacheDb(database), { initialize() }) { BilibiliSubtitleMetaCacheService.initialize(it) }
-            boot("BilibiliSubtitleBodyCacheService", BilibiliSubtitleBodyCacheDb(database), { initialize() }) { BilibiliSubtitleBodyCacheService.initialize(it) }
-            // 6. Weben 知识图谱表（顺序无强依赖，但 flashcard 依赖 concept 表存在）
-            boot("WebenSourceService",    WebenSourceDb(database),    { initialize() }) { WebenSourceService.initialize(it) }
-            boot("WebenConceptService",   WebenConceptDb(database),   { initialize() }) { WebenConceptService.initialize(it) }
-            boot("WebenRelationService",  WebenRelationDb(database),  { initialize() }) { WebenRelationService.initialize(it) }
-            boot("WebenSegmentService",   WebenSegmentDb(database),   { initialize() }) { WebenSegmentService.initialize(it) }
-            boot("WebenFlashcardService", WebenFlashcardDb(database), { initialize() }) { WebenFlashcardService.initialize(it) }
-            boot("WebenNoteService",      WebenNoteDb(database),      { initialize() }) { WebenNoteService.initialize(it) }
-            // 7. PromptGraph 提示词图引擎（三张表）
-            val pgDefDb  = PromptGraphDefDb(database)
-            val pgRunDb  = PromptGraphRunDb(database)
-            val pgNodeDb = PromptNodeRunDb(database)
-            boot("PromptGraphDefService",     pgDefDb,  { initialize() }) { PromptGraphDefService.initialize(it) }
-            boot("PromptGraphRunService",     pgRunDb,  { initialize() }) { PromptGraphRunService.initialize(it) }
-            boot("PromptNodeRunService",      pgNodeDb, { initialize() }) { PromptNodeRunService.initialize(it) }
-            // 系统内置图种子初始化（每次启动同步最新内置版本）
-            pgDefDb.upsertSystemGraphs()
-            // 注册引擎到 PromptGraphEngineService（通过 PromptGraphRunner 接口隐藏 jvmMain 依赖）
-            PromptGraphEngineService.initialize(object : PromptGraphRunner {
-                private val engine = PromptGraphEngine { modelConfig, requestBody, cancelSignal ->
-                    LlmSseClient.streamChat(
-                        modelConfig  = modelConfig,
-                        requestBody  = requestBody,
-                        cancelSignal = cancelSignal,
-                    )
-                }
-                override suspend fun run(
-                    defId: String,
-                    initialContext: Map<String, String>,
-                    materialId: String?,
-                    workflowRunId: String?,
-                    cancelSignal: kotlinx.coroutines.CompletableDeferred<Unit>?,
-                ) = engine.run(defId, initialContext, materialId, workflowRunId, cancelSignal)
-            })
-            logger.debug("PromptGraphEngineService initialized")
+            logger.debug("All DB services initialized")
         }
 
         CurrentInstanceHandler.server = embeddedServer(
@@ -255,12 +157,12 @@ object FredicaApiJvmService {
             executors = listOf(
                 DownloadBilibiliVideoExecutor,
                 TranscodeMp4Executor,
-                FetchSubtitleExecutor,
+//                FetchSubtitleExecutor,
                 ExtractAudioExecutor,
                 TranscribeExecutor,
-                WebenConceptExtractExecutor,
                 DownloadWhisperModelExecutor,
-                EvaluateWhisperCompatExecutor,
+                EvaluateFasterWhisperCompatExecutor,
+                DownloadTorchExecutor,
             ),
         )
         logger.debug("WorkerEngine started")
@@ -337,6 +239,23 @@ object FredicaApiJvmService {
             logger.info("[startup] device detect complete, ffmpegProbeJson saved")
         } catch (e: Throwable) {
             logger.warn("[startup] device detect failed: ${e.message}")
+        }
+
+        // torch 版本探测（异步，不阻塞启动）
+        try {
+            val torchResult = PythonUtil.Py314Embed.PyUtilServer.requestText(
+                HttpMethod.Post, "/torch/resolve-spec", requestTimeoutMs = 30_000L
+            )
+            val torchJson = AppUtil.GlobalVars.json.parseToJsonElement(torchResult).jsonObject
+            val recommendedVariant = torchJson["recommended_variant"]?.jsonPrimitive?.content ?: ""
+            val config2 = AppConfigService.repo.getConfig()
+            AppConfigService.repo.updateConfig(config2.copy(
+                torchRecommendedVariant = recommendedVariant,
+                torchRecommendationJson = torchResult,
+            ))
+            logger.info("[startup] torch resolve-spec complete, recommended=$recommendedVariant")
+        } catch (e: Throwable) {
+            logger.warn("[startup] torch resolve-spec failed: ${e.message}")
         }
     }
 

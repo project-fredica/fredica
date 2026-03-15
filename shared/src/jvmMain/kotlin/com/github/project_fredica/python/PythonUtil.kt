@@ -3,7 +3,10 @@ package com.github.project_fredica.python
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.JVMPlatform
+import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.getAsset
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
@@ -32,6 +35,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
@@ -43,7 +47,7 @@ import kotlin.time.DurationUnit
 
 
 object PythonUtil {
-
+    private val logger = createLogger()
 
     object Py314Embed {
         private val logger = createLogger()
@@ -146,7 +150,7 @@ object PythonUtil {
             private val logger = createLogger()
             private val port get() = FredicaApi.DEFAULT_PYUTIL_SERVER_PORT
             private lateinit var proc: Process
-            private val _name get() = PyUtilServer::class.simpleName
+            private val _PyUtilServer get() = PyUtilServer::class.simpleName
 
             /** Dedicated client with WebSocket plugin for task endpoints. */
             private val wsClient by lazy {
@@ -157,47 +161,49 @@ object PythonUtil {
 
             suspend fun start() {
                 if (::proc.isInitialized) {
-                    logger.debug("$_name already start")
+                    logger.debug("$_PyUtilServer already start")
                     return
                 }
-                logger.debug("start $_name")
+                logger.debug("start $_PyUtilServer")
                 return withContext(Dispatchers.IO) {
-                    proc = newPythonProcessBuilder(
+                    val pb = newPythonProcessBuilder(
                         "-m", "uvicorn",
                         "fredica_pyutil_server.app:app",
                         "--host", "127.0.0.1",
                         "--port", "$port",
-                    ).inheritIO().start()
+                    ).inheritIO()
+                    pb.environment()["FREDICA_DATA_DIR"] = AppUtil.Paths.appDataDir.absolutePath
+                    proc = pb.start()
                     delay(1000)
                     var count = 0
                     while (count <= 10) {
                         try {
                             if (!proc.isAlive) {
-                                throw IllegalStateException("failed to start $_name , process ${proc.pid()} unexpected die , return code ${proc.exitValue()}")
+                                throw IllegalStateException("failed to start $_PyUtilServer , process ${proc.pid()} unexpected die , return code ${proc.exitValue()}")
                             }
                             delay(1000)
                             try {
                                 requestText(HttpMethod.Get, "/ping")
                                 break
                             } catch (err: Throwable) {
-                                logger.debug("failed to ping $_name , cause by : $err")
+                                logger.debug("failed to ping $_PyUtilServer , cause by : $err")
                             }
                         } finally {
                             count++
                         }
                     }
-                    logger.debug("test ping $_name")
+                    logger.debug("test ping $_PyUtilServer")
                     requestText(HttpMethod.Get, "/ping")
-                    logger.debug("success ping $_name")
+                    logger.debug("success ping $_PyUtilServer")
                 }
             }
 
             suspend fun stop() {
                 if (!::proc.isInitialized) {
-                    logger.debug("$_name not start")
+                    logger.debug("$_PyUtilServer not start")
                     return
                 }
-                logger.debug("stoping $_name process ${proc.pid()} ")
+                logger.debug("stoping $_PyUtilServer process ${proc.pid()} ")
                 withContext(Dispatchers.IO) {
                     if (proc.isAlive) {
                         proc.destroy()
@@ -205,7 +211,7 @@ object PythonUtil {
                         var count = 0L
                         while (proc.isAlive) {
                             try {
-                                logger.debug("waiting destroy $_name process ${proc.pid()} ...")
+                                logger.debug("waiting destroy $_PyUtilServer process ${proc.pid()} ...")
                                 delay(1000 + count * 500)
                                 if (count >= 5) {
                                     proc.destroyForcibly()
@@ -216,7 +222,7 @@ object PythonUtil {
                         }
                     }
                 }
-                logger.debug("stop $_name , destroy finish")
+                logger.debug("stop $_PyUtilServer , destroy finish")
             }
 
 
@@ -244,13 +250,25 @@ object PythonUtil {
                 body: String? = null,
                 requestTimeoutMs: Long = 60_000L,
             ): String {
-                logger.debug("request to $_name route ${method.value} $pth")
+                logger.debug("request to $_PyUtilServer route ${method.value} $pth")
                 val resp = AppUtil.GlobalVars.ktorClientLocal.request {
                     url {
                         protocol = URLProtocol.HTTP
                         port = this@PyUtilServer.port.toInt()
                         host = "localhost"
-                        path(pth)
+                        // path() 会对整个字符串做 URL 编码，导致 ? 变成 %3F。
+                        // 将路径和 query string 分开处理，避免 query 被当成路径编码。
+                        val qIdx = pth.indexOf('?')
+                        if (qIdx < 0) {
+                            path(pth)
+                        } else {
+                            path(pth.substring(0, qIdx))
+                            pth.substring(qIdx + 1).split('&').forEach { kv ->
+                                val eqIdx = kv.indexOf('=')
+                                if (eqIdx < 0) parameters.append(kv, "")
+                                else parameters.append(kv.substring(0, eqIdx), kv.substring(eqIdx + 1))
+                            }
+                        }
                     }
                     this.method = method
                     contentType(ContentType.Application.Json)
@@ -264,14 +282,14 @@ object PythonUtil {
                     }
                 }
                 if (resp.status.value != 200) {
-                    throw IllegalStateException("failed request $_name , status code is ${resp.status.value} , response body : ${resp.bodyAsText()}")
+                    throw IllegalStateException("failed request $_PyUtilServer , status code is ${resp.status.value} , response body : ${resp.bodyAsText()}")
                 }
                 val bodyText = resp.bodyAsText()
                 logger.debug(
-                    "response from $_name route ${method.value} $pth : ${
+                    "response from $_PyUtilServer route ${method.value} $pth : ${
                         bodyText.let {
-                            if (it.length <= 100) it else {
-                                it.slice(0..100) + "..."
+                            if (it.length <= 200) it else {
+                                it.slice(0..200) + "..."
                             }
                         }
                     }")
@@ -281,14 +299,18 @@ object PythonUtil {
             /**
              * 执行基于 WebSocket 的长时任务（init_param_and_run 协议）。
              *
-             * @param pth           WebSocket 路径
-             * @param paramJson     init_param_and_run 命令的 data 字段（JSON 字符串）
-             * @param onProgress    进度回调（0-100），每次收到 progress 消息时调用
-             * @param onPausable    可暂停状态回调；Python 端 progress 消息含 pausable 字段时调用，
-             *                      true = 当前可暂停，false = 不可暂停（前端据此禁用暂停按钮）
-             * @param cancelSignal  取消信号；完成后会向 Python 端发送 {"command":"cancel"}
-             * @param pauseChannel  暂停信号 Channel；收到 Unit 后发送 {"command":"pause"}
-             * @param resumeChannel 恢复信号 Channel；收到 Unit 后发送 {"command":"resume"}
+             * @param pth              WebSocket 路径
+             * @param paramJson        init_param_and_run 命令的 data 字段（JSON 字符串）
+             * @param onProgress       进度回调（0-100），每次收到 progress 消息时调用
+             * @param onPausable       可暂停状态回调；Python 端 progress 消息含 pausable 字段时调用，
+             *                         true = 当前可暂停，false = 不可暂停（前端据此禁用暂停按钮）
+             * @param onPauseRequest   Python 主动发起暂停的回调；收到 {"type":"pause_request"} 时调用，
+             *                         参数为 reason 字符串；Executor 应在此更新 Task 的 is_paused 状态
+             * @param onResumeRequest  Python 主动恢复的回调；收到 {"type":"resume_request"} 时调用；
+             *                         Executor 应在此将 Task 的 is_paused 重置为 false
+             * @param cancelSignal     取消信号；完成后会向 Python 端发送 {"command":"cancel"}
+             * @param pauseChannel     暂停信号 Channel；收到 Unit 后发送 {"command":"pause"}
+             * @param resumeChannel    恢复信号 Channel；收到 Unit 后发送 {"command":"resume"}
              * @return 成功时返回 done 消息的 JSON 字符串；被取消时返回 null
              */
             suspend fun websocketTask(
@@ -296,11 +318,27 @@ object PythonUtil {
                 paramJson: String,
                 onProgress: (suspend (Int) -> Unit)? = null,
                 onPausable: (suspend (Boolean) -> Unit)? = null,
+                onPauseRequest: (suspend (reason: String) -> Unit)? = null,
+                onResumeRequest: (suspend () -> Unit)? = null,
                 cancelSignal: Deferred<Unit>? = null,
                 pauseChannel: ReceiveChannel<Unit>? = null,
                 resumeChannel: ReceiveChannel<Unit>? = null,
             ): String? = withContext(Dispatchers.IO) {
-                logger.debug("websocketTask to $_name ws $pth")
+                logger.debug("start websocketTask to ws $pth")
+                val paramJsonElement = if (paramJson.isBlank()) {
+                    createJson { obj { } }
+                } else {
+                    paramJson.loadJsonModel<JsonObject>().also {
+                        if (it.isFailure) {
+                            logger.exception(
+                                "Failed to parse paramJson in websocketTask , source is $paramJson",
+                                it.exceptionOrNull()!!
+                            )
+                        }
+                    }.getOrThrow()
+                }
+                logger.debug("success to parse json of websocketTask : $paramJsonElement")
+
                 var resultText: String? = null
                 var errorMsg: String? = null
 
@@ -313,11 +351,14 @@ object PythonUtil {
                     // 监听取消信号，一旦触发就向 Python 端发送 cancel 命令
                     val cancelJob = cancelSignal?.let { sig ->
                         launch {
+                            logger.debug("websocketTask start await cancel signal")
                             sig.await()
+                            logger.debug("websocketTask received an cancel signal")
                             try {
                                 send(Frame.Text("""{"command":"cancel"}"""))
                                 logger.debug("websocketTask sent cancel command for $pth")
-                            } catch (_: Exception) { /* WebSocket 可能已关闭，忽略 */
+                            } catch (err: Exception) { /* WebSocket 可能已关闭，可忽略 */
+                                logger.debug("An error on send cancel command to websocketTask : $err")
                             }
                         }
                     }
@@ -326,10 +367,12 @@ object PythonUtil {
                     val pauseJob = pauseChannel?.let { ch ->
                         launch {
                             for (unit in ch) {
+                                logger.debug("websocketTask received an pause signal")
                                 try {
                                     send(Frame.Text("""{"command":"pause"}"""))
                                     logger.debug("websocketTask sent pause command for $pth")
-                                } catch (_: Exception) {
+                                } catch (err: Exception) {
+                                    logger.debug("An error on websocketTask send pause signal : $err")
                                 }
                             }
                         }
@@ -339,10 +382,12 @@ object PythonUtil {
                     val resumeJob = resumeChannel?.let { ch ->
                         launch {
                             for (unit in ch) {
+                                logger.debug("websocketTask received an resume signal")
                                 try {
                                     send(Frame.Text("""{"command":"resume"}"""))
                                     logger.debug("websocketTask sent resume command for $pth")
-                                } catch (_: Exception) {
+                                } catch (err: Exception) {
+                                    logger.debug("An error on websocketTask send pause signal : $err")
                                 }
                             }
                         }
@@ -350,7 +395,10 @@ object PythonUtil {
 
                     try {
                         // Send init_param_and_run command
-                        val initCmd = """{"command":"init_param_and_run","data":$paramJson}"""
+                        val initCmd = buildValidJson {
+                            kv("command", "init_param_and_run")
+                            kv("data", paramJsonElement)
+                        }.str
                         send(Frame.Text(initCmd))
                         logger.debug("websocketTask sent init_param_and_run for $pth")
                         var lastPct = -1
@@ -360,7 +408,8 @@ object PythonUtil {
                             val text = frame.readText()
                             val json = try {
                                 AppUtil.GlobalVars.json.parseToJsonElement(text).jsonObject
-                            } catch (_: Exception) {
+                            } catch (err: Exception) {
+                                logger.warn("Failed parse json in websocketTask text frame data : text is $text , error is $err")
                                 continue
                             }
 
@@ -381,6 +430,17 @@ object PythonUtil {
                                     }
                                 }
 
+                                "pause_request" -> {
+                                    val reason = json["reason"]?.jsonPrimitive?.content ?: ""
+                                    logger.debug("websocketTask pause_request $pth : reason=$reason")
+                                    onPauseRequest?.invoke(reason)
+                                }
+
+                                "resume_request" -> {
+                                    logger.debug("websocketTask resume_request $pth")
+                                    onResumeRequest?.invoke()
+                                }
+
                                 "done" -> {
                                     resultText = text
                                     logger.debug("websocketTask done $pth")
@@ -391,6 +451,10 @@ object PythonUtil {
                                     errorMsg = json["message"]?.jsonPrimitive?.content ?: "unknown error"
                                     logger.debug("websocketTask error $pth : $errorMsg")
                                     break
+                                }
+
+                                else -> {
+                                    logger.warn("unexpected frame text in websocketTask : text is $text")
                                 }
                             }
                         }

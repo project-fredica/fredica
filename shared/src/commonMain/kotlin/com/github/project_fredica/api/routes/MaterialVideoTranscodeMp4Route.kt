@@ -16,92 +16,90 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 
 /**
- * 为指定素材启动单个初级任务（无 DAG 依赖）。
+ * 为指定素材启动 MP4 转码任务。
  *
- * 每次调用创建一个单任务流水线，立即排入 WorkerEngine 队列。
+ * 优先使用 DASH .m4s 对，回退到 .flv。
  * 若该素材已有同类型任务处于活跃状态（pending/claimed/running），返回 TASK_ALREADY_ACTIVE 错误。
  */
-object MaterialRunTaskRoute : FredicaApi.Route {
+object MaterialVideoTranscodeMp4Route : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
-    override val desc = "为指定素材启动单个初级任务（无 DAG 依赖）"
+    override val desc = "为指定素材启动 MP4 转码任务"
 
     override suspend fun handler(param: String): ValidJsonString {
-        val p = param.loadJsonModel<MaterialRunTaskParam>().getOrThrow()
+        val p = param.loadJsonModel<MaterialVideoTranscodeMp4Param>().getOrThrow()
         val materialId = p.materialId
-        val taskType   = p.taskType
+        val taskType = "TRANSCODE_MP4"
 
-        val material = MaterialVideoService.repo.findById(materialId)
-            ?: return buildValidJson { kv("error", "MATERIAL_NOT_FOUND") }
+        val material = MaterialVideoService.repo.findById(materialId) ?: return buildValidJson {
+            kv(
+                "error",
+                "MATERIAL_NOT_FOUND"
+            )
+        }
 
         val activeStatuses = setOf("pending", "claimed", "running")
-        val isActive = TaskStatusService.listAll(materialId = materialId, pageSize = 200)
-            .items.any { it.type == taskType && it.status in activeStatuses }
+        val isActive = TaskStatusService.listAll(
+            materialId = materialId,
+            pageSize = 200
+        ).items.any { it.type == taskType && it.status in activeStatuses }
         if (isActive) {
             return buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
         }
 
-        val nowSec        = System.currentTimeMillis() / 1000L
-        val mediaDir      = AppUtil.Paths.materialMediaDir(material.id)
+        val nowSec = System.currentTimeMillis() / 1000L
+        val mediaDir = AppUtil.Paths.materialMediaDir(material.id)
         val workflowRunId = UUID.randomUUID().toString()
-        val taskId        = UUID.randomUUID().toString()
+        val taskId = UUID.randomUUID().toString()
 
-        val payload = when (taskType) {
-            "DOWNLOAD_BILIBILI_VIDEO" -> createJson { obj {
-                kv("bvid",        material.sourceId)
-                kv("page",        1)
-                kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
-            } }.toString()
-            "TRANSCODE_MP4" -> createJson { obj {
+        val payload = createJson {
+            obj {
+                // Bilibili 下载路径。
                 // Prefer .m4s pair (DASH); fall back to .flv for older downloads
                 val videoM4s = mediaDir.resolve("video.m4s")
                 val audioM4s = mediaDir.resolve("audio.m4s")
                 val videoFlv = mediaDir.resolve("video.flv")
                 if (videoM4s.exists() && audioM4s.exists()) {
-                    kv("input_video",  videoM4s.absolutePath)
-                    kv("input_audio",  audioM4s.absolutePath)
+                    kv("input_video", videoM4s.absolutePath)
+                    kv("input_audio", audioM4s.absolutePath)
                 } else {
-                    kv("input_video",  videoFlv.absolutePath)
+                    kv("input_video", videoFlv.absolutePath)
                 }
                 kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
-                kv("hw_accel",    "auto")
-            } }.toString()
-            else -> "{}"
-        }
-
-        val maxRetries = 3
+                kv("hw_accel", "auto")
+            }
+        }.toString()
 
         WorkflowRunStatusService.create(
             WorkflowRun(
-                id         = workflowRunId,
+                id = workflowRunId,
                 materialId = material.id,
-                template   = "manual_${taskType.lowercase()}",
-                status     = "pending",
+                template = "manual_transcode_mp4",
+                status = "pending",
                 totalTasks = 1,
-                doneTasks  = 0,
-                createdAt  = nowSec,
+                doneTasks = 0,
+                createdAt = nowSec,
             )
         )
         TaskStatusService.create(
             Task(
-                id         = taskId,
-                type       = taskType,
+                id = taskId,
+                type = taskType,
                 workflowRunId = workflowRunId,
                 materialId = material.id,
-                payload    = payload,
-                maxRetries = maxRetries,
-                createdAt  = nowSec,
+                payload = payload,
+                maxRetries = 3,
+                createdAt = nowSec,
             )
         )
 
         return buildValidJson {
             kv("workflow_run_id", workflowRunId)
-            kv("task_id",     taskId)
+            kv("task_id", taskId)
         }
     }
 }
 
 @Serializable
-data class MaterialRunTaskParam(
+data class MaterialVideoTranscodeMp4Param(
     @SerialName("material_id") val materialId: String,
-    @SerialName("task_type")   val taskType: String,
 )

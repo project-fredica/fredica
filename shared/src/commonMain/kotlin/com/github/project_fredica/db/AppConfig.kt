@@ -1,5 +1,6 @@
 package com.github.project_fredica.db
 
+import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -37,15 +38,29 @@ data class AppConfig(
     // 兼容性评估结果（只读，由 EvaluateWhisperCompatExecutor 写入）
     @SerialName("faster_whisper_compat_json") val fasterWhisperCompatJson: String = "{}",
     @SerialName("faster_whisper_models_dir") val fasterWhisperModelsDir: String = "",
+    // torch 检测结果（只读，启动时自动写入）
+    @SerialName("torch_recommended_variant") val torchRecommendedVariant: String = "",
+    @SerialName("torch_recommendation_json") val torchRecommendationJson: String = "",
+    // torch 用户选择（用户主动写入，用于下载目录命名和符号链接）
+    @SerialName("torch_variant") val torchVariant: String = "",
+    // torch 下载代理设置
+    @SerialName("torch_download_use_proxy") val torchDownloadUseProxy: Boolean = false,
+    @SerialName("torch_download_proxy_url") val torchDownloadProxyUrl: String = "",
+    // torch 下载源覆盖（内置 variant 用；留空则使用官方源，可填国内镜像地址）
+    @SerialName("torch_download_index_url") val torchDownloadIndexUrl: String = "",
+    // torch 自定义版本（variant=="custom" 时使用）
+    @SerialName("torch_custom_packages") val torchCustomPackages: String = "",
+    @SerialName("torch_custom_index_url") val torchCustomIndexUrl: String = "",
+    @SerialName("torch_custom_variant_id") val torchCustomVariantId: String = "",
     // Bilibili 登录态（留空则匿名请求；仅当出现"账号未登录"类错误时才需要配置）
-    @SerialName("bilibili_sessdata") val bilibiliSessdata: String = "",
-    @SerialName("bilibili_bili_jct") val bilibiliBiliJct: String = "",
-    @SerialName("bilibili_buvid3") val bilibiliBuvid3: String = "",
-    @SerialName("bilibili_dedeuserid") val bilibiliDedeuserid: String = "",
-    @SerialName("bilibili_ac_time_value") val bilibiliAcTimeValue: String = "",
-    @SerialName("bilibili_buvid4") val bilibiliBuvid4: String = "",
-    @SerialName("bilibili_proxy") val bilibiliProxy: String = "",
-)
+    @SerialName("bilibili_sessdata") override val bilibiliSessdata: String = "",
+    @SerialName("bilibili_bili_jct") override val bilibiliBiliJct: String = "",
+    @SerialName("bilibili_buvid3") override val bilibiliBuvid3: String = "",
+    @SerialName("bilibili_dedeuserid") override val bilibiliDedeuserid: String = "",
+    @SerialName("bilibili_ac_time_value") override val bilibiliAcTimeValue: String = "",
+    @SerialName("bilibili_buvid4") override val bilibiliBuvid4: String = "",
+    @SerialName("bilibili_proxy") override val bilibiliProxy: String = "",
+) : BilibiliApiPythonCredentialConfig
 
 interface AppConfigRepo {
     suspend fun getConfig(): AppConfig

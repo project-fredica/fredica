@@ -35,7 +35,7 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
     :param param:         init_param_and_run 传入的参数字典，字段见下方
     :param status_queue:  multiprocessing.Queue，用于向父进程推送消息
     :param cancel_event:  multiprocessing.Event，set 时应尽快退出
-    :param resume_event:  multiprocessing.Event，clear 时应 wait()（暂停）
+    :param resume_event:  multiprocessing.Event FFmpeg 子进程不支持暂停，因此这里没用。
 
     param 支持的字段：
         input_video  (str)  必填，视频流路径（.m4s 或 .flv）
@@ -100,11 +100,6 @@ def _ffmpeg_transcode_worker(param: dict, status_queue, cancel_event, resume_eve
                     logger.debug("[transcode] proc.terminate() failed: {}", e)
                 status_queue.put({"type": "error", "message": "cancelled"})
                 return
-
-            resume_event.wait(timeout=0.1)
-            if not resume_event.is_set():
-                # 仍处于暂停状态，继续等待（同时保持 cancel_event 可响应）
-                continue
 
             # 非阻塞地取一行；若暂时没有则继续轮询
             try:
@@ -218,13 +213,12 @@ class FfmpegTranscodeMp4TaskEndpoint(TaskEndpointInSubProcess):
         return _ffmpeg_transcode_worker
 
     async def _does_support_pause(self):
-        # FFmpeg 子进程在 resume_event 上等待只是暂停了进度读取，
         # FFmpeg 本身仍在后台持续编码，因此暂停无实际意义。
         return "unsupported_always"
 
     async def _on_subprocess_message(self, msg: Any):
         self._current_status = msg
-        # 转码子进程不支持暂停（FFmpeg 子进程无法在 resume_event 上真正挂起），
+        # 转码子进程不支持暂停（FFmpeg 子进程无法真正挂起），
         # 在 progress 消息中透传 pausable=False，前端据此禁用暂停按钮。
         if isinstance(msg, dict) and msg.get("type") == "progress":
             msg = {**msg, "pausable": await self.is_pausable()}
