@@ -47,7 +47,11 @@ desktop_assets/common/fredica-pyutil/  # Python 服务源代码
     └── util/       # TaskEndpoint 基类 + device_util + ffmpeg_util
 
 docs/               # VitePress 文档站（sortMenusByFrontmatterOrder）
-├── dev/            # 开发文档（setup / architecture / task-model / build / testing / error-handling / plans/）
+├── dev/            # 开发文档（order 分段：0-99 入门 · 100-199 规范 · 200+ 专题）
+│   ├── setup.md / architecture.md / frontend-backend-bridge.md / task-model.md / build.md
+│   ├── error-handling.md / json-handling.md / testing.md / git-commit-style.md / vitepress-guide.md
+│   ├── image-proxy.md
+│   └── plans/      # 设计文档（order 500+）
 ├── guide/          # 用户文档
 └── product/        # 产品文档
 ```
@@ -104,7 +108,7 @@ cd fredica-webui && npm install && npm run dev
 |------|---------|
 | `util/app_fetch.ts` | `useAppFetch`、`useImageProxyUrl`、`parseJsonBody`、`buildAuthHeaders` |
 | `context/appConfig.tsx` | 应用配置 Context（持久化到 localStorage；WebView 通过 bridge `get_server_info` 初始化） |
-| `util/bridge.ts` | `getBridge()` 获取 JsBridge |
+| `util/bridge.ts` | `callBridge(method, params)` · `callBridgeOrNull(method, params)` · 详见 [docs/dev/frontend-backend-bridge.md](docs/dev/frontend-backend-bridge.md) |
 | `util/llm.ts` | `llmChat(params): AsyncGenerator<string>`（direct/router/bridge 三模式） |
 
 ---
@@ -140,6 +144,15 @@ cd fredica-webui && npm install && npm run dev
 - **Kotlin JsBridge**：Python 调用失败用 `logger.warn` + `callback({"error": "..."})`；发起调用前打一条入参日志
 - **Kotlin Route API**：`try/catch` 包裹业务逻辑，异常时 `respond({"error": ...})`
 - **前端 catch 块**：无响应信息用 `print_error`，有 HTTP 响应用 `reportHttpError`（自动附加状态码）；`BridgeUnavailableError` 静默；bridge 返回后检查 `res.error` 字段
+
+### Git Commit 约定
+
+详见 [docs/dev/git-commit-style.md](docs/dev/git-commit-style.md)，核心规则：
+
+- **格式**：`type(scope): subject`，正文按模块分组，每条变更 `- 类名: 做了什么`
+- **wip**：开发中随时用 `wip: ...` 暂存，不必等功能完整
+- **常用 type**：`feat` · `fix` · `refactor` · `docs` · `test` · `wip`
+- **跨层 scope**：用 `+` 连接，如 `feat(asr+webui):` · `refactor(json+error):`
 
 ### JSON 处理约定
 

@@ -35,7 +35,10 @@ export async function callBridge(
     { maxRetries = 5, retryDelayMs = 300 }: { maxRetries?: number; retryDelayMs?: number } = {},
 ): Promise<string> {
     const bridge = typeof window !== "undefined" ? window.kmpJsBridge : undefined;
-    if (!bridge) throw new BridgeUnavailableError();
+    if (!bridge) {
+        console.debug(`[callBridge] bridge unavailable (non-WebView env), method=${method}`);
+        throw new BridgeUnavailableError();
+    }
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -55,6 +58,25 @@ export async function callBridge(
         }
     }
     throw lastError;
+}
+
+/**
+ * callBridge 的静默变体：bridge 不可用时返回 null，其他错误正常抛出。
+ *
+ * 适用于浏览器开发环境下可静默跳过的调用（如 useEffect 内的数据加载）。
+ * 调用方只需 `if (!raw) return` 即可，无需 catch BridgeUnavailableError。
+ */
+export async function callBridgeOrNull(
+    method: string,
+    params: string = "{}",
+    options?: { maxRetries?: number; retryDelayMs?: number },
+): Promise<string | null> {
+    try {
+        return await callBridge(method, params, options ?? {});
+    } catch (e) {
+        if (e instanceof BridgeUnavailableError) return null;
+        throw e;
+    }
 }
 
 /**

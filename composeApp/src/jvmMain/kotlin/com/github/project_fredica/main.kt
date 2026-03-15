@@ -120,7 +120,7 @@ fun main() {
                             logger.debug("[startup] torch variant not set, skip setup-links")
                         }
                     } catch (e: Throwable) {
-                        logger.warn("[startup] torch setup-links failed: ${e.message}")
+                        logger.warn("[startup] torch setup-links failed", isHappensFrequently = false, err = e)
                     }
                 }
             }

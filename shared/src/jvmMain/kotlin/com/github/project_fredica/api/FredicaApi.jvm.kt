@@ -169,7 +169,11 @@ object FredicaApiJvmService {
 
         // 启动后异步触发设备检测（不阻塞启动流程）
         engineScope.launch {
-            _runStartupDeviceDetect()
+            try {
+                _runStartupDeviceDetect()
+            } catch (e: Throwable) {
+                logger.warn("[startup] device detect launch failed", isHappensFrequently = false, err = e)
+            }
         }
 
         // 注册前置清理：关闭 Python 服务 / 数据库等 shutdown hook 之前，
@@ -238,7 +242,7 @@ object FredicaApiJvmService {
             }
             logger.info("[startup] device detect complete, ffmpegProbeJson saved")
         } catch (e: Throwable) {
-            logger.warn("[startup] device detect failed: ${e.message}")
+            logger.warn("[startup] device detect failed", isHappensFrequently = false, err = e)
         }
 
         // torch 版本探测（异步，不阻塞启动）
@@ -255,7 +259,7 @@ object FredicaApiJvmService {
             ))
             logger.info("[startup] torch resolve-spec complete, recommended=$recommendedVariant")
         } catch (e: Throwable) {
-            logger.warn("[startup] torch resolve-spec failed: ${e.message}")
+            logger.warn("[startup] torch resolve-spec failed", isHappensFrequently = false, err = e)
         }
     }
 
@@ -269,7 +273,11 @@ object FredicaApiJvmService {
         val logger = createLogger()
         logger.info("[onAppReady] KCEF 初始化完成，启动后台 WebenSource 对账任务…")
         CurrentInstanceHandler.engineScope.launch(Dispatchers.IO) {
-            WebenSourceListRoute.startupReconcileAll()
+            try {
+                WebenSourceListRoute.startupReconcileAll()
+            } catch (e: Throwable) {
+                logger.warn("[onAppReady] startupReconcileAll failed", isHappensFrequently = false, err = e)
+            }
         }
     }
 

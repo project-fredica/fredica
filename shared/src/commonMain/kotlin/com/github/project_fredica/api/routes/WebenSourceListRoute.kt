@@ -291,7 +291,7 @@ object WebenSourceListRoute : FredicaApi.Route {
      */
     internal suspend fun startupReconcileAll() {
         val sources = runCatching { WebenSourceService.repo.listAll(null) }.getOrElse {
-            logger.warn("startupReconcileAll: 查询来源失败，跳过对账 ${it.message}")
+            logger.warn("startupReconcileAll: 查询来源失败，跳过对账", isHappensFrequently = false, err = it)
             return
         }
         val hasNonTerminal = sources.any { it.analysisStatus != "completed" && it.analysisStatus != "failed" }

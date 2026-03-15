@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { ArrowLeft, RefreshCw, Download, CheckCircle, Loader, AlertTriangle, ChevronDown, Search } from "lucide-react";
 import type { Route } from "./+types/app-desktop-setting.torch-config";
 import { useAppFetch } from "~/util/app_fetch";
-import { callBridge, BridgeUnavailableError } from "~/util/bridge";
+import { callBridge, callBridgeOrNull, BridgeUnavailableError } from "~/util/bridge";
 import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
 import { print_error } from "~/util/error_handler";
 
@@ -165,8 +165,9 @@ export default function TorchConfigPage() {
         setMirrorSupportedVariants(null);
         const params: Record<string, unknown> = { mirror_key: selectedMirrorKey };
         if (useProxy && proxyUrl.trim()) { params.use_proxy = true; params.proxy = proxyUrl.trim(); }
-        callBridge("get_torch_mirror_versions", JSON.stringify(params))
+        callBridgeOrNull("get_torch_mirror_versions", JSON.stringify(params))
             .then(raw => {
+                if (!raw) { setMirrorSupportedVariants(null); return; }
                 try {
                     const res = JSON.parse(raw) as { variants?: string[]; error?: string };
                     if (res.error) {
@@ -190,9 +191,7 @@ export default function TorchConfigPage() {
                 }
             })
             .catch(e => {
-                if (!(e instanceof BridgeUnavailableError)) {
-                    print_error({ reason: "获取镜像版本列表异常", err: e, variables: { mirror_key: selectedMirrorKey } });
-                }
+                print_error({ reason: "获取镜像版本列表异常", err: e, variables: { mirror_key: selectedMirrorKey } });
                 setMirrorSupportedVariants(null);
             });
     }, [selectedMirrorKey]);
@@ -224,9 +223,8 @@ export default function TorchConfigPage() {
 
     const loadInfo = async () => {
         try {
-            let raw: string;
-            try { raw = await callBridge("get_torch_info", "{}"); }
-            catch (e) { if (e instanceof BridgeUnavailableError) return; throw e; }
+            const raw = await callBridgeOrNull("get_torch_info");
+            if (!raw) return;
             const d = JSON.parse(raw) as TorchInfo;
             if (d.error) {
                 print_error({ reason: `加载 torch 配置失败: ${d.error}`, variables: { raw } });
@@ -265,9 +263,8 @@ export default function TorchConfigPage() {
 
     const loadCheckItems = async () => {
         try {
-            let raw: string;
-            try { raw = await callBridge("get_torch_check", "{}"); }
-            catch (e) { if (e instanceof BridgeUnavailableError) return; throw e; }
+            const raw = await callBridgeOrNull("get_torch_check");
+            if (!raw) return;
             const d = JSON.parse(raw) as { items: TorchCheckItem[]; error?: string };
             if (d.error) {
                 print_error({ reason: `检查 torch 下载状态失败: ${d.error}` });
@@ -281,9 +278,8 @@ export default function TorchConfigPage() {
 
     const loadAllMirrorVariants = async () => {
         try {
-            let raw: string;
-            try { raw = await callBridge("get_torch_all_mirror_variants", JSON.stringify({ use_proxy: useProxy, proxy: proxyUrl.trim() })); }
-            catch (e) { if (e instanceof BridgeUnavailableError) return; throw e; }
+            const raw = await callBridgeOrNull("get_torch_all_mirror_variants", JSON.stringify({ use_proxy: useProxy, proxy: proxyUrl.trim() }));
+            if (!raw) return;
             const res = JSON.parse(raw) as { variants?: string[]; per_mirror?: Record<string, string[]>; per_mirror_torch_versions?: Record<string, Record<string, string>>; error?: string };
             if (res.error) {
                 print_error({ reason: `查询镜像版本列表失败: ${res.error}` });
@@ -301,9 +297,7 @@ export default function TorchConfigPage() {
         if (detecting) return;
         setDetecting(true);
         try {
-            let raw: string;
-            try { raw = await callBridge("run_torch_detect", "{}"); }
-            catch (e) { if (e instanceof BridgeUnavailableError) return; throw e; }
+            const raw = await callBridge("run_torch_detect");
             const res = JSON.parse(raw);
             if (res.error) {
                 print_error({ reason: `GPU 检测失败: ${res.error}` });
@@ -315,6 +309,7 @@ export default function TorchConfigPage() {
             }
             await loadCheckItems();
         } catch (e) {
+            if (e instanceof BridgeUnavailableError) { setDetecting(false); return; }
             print_error({ reason: "GPU 检测异常", err: e });
         } finally { setDetecting(false); }
     };
@@ -325,9 +320,7 @@ export default function TorchConfigPage() {
         try {
             const params: Record<string, unknown> = { variant: selectedVariant };
             if (useProxy && proxyUrl.trim()) { params.use_proxy = true; params.proxy = proxyUrl.trim(); }
-            let raw: string;
-            try { raw = await callBridge("get_torch_mirror_check", JSON.stringify(params)); }
-            catch (e) { if (e instanceof BridgeUnavailableError) return; throw e; }
+            const raw = await callBridge("get_torch_mirror_check", JSON.stringify(params));
             const res = JSON.parse(raw) as { results: MirrorCheckResult[]; error?: string };
             if (res.error) {
                 print_error({ reason: `探测镜像可用性失败: ${res.error}`, variables: { variant: selectedVariant } });
@@ -337,6 +330,7 @@ export default function TorchConfigPage() {
             for (const r of res.results ?? []) map[r.key] = r;
             setMirrorCheckResults(map);
         } catch (e) {
+            if (e instanceof BridgeUnavailableError) { setCheckingMirrors(false); return; }
             print_error({ reason: "探测镜像可用性异常", err: e, variables: { variant: selectedVariant } });
         } finally { setCheckingMirrors(false); }
     };
@@ -354,8 +348,7 @@ export default function TorchConfigPage() {
                 ? customMirrorUrl.trim()
                 : (MIRROR_URL_FNS[selectedMirrorKey]?.(selectedVariant) ?? "");
 
-            try {
-                const saveRaw = await callBridge("save_torch_config", JSON.stringify({
+            const saveRaw = await callBridge("save_torch_config", JSON.stringify({
                     torch_variant: selectedVariant,
                     torch_download_use_proxy: useProxy,
                     torch_download_proxy_url: proxyUrl.trim(),
@@ -366,17 +359,8 @@ export default function TorchConfigPage() {
                 }));
                 const saveRes = JSON.parse(saveRaw);
                 if (saveRes.error) { setDownloadError(`保存配置失败: ${saveRes.error}`); setDownloading(false); return; }
-            } catch (e) {
-                if (e instanceof BridgeUnavailableError) { setDownloadError("仅支持在桌面应用内运行"); setDownloading(false); return; }
-                throw e;
-            }
 
-            let raw: string;
-            try { raw = await callBridge("download_torch", "{}"); }
-            catch (e) {
-                if (e instanceof BridgeUnavailableError) { setDownloadError("仅支持在桌面应用内运行"); setDownloading(false); return; }
-                throw e;
-            }
+            const raw = await callBridge("download_torch", "{}");
             const res = JSON.parse(raw);
             if (res.error) {
                 setDownloadError(res.error === "TASK_ALREADY_ACTIVE" ? "下载任务已在进行中" : res.error);
@@ -385,6 +369,7 @@ export default function TorchConfigPage() {
             }
             if (res.workflow_run_id) setDownloadWorkflowRunId(res.workflow_run_id);
         } catch (e: unknown) {
+            if (e instanceof BridgeUnavailableError) { setDownloadError("仅支持在桌面应用内运行"); setDownloading(false); return; }
             setDownloadError(e instanceof Error ? e.message : String(e));
             setDownloading(false);
         }

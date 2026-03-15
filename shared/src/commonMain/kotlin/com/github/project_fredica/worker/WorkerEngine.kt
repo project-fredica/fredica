@@ -148,7 +148,7 @@ object WorkerEngine {
         val nonTerminalSnapshot = try {
             TaskService.repo.snapshotNonTerminalTasks()
         } catch (e: Throwable) {
-            logger.warn("WorkerEngine 启动恢复: 快照非终态任务失败"); emptyList()
+            logger.warn("WorkerEngine 启动恢复: 快照非终态任务失败", isHappensFrequently = false, err = e); emptyList()
         }
 
         // 2. 重置僵尸任务（running/claimed/pending → cancelled）
@@ -172,7 +172,7 @@ object WorkerEngine {
                 RestartTaskLogService.repo.recordRestartSession(sessionId, nonTerminalSnapshot, nowSec)
                 logger.info("WorkerEngine 启动恢复: 记录中断任务 ${nonTerminalSnapshot.size} 条，session=$sessionId")
             } catch (e: Throwable) {
-                logger.warn("WorkerEngine 启动恢复: 写重启日志失败（不影响正常启动）")
+                logger.warn("WorkerEngine 启动恢复: 写重启日志失败（不影响正常启动）", isHappensFrequently = false, err = e)
             }
         }
 

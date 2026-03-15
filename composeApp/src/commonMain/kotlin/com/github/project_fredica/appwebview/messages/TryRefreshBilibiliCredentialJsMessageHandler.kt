@@ -103,7 +103,7 @@ class TryRefreshBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
             logger.info("TryRefreshBilibiliCredential: 完成，raw=$raw")
             callback(raw)
         } catch (e: Throwable) {
-            logger.warn("TryRefreshBilibiliCredential: Python 服务异常: ${e.message}")
+            logger.warn("TryRefreshBilibiliCredential: Python 服务异常", isHappensFrequently = false, err = e)
             callback(buildValidJson {
                 kv("success", false)
                 kv("refreshed", false)

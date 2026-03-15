@@ -72,3 +72,22 @@ inline fun Logger.error(msg: String, err: Throwable?) = if (err == null) {
 } else {
     this.exception(msg, err)
 }
+
+/**
+ * 输出警告日志，根据 [err] 是否为 null 以及 [isHappensFrequently] 决定异常信息详细程度。
+ *
+ * - `err == null`：仅输出消息文本
+ * - `err != null && isHappensFrequently == true`：输出 `msg > ExceptionType : message`（简短，避免高频场景刷屏）
+ * - `err != null && isHappensFrequently == false`：输出消息 + 完整 stacktrace
+ *
+ * 使用场景：
+ * - 预期失败但不频繁（如启动时 Python 服务未就绪）→ `isHappensFrequently = false`
+ * - 预期失败且高频（如轮询超时、每次请求都可能失败）→ `isHappensFrequently = true`
+ */
+inline fun Logger.warn(msg: String, isHappensFrequently: Boolean, err: Throwable?) = if (err == null) {
+    this.warn(msg)
+} else if (isHappensFrequently) {
+    this.warn("$msg > ${err::class.simpleName} : ${err.message}")
+} else {
+    this.warn("$msg\n${err.stackTraceToString()}")
+}

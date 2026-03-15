@@ -127,17 +127,7 @@ export default function AsrConfigPage() {
         setEvalRunning(true);
         setEvalLog(["开始兼容性评估…"]);
         try {
-            let raw: string;
-            try {
-                raw = await callBridge("run_faster_whisper_compat_eval", "{}");
-            } catch (e) {
-                if (e instanceof BridgeUnavailableError) {
-                    setEvalLog(prev => [...prev, "仅支持在桌面应用内运行"]);
-                    setEvalRunning(false);
-                    return;
-                }
-                throw e;
-            }
+            const raw = await callBridge("run_faster_whisper_compat_eval", "{}");
             const res = JSON.parse(raw);
             if (res.error) {
                 setEvalLog(prev => [...prev, `错误: ${res.error}`]);
@@ -187,6 +177,7 @@ export default function AsrConfigPage() {
                 } catch {}
             }, 2000);
         } catch (e: any) {
+            if (e instanceof BridgeUnavailableError) { setEvalLog(prev => [...prev, "仅支持在桌面应用内运行"]); setEvalRunning(false); return; }
             setEvalLog(prev => [...prev, `错误: ${e?.message ?? e}`]);
             setEvalRunning(false);
         }
@@ -198,17 +189,7 @@ export default function AsrConfigPage() {
         setDlProgress(0);
         setDlLog([`开始下载模型 ${cfg.model}…`]);
         try {
-            let raw: string;
-            try {
-                raw = await callBridge("run_faster_whisper_model_download", JSON.stringify({ model_name: cfg.model }));
-            } catch (e) {
-                if (e instanceof BridgeUnavailableError) {
-                    setDlLog(prev => [...prev, "仅支持在桌面应用内运行"]);
-                    setDlRunning(false);
-                    return;
-                }
-                throw e;
-            }
+            const raw = await callBridge("run_faster_whisper_model_download", JSON.stringify({ model_name: cfg.model }));
             const res = JSON.parse(raw);
             if (res.error) {
                 setDlLog(prev => [...prev, `错误: ${res.error}`]);
@@ -250,6 +231,7 @@ export default function AsrConfigPage() {
                 } catch {}
             }, 1500);
         } catch (e: any) {
+            if (e instanceof BridgeUnavailableError) { setDlLog(prev => [...prev, "仅支持在桌面应用内运行"]); setDlRunning(false); return; }
             setDlLog(prev => [...prev, `错误: ${e?.message ?? e}`]);
             setDlRunning(false);
         }

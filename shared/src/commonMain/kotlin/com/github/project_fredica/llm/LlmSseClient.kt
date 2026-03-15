@@ -179,7 +179,7 @@ object LlmSseClient {
             ?.get("content")?.jsonPrimitive?.contentOrNull
     }.getOrElse { e ->
         // 解析异常通常是服务端发送了非 JSON 格式的 data 行，降级为 null 跳过即可
-        logger.warn("extractDeltaContent parse failed: ${e.message} data=$dataJson")
+        logger.warn("extractDeltaContent parse failed data=$dataJson", isHappensFrequently = true, err = e)
         null
     }
 }

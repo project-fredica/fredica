@@ -94,7 +94,7 @@ class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
             logger.info("CheckBilibiliCredential: 完成，raw=$raw")
             callback(raw)
         } catch (e: Throwable) {
-            logger.warn("CheckBilibiliCredential: Python 服务异常: ${e.message}")
+            logger.warn("CheckBilibiliCredential: Python 服务异常", isHappensFrequently = false, err = e)
             callback(buildValidJson {
                 kv("configured", true)
                 kv("valid", false)

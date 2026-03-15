@@ -29,7 +29,7 @@ class GetTorchAllMirrorVariantsJsMessageHandler : MyJsMessageHandler() {
         val params = try {
             AppUtil.GlobalVars.json.parseToJsonElement(message.params) as? JsonObject
         } catch (e: Throwable) {
-            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] failed to parse params: ${e.message}")
+            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] failed to parse params", isHappensFrequently = false, err = e)
             null
         }
 
@@ -40,12 +40,12 @@ class GetTorchAllMirrorVariantsJsMessageHandler : MyJsMessageHandler() {
             append("/torch/all-mirror-variants")
             if (useProxy && proxy.isNotBlank()) append("?proxy=$proxy")
         }
-        logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] useProxy=$useProxy path=$path")
+        logger.debug("[GetTorchAllMirrorVariantsJsMessageHandler] useProxy=$useProxy path=$path")
 
         val result = try {
             FredicaApi.PyUtil.get(path)
         } catch (e: Throwable) {
-            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] Python call failed: ${e.message}")
+            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] Python call failed", isHappensFrequently = false, err = e)
             buildValidJson { kv("error", e.message ?: "unknown error") }.str
         }
         callback(result)

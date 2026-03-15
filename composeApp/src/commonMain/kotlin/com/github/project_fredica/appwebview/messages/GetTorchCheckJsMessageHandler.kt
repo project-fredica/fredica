@@ -50,7 +50,7 @@ class GetTorchCheckJsMessageHandler : MyJsMessageHandler() {
             }
             buildValidJson { kv("items", ValidJsonString(items)) }.str
         } catch (e: Throwable) {
-            logger.warn("[GetTorchCheckJsMessageHandler] failed: ${e.message}")
+            logger.warn("[GetTorchCheckJsMessageHandler] failed", isHappensFrequently = false, err = e)
             buildValidJson { kv("items", ValidJsonString("[]")) }.str
         }
         callback(result)

@@ -54,7 +54,7 @@ abstract class MyJsMessageHandler : IJsMessageHandler {
                     )
                 }
             } catch (e: Throwable) {
-                logger.warn("[${this@MyJsMessageHandler.javaClass.simpleName}] unhandled error: ${e.message}")
+                logger.warn("[${this@MyJsMessageHandler.javaClass.simpleName}] unhandled error", isHappensFrequently = false, err = e)
                 callback(buildValidJson { kv("error", e.message ?: "unknown error") }.str)
             }
         }

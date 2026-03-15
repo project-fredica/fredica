@@ -32,7 +32,7 @@ class GetTorchPipCommandJsMessageHandler : MyJsMessageHandler() {
         val params = try {
             AppUtil.GlobalVars.json.parseToJsonElement(message.params) as? JsonObject
         } catch (e: Throwable) {
-            logger.warn("[GetTorchPipCommandJsMessageHandler] failed to parse params: ${e.message}")
+            logger.warn("[GetTorchPipCommandJsMessageHandler] failed to parse params", isHappensFrequently = false, err = e)
             null
         }
 
@@ -63,7 +63,7 @@ class GetTorchPipCommandJsMessageHandler : MyJsMessageHandler() {
         val result = try {
             FredicaApi.PyUtil.get(path)
         } catch (e: Throwable) {
-            logger.warn("[GetTorchPipCommandJsMessageHandler] Python call failed for variant=$variant: ${e.message}")
+            logger.warn("[GetTorchPipCommandJsMessageHandler] Python call failed for variant=$variant", isHappensFrequently = false, err = e)
             buildValidJson { kv("command", "") }.str
         }
         callback(result)

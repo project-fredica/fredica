@@ -409,7 +409,7 @@ object PythonUtil {
                             val json = try {
                                 AppUtil.GlobalVars.json.parseToJsonElement(text).jsonObject
                             } catch (err: Exception) {
-                                logger.warn("Failed parse json in websocketTask text frame data : text is $text , error is $err")
+                                logger.warn("Failed parse json in websocketTask text frame data : text is $text", isHappensFrequently = true, err = err)
                                 continue
                             }
 
