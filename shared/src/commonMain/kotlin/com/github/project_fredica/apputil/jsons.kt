@@ -268,12 +268,11 @@ inline fun <R> createJson(scope: CreateJsonUtil.() -> R): R {
  * }
  * ```
  *
- * 嵌套已序列化的 JSON 对象/数组时，使用 [CreateJsonUtil.ObjContext.kv] 的
- * [ValidJsonString] 重载：
+ * 嵌套 `@Serializable` 子对象时，先转成 [JsonElement] 再传给 [CreateJsonUtil.ObjContext.kv]：
  * ```kotlin
  * return buildValidJson {
- *     kv("pipeline", ValidJsonString(json.encodeToString(pipeline)))
- *     kv("tasks",    ValidJsonString(json.encodeToString(tasks)))
+ *     kv("pipeline", AppUtil.GlobalVars.json.encodeToJsonElement(pipeline))
+ *     kv("tasks",    AppUtil.GlobalVars.json.encodeToJsonElement(tasks))
  * }
  * ```
  */

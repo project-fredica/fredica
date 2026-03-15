@@ -176,4 +176,5 @@ def evaluate_faster_whisper_compat_worker(param: dict, status_queue, cancel_even
             _put({"type": "done", "result": result})
 
     except Exception as e:
+        logger.exception("evaluate_faster_whisper_compat_worker: unexpected error")
         _put({"type": "error", "message": str(e)})

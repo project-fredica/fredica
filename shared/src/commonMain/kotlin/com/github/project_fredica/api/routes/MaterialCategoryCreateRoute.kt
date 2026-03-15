@@ -3,12 +3,10 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialCategory
 import com.github.project_fredica.db.MaterialCategoryService
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 
 object MaterialCategoryCreateRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
@@ -17,7 +15,7 @@ object MaterialCategoryCreateRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<MaterialCategoryCreateParam>().getOrThrow()
         val category: MaterialCategory = MaterialCategoryService.repo.createOrGet(p.name.trim(), p.description)
-        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(category))
+        return AppUtil.dumpJsonStr(category).getOrThrow()
     }
 }
 

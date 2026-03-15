@@ -3,11 +3,9 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.RestartTaskLogListResult
 import com.github.project_fredica.db.RestartTaskLogService
-import kotlinx.serialization.encodeToString
 
 /**
  * GET /api/v1/RestartTaskLogListRoute[?disposition=...&material_id=...]

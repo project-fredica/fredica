@@ -4,6 +4,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.CaseFormat
 import com.github.project_fredica.apputil.CreateJsonUtil
 import com.github.project_fredica.apputil.asT
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.convertCase
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.json
@@ -41,15 +42,20 @@ abstract class MyJsMessageHandler : IJsMessageHandler {
     ) {
         logger.debug("[${this.javaClass.simpleName}] handle js message: $message")
         CoroutineScope(Dispatchers.IO).launch {
-            handle2(message, navigator) {
-                callback(
-                    // kmpJsBridge 将回调字符串包裹在 JS 单引号字面量中：
-                    //   window.kmpJsBridge.onCallback(id, '<payload>')
-                    // 因此 payload 内的反斜杠和单引号必须提前转义，否则会破坏 JS 语法，
-                    // 导致前端 JSON.parse 收到截断或错误的字符串。
-                    // 顺序：先转义反斜杠（避免后续步骤二次转义），再转义单引号。
-                    it.replace("\\", "\\\\").replace("'", "\\'")
-                )
+            try {
+                handle2(message, navigator) {
+                    callback(
+                        // kmpJsBridge 将回调字符串包裹在 JS 单引号字面量中：
+                        //   window.kmpJsBridge.onCallback(id, '<payload>')
+                        // 因此 payload 内的反斜杠和单引号必须提前转义，否则会破坏 JS 语法，
+                        // 导致前端 JSON.parse 收到截断或错误的字符串。
+                        // 顺序：先转义反斜杠（避免后续步骤二次转义），再转义单引号。
+                        it.replace("\\", "\\\\").replace("'", "\\'")
+                    )
+                }
+            } catch (e: Throwable) {
+                logger.warn("[${this@MyJsMessageHandler.javaClass.simpleName}] unhandled error: ${e.message}")
+                callback(buildValidJson { kv("error", e.message ?: "unknown error") }.str)
             }
         }
     }

@@ -32,12 +32,12 @@ return buildValidJson {
 
 `kv` 支持 `String?` / `Boolean?` / `Number?` / `JsonObject?` / `JsonArray?` / `JsonElement?` / `ValidJsonString?`，`kNull` 显式写入 JSON null。
 
-嵌套已序列化的子对象时，用 `ValidJsonString` 重载：
+嵌套 `@Serializable` 子对象时，先转成 `JsonElement` 再传给 `kv`：
 
 ```kotlin
 return buildValidJson {
-    kv("pipeline", ValidJsonString(json.encodeToString(pipeline)))
-    kv("tasks",    ValidJsonString(json.encodeToString(tasks)))
+    kv("pipeline", AppUtil.GlobalVars.json.encodeToJsonElement(pipeline))
+    kv("tasks",    AppUtil.GlobalVars.json.encodeToJsonElement(tasks))
 }
 ```
 

@@ -3,12 +3,10 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialTaskService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 
 object MaterialTaskListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
@@ -17,7 +15,7 @@ object MaterialTaskListRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<MaterialTaskListParam>().getOrThrow()
         val tasks = MaterialTaskService.repo.listByMaterialId(p.materialId)
-        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(tasks))
+        return AppUtil.dumpJsonStr(tasks).getOrThrow()
     }
 }
 

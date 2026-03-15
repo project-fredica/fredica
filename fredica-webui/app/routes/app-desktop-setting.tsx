@@ -387,8 +387,7 @@ export default function Component({ }: Route.ComponentProps) {
             setIsDirty(false);
             setTimeout(() => setSaved(false), 2000);
         } catch (e) {
-            console.error("保存设置失败：", e);
-            alert("保存失败：" + e);
+            print_error({ reason: "保存设置失败", err: e });
         }
     };
 
@@ -397,7 +396,7 @@ export default function Component({ }: Route.ComponentProps) {
         try {
             const result = await callBridge("run_ffmpeg_detect");
             const info = JSON.parse(result);
-            if (info.error) { console.error("device detect error:", info.error); return; }
+            if (info.error) { print_error({ reason: `设备检测失败: ${info.error}` }); return; }
             if (info.device_info_json) {
                 setDeviceInfo(typeof info.device_info_json === "string"
                     ? JSON.parse(info.device_info_json) : info.device_info_json);
@@ -407,7 +406,7 @@ export default function Component({ }: Route.ComponentProps) {
                     ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
             }
         } catch (e) {
-            console.error("detect failed:", e);
+            print_error({ reason: "设备检测失败", err: e });
         } finally {
             setDetecting(false);
         }

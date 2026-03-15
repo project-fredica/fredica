@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
+import { print_error } from "~/util/error_handler";
 import type { Route } from "./+types/app-desktop-home";
 
 export function meta({ }: Route.MetaArgs) {
@@ -81,8 +82,9 @@ export default function Component({
         try {
             await callBridge("open_browser", JSON.stringify({ url: "http://localhost:7630", addServerInfoParam: true }));
         } catch (e) {
-            console.error("调用 open_browser bridge 失败:", e);
-            alert("kmpJsBridge 不可用，请在桌面端环境中使用");
+            if (!(e instanceof BridgeUnavailableError)) {
+                print_error({ reason: "打开浏览器失败", err: e });
+            }
         }
     };
 

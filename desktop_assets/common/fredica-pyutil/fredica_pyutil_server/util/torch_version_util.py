@@ -11,7 +11,7 @@ import re
 import sysconfig
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 
 from loguru import logger
 
@@ -404,11 +404,20 @@ def _find_variants_in_stable_html(html: str) -> dict:
         return resp.read().decode("utf-8", errors="ignore")
 
 
-def check_mirror_availability(variant: str, mirror_key: str, proxy: str = "") -> dict:
+class MirrorAvailabilityResult(TypedDict):
     """
-    抓取镜像站页面，判断该镜像是否有指定 variant 的 torch wheel。
-    返回 {"available": bool, "url": str, "error": str}
+    镜像可用性探测结果。
+    available: 该镜像是否有指定 variant 的 torch wheel
+    url:       实际请求的 URL（用于调试）
+    error:     失败原因，成功时为空字符串
     """
+    available: bool
+    url: str
+    error: str
+
+
+def check_mirror_availability(variant: str, mirror_key: str, proxy: str = "") -> MirrorAvailabilityResult:
+    """抓取镜像站页面，判断该镜像是否有指定 variant 的 torch wheel。不抛异常，失败时 error 字段非空。"""
     src = next((s for s in MIRROR_SOURCES if s.key == mirror_key), None)
     if src is None or src.key == "custom":
         logger.warning(f"[torch] check_mirror_availability: unsupported mirror_key={mirror_key!r}")
@@ -447,12 +456,23 @@ def check_mirror_availability(variant: str, mirror_key: str, proxy: str = "") ->
             return {"available": False, "url": simple_url, "error": str(e)}
 
 
-def fetch_mirror_supported_variants(mirror_key: str, proxy: str = "") -> dict:
+class MirrorVariantsResult(TypedDict):
     """
-    抓取镜像站页面一次，返回该镜像支持的所有 variant 列表。
+    镜像站支持的 variant 列表查询结果。
+    variants:       该镜像支持的 variant 列表（如 ["cu128", "cu126", "cpu"]）
+    torch_versions: variant -> torch 版本号的映射（部分镜像可解析，否则为空 dict）
+    error:          失败原因，成功时为空字符串
+    """
+    variants: List[str]
+    torch_versions: dict
+    error: str
+
+
+def fetch_mirror_supported_variants(mirror_key: str, proxy: str = "") -> MirrorVariantsResult:
+    """
+    抓取镜像站页面一次，返回该镜像支持的所有 variant 列表。不抛异常，失败时 error 字段非空。
     - stable_html 型：请求 {base}/torch_stable.html，检查 "+{variant}" 字样
     - simple_api 型：请求 {base}/torch/，检查 "+{variant}" 字样
-    返回 {"variants": ["cu128", "cu126", ...], "error": str}
     """
     src = next((s for s in MIRROR_SOURCES if s.key == mirror_key), None)
     if src is None or src.key == "custom":
