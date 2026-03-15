@@ -96,35 +96,38 @@ class TaskDbTest {
     // ── 测试 2：幂等键去重 ────────────────────────────────────────────────────
 
     /**
-     * 证明目的：相同 idempotency_key 的任务只会保留第一条，重复插入被静默忽略。
+     * 证明目的：相同 idempotency_key 只对活跃任务（非终态）去重；已完成的任务不阻塞新任务。
      *
-     * 证明过程：
-     *   1. 插入任务 idem-1，idempotency_key = "unique-key-abc"。
-     *   2. 插入任务 idem-2，idempotency_key 相同但 id 不同（模拟重复提交）。
-     *   3. 读取全部任务，断言只有 1 条（idem-2 被丢弃）。
-     *   4. 验证保留的是 idem-1（先到先得）。
+     * 用例 A：活跃任务去重
+     *   1. 插入 idem-1（pending），idempotency_key = "key-abc"。
+     *   2. 插入 idem-2，相同 key——应被跳过。
+     *   3. 断言只有 1 条。
      *
-     * 关键实现细节：
-     *   SQL 使用 `INSERT OR IGNORE`，它能同时处理 id 冲突和 idempotency_key 冲突。
-     *   如果用 `ON CONFLICT(id) DO NOTHING`，idempotency_key 冲突时会抛出异常。
+     * 用例 B：已完成后可重新插入
+     *   1. 将 idem-1 标记为 completed。
+     *   2. 插入 idem-3，相同 key——应成功插入。
+     *   3. 断言共 2 条（idem-1 completed + idem-3 pending）。
      */
     @Test
-    fun testIdempotencyKey() = runBlocking {
+    fun testIdempotencyKeyActiveOnly() = runBlocking {
         val t1 = Task(
             id = "idem-1", type = "EXTRACT_AUDIO",
             workflowRunId = "wr-1", materialId = "material-1",
-            idempotencyKey = "unique-key-abc",
+            idempotencyKey = "key-abc",
             createdAt = nowSec(),
         )
         taskDb.create(t1)
 
-        // id 不同，但 idempotency_key 相同——模拟客户端重试导致的重复提交
+        // 用例 A：活跃任务去重
         val t2 = t1.copy(id = "idem-2")
         taskDb.create(t2)
+        assertEquals(1, taskDb.listAll().items.size, "活跃任务相同幂等键应被跳过")
 
-        val all = taskDb.listAll()
-        assertEquals(1, all.items.size, "相同幂等键的第二次插入应被静默忽略")
-        assertEquals("idem-1", all.items.first().id, "保留的应该是第一次插入的任务")
+        // 用例 B：完成后可重新插入
+        taskDb.updateStatus(t1.id, "completed")
+        val t3 = t1.copy(id = "idem-3")
+        taskDb.create(t3)
+        assertEquals(2, taskDb.listAll().items.size, "已完成任务不应阻塞相同幂等键的新任务")
     }
 
     // ── 测试 3：claimNext 原子性 ──────────────────────────────────────────────

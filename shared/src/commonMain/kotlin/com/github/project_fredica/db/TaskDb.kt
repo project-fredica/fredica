@@ -17,11 +17,14 @@ package com.github.project_fredica.db
 //      职责属于 WorkflowRunDb，不应让 TaskDb 跨表依赖。
 // =============================================================================
 
+import com.github.project_fredica.apputil.createLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.ktorm.database.Database
 
 class TaskDb(private val db: Database) : TaskRepo {
+
+    private val logger = createLogger()
 
     // ── 建表 ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +53,7 @@ class TaskDb(private val db: Database) : TaskRepo {
                             error               TEXT,
                             error_type          TEXT,
                             excluded_nodes      TEXT NOT NULL DEFAULT '[]',
-                            idempotency_key     TEXT UNIQUE,
+                            idempotency_key     TEXT,
                             retry_count         INTEGER NOT NULL DEFAULT 0,
                             max_retries         INTEGER NOT NULL DEFAULT 3,
                             created_by          TEXT NOT NULL DEFAULT 'local',
@@ -366,13 +369,31 @@ class TaskDb(private val db: Database) : TaskRepo {
     /**
      * 批量插入任务。
      *
-     * 使用 `INSERT OR IGNORE` 而非 `INSERT ... ON CONFLICT(id) DO NOTHING`：
-     * - 前者忽略**任意** UNIQUE 约束冲突（包括 idempotency_key）
-     * - 后者只忽略 id 冲突，idempotency_key 重复时仍会抛出异常
+     * 幂等键语义：只对"活跃任务"（非终态）去重。
+     * 若相同 idempotency_key 已存在于 pending/claimed/running 状态的任务中，则跳过插入。
+     * 已完成（completed/failed/cancelled）的任务不阻塞新任务创建，重新执行交由 canSkip 决定。
+     *
+     * 使用 `INSERT OR IGNORE` 处理 id 级别的重复（防御性保护）。
      */
     override suspend fun createAll(tasks: List<Task>): Unit = withContext(Dispatchers.IO) {
         if (tasks.isEmpty()) return@withContext
         db.useConnection { conn ->
+            // 收集本批次中有幂等键的任务，查出哪些 key 已有活跃任务
+            val keysToCheck = tasks.mapNotNull { it.idempotencyKey }
+            val activeKeys = if (keysToCheck.isEmpty()) emptySet() else {
+                val placeholders = keysToCheck.joinToString(",") { "?" }
+                conn.prepareStatement(
+                    "SELECT idempotency_key FROM task WHERE idempotency_key IN ($placeholders) AND status NOT IN ('completed','failed','cancelled')"
+                ).use { ps ->
+                    keysToCheck.forEachIndexed { i, k -> ps.setString(i + 1, k) }
+                    ps.executeQuery().use { rs ->
+                        val result = mutableSetOf<String>()
+                        while (rs.next()) result.add(rs.getString(1))
+                        result
+                    }
+                }
+            }
+
             conn.prepareStatement(
                 """
                 INSERT OR IGNORE INTO task (
@@ -383,6 +404,11 @@ class TaskDb(private val db: Database) : TaskRepo {
                 """.trimIndent()
             ).use { ps ->
                 for (t in tasks) {
+                    // 幂等键已有活跃任务则跳过
+                    if (t.idempotencyKey != null && t.idempotencyKey in activeKeys) {
+                        logger.info("Task skipped: idempotency_key='${t.idempotencyKey}' already has an active task")
+                        continue
+                    }
                     ps.setString(1,  t.id)
                     ps.setString(2,  t.type)
                     ps.setString(3,  t.workflowRunId)
