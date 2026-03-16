@@ -5,6 +5,7 @@ import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.AppConfigService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator

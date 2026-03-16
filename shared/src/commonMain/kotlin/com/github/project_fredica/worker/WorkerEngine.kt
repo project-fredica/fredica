@@ -33,6 +33,7 @@ package com.github.project_fredica.worker
 
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
+import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.RestartTaskLogService
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task

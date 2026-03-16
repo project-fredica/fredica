@@ -5,15 +5,22 @@ order: 130
 
 # 测试指南
 
-## 运行测试
+## Kotlin / Gradle 测试（shared 模块）
 
-所有单元测试位于 `shared/src/jvmTest/`，通过 Gradle 在 JVM 上运行。
+测试文件位于 `shared/src/jvmTest/kotlin/`，按包结构组织：
+
+```
+shared/src/jvmTest/kotlin/.../
+├── db/          # Task、WorkflowRun、Weben、对账等
+├── worker/      # WorkerEngine、DagEngine、Executor
+├── llm/         # LLM SSE 客户端
+└── python/      # Python 服务通信
+```
+
+### 运行命令
 
 ```shell
-# 运行全部测试
-./gradlew :shared:jvmTest
-
-# 强制重新运行（跳过 UP-TO-DATE 缓存）
+# 运行全部测试（跳过 UP-TO-DATE 缓存）
 ./gradlew :shared:jvmTest --rerun-tasks
 
 # 运行单个测试类
@@ -23,39 +30,23 @@ order: 130
 ./gradlew :shared:jvmTest --rerun-tasks --info
 ```
 
-## 测试位置
+### 关键约定
 
-所有单元测试位于 `shared/src/jvmTest/kotlin/`，按包结构组织：
+**SQLite 测试隔离：必须用临时文件，不能用 `:memory:`**
 
-```
-shared/src/jvmTest/kotlin/.../
-├── db/          # DB 层测试（Task、WorkflowRun、Weben、对账等）
-├── worker/      # WorkerEngine、DagEngine、Executor 测试
-├── llm/         # LLM SSE 客户端测试
-└── python/      # Python 服务通信测试
-```
-
-## 关键约定
-
-### SQLite 测试隔离
-
-::: warning 必须使用临时文件，不能用 `:memory:`
-ktorm 连接池每次 `useConnection {}` 开新连接，内存库各连接相互独立，会导致建表和插入数据在不同连接上，测试间数据无法共享。
+ktorm 连接池每次 `useConnection {}` 开新连接，内存库各连接相互独立，建表和插入数据会在不同连接上执行。
 
 ```kotlin
-// 正确做法
 val tmpFile = File.createTempFile("test_", ".db").also { it.deleteOnExit() }
 val db = Database.connect(
     url = "jdbc:sqlite:${tmpFile.absolutePath}",
     driver = "org.sqlite.JDBC",
 )
 ```
-:::
 
-### WorkerEngine 测试隔离
+**WorkerEngine 测试隔离：`@AfterTest` 必须取消 CoroutineScope**
 
-::: warning @AfterTest 必须取消 CoroutineScope
-`WorkerEngine` 是全局单例，每次 `start()` 都会新增轮询协程。若不在 `@AfterTest` 中取消，旧协程会抢占下一个测试的任务，导致测试间相互干扰。
+`WorkerEngine` 是全局单例，每次 `start()` 都会新增轮询协程。不取消会导致旧协程抢占下一个测试的任务。
 
 ```kotlin
 private val activeScopes = mutableListOf<CoroutineScope>()
@@ -66,13 +57,42 @@ fun tearDown() {
     activeScopes.clear()
 }
 ```
-:::
 
-### 条件跳过测试
-
-部分测试依赖外部服务（Python 服务、LLM API Token），无外部依赖时会自动跳过，不影响 CI：
+**条件跳过：依赖外部服务时自动跳过，不影响 CI**
 
 ```kotlin
-// LlmSseClientTest：无 token 时跳过
+// 无 token 时跳过
 assumeTrue(System.getenv("LLM_TEST_API_KEY") != null)
 ```
+
+---
+
+## Python 服务测试（fredica-pyutil）
+
+测试文件位于 `desktop_assets/common/fredica-pyutil/tests/`，使用 pytest。
+
+### 运行命令
+
+使用打包的 embedded Python（`desktop_assets/windows/lfs/python-314-embed/python.exe`）：
+
+```shell
+cd desktop_assets/common/fredica-pyutil
+
+# 只跑解析函数单元测试（无网络，速度快）
+../../windows/lfs/python-314-embed/python.exe -m pytest tests/ -v -m "not network"
+
+# 只跑真实网络请求测试
+../../windows/lfs/python-314-embed/python.exe -m pytest tests/ -v -m "network" -s
+
+# 全跑
+../../windows/lfs/python-314-embed/python.exe -m pytest tests/ -v -s
+```
+
+### mark 约定
+
+| mark                   | 含义                  |
+|------------------------|---------------------|
+| 无 mark                 | 纯逻辑单元测试，不需要网络，速度快   |
+| `@pytest.mark.network` | 发真实 HTTP 请求，依赖网络可达性 |
+
+mark 在 `pytest.ini` 中已注册，离线环境用 `-m "not network"` 只跑单元测试。

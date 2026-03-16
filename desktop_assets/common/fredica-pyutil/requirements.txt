@@ -11,3 +11,4 @@ pydantic
 psutil
 pynvml
 huggingface_hub
+pytest

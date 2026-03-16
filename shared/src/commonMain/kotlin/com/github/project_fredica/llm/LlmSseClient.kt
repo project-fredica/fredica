@@ -5,6 +5,7 @@ import com.github.project_fredica.apputil.SseLineParser
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.warn
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.preparePost

@@ -307,9 +307,10 @@ class MirrorSource:
     supports_cuda: bool = True
     # "simple_api"：标准 PyPI Simple API，{base}/torch/ 页面含 wheel 文件名
     # "stable_html"：静态 HTML 文件，{base}/torch_stable.html，含所有 wheel 链接，检查 "+{variant}" 字样
-    # "dir_listing"：目录列表型，{base}/ 页面直接列出 cu128/ 等 variant 目录（保留兼容）
+    # "dir_listing"：目录列表型，{base}/ 页面直接列出 cu128/ 等 variant 目录，从链接提取 variant
+    # "sjtu_s3"：上海交大 S3 存储，{base}/?mirror_intel_list 列出顶层目录
     index_style: str = "simple_api"
-    # stable_html 型专用：torch_stable.html 的完整 URL（不含 variant 路径）
+    # stable_html / dir_listing / sjtu_s3 型专用：基础 URL（不含 variant 路径）
     stable_html_base: str = ""
 
 
@@ -325,7 +326,7 @@ MIRROR_SOURCES: list = [
         label="南京大学镜像",
         url_fn=lambda v: f"https://mirrors.nju.edu.cn/pytorch/whl/{v}",
         supports_cuda=True,
-        index_style="stable_html",
+        index_style="dir_listing",
         stable_html_base="https://mirrors.nju.edu.cn/pytorch/whl",
     ),
     MirrorSource(
@@ -333,7 +334,7 @@ MIRROR_SOURCES: list = [
         label="上海交大镜像",
         url_fn=lambda v: f"https://mirror.sjtu.edu.cn/pytorch-wheels/{v}",
         supports_cuda=True,
-        index_style="stable_html",
+        index_style="sjtu_s3",
         stable_html_base="https://mirror.sjtu.edu.cn/pytorch-wheels",
     ),
     MirrorSource(
@@ -341,7 +342,7 @@ MIRROR_SOURCES: list = [
         label="阿里云镜像",
         url_fn=lambda v: f"https://mirrors.aliyun.com/pytorch-wheels/{v}",
         supports_cuda=True,
-        index_style="stable_html",
+        index_style="dir_listing",
         stable_html_base="https://mirrors.aliyun.com/pytorch-wheels",
     ),
     MirrorSource(
@@ -370,6 +371,35 @@ def _fetch_html(url: str, proxy: str, timeout: int = 8) -> str:
         return resp.read().decode("utf-8", errors="ignore")
 
 
+def _find_variants_in_dir_listing(html: str) -> list:
+    """
+    从目录列表型镜像（如南京大学）的根目录 HTML 中提取支持的 variant 目录名。
+    格式：<a href="cu128/" title="cu128">cu128/</a>
+    只返回在 _VARIANT_ORDER 中的 variant。
+    """
+    found = []
+    for v in _VARIANT_ORDER:
+        # 匹配 href="cu128/" 或 href="cu128"
+        if re.search(rf'href="{re.escape(v)}/?["/ ]', html):
+            found.append(v)
+    logger.debug(f"[torch] _find_variants_in_dir_listing: found={found}")
+    return found
+
+
+def _find_variants_in_sjtu_s3(html: str) -> list:
+    """
+    从上海交大 S3 目录列表（?mirror_intel_list）HTML 中提取支持的 variant 目录名。
+    格式：<a href="/pytorch-wheels/cu128/">cu128/</a> 或 <td><a href="...">cu128/</a></td>
+    只返回在 _VARIANT_ORDER 中的 variant。
+    """
+    found = []
+    for v in _VARIANT_ORDER:
+        if re.search(rf'>{re.escape(v)}/?<', html):
+            found.append(v)
+    logger.debug(f"[torch] _find_variants_in_sjtu_s3: found={found}")
+    return found
+
+
 def _find_variants_in_stable_html(html: str) -> dict:
     """
     从 torch_stable.html 的内容中提取支持的 variant 及对应的最新 torch 版本。
@@ -394,14 +424,6 @@ def _find_variants_in_stable_html(html: str) -> dict:
             if variant not in found or ver > found[variant]:
                 found[variant] = ver
     return found
-    """抓取 URL 返回 HTML 字符串，失败抛出异常。"""
-    import urllib.request
-    opener = urllib.request.build_opener()
-    if proxy:
-        opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    req = urllib.request.Request(url, headers={"User-Agent": "fredica/1.0"})
-    with opener.open(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="ignore")
 
 
 class MirrorAvailabilityResult(TypedDict):
@@ -436,6 +458,32 @@ def check_mirror_availability(variant: str, mirror_key: str, proxy: str = "") ->
             html = _fetch_html(probe_url, proxy)
             logger.debug(f"[torch] check_mirror_availability: stable_html mirror={mirror_key} html_snippet={html[:2000]!r}")
             available = f"+{variant}" in html or variant == "cpu"
+            logger.debug(f"[torch] check_mirror_availability: mirror={mirror_key} variant={variant} available={available}")
+            return {"available": available, "url": probe_url, "error": ""}
+        except Exception as e:
+            logger.warning(f"[torch] check_mirror_availability: mirror={mirror_key} variant={variant} failed: {e}")
+            return {"available": False, "url": probe_url, "error": str(e)}
+    elif src.index_style == "dir_listing":
+        # dir_listing 型（如南京大学）：请求根目录，检查是否有 variant 子目录链接
+        probe_url = src.stable_html_base.rstrip("/") + "/"
+        logger.debug(f"[torch] check_mirror_availability: dir_listing mirror={mirror_key} variant={variant} url={probe_url}")
+        try:
+            html = _fetch_html(probe_url, proxy)
+            logger.debug(f"[torch] check_mirror_availability: dir_listing mirror={mirror_key} html_snippet={html[:2000]!r}")
+            available = bool(re.search(rf'href="{re.escape(variant)}/?["/ ]', html)) or variant == "cpu"
+            logger.debug(f"[torch] check_mirror_availability: mirror={mirror_key} variant={variant} available={available}")
+            return {"available": available, "url": probe_url, "error": ""}
+        except Exception as e:
+            logger.warning(f"[torch] check_mirror_availability: mirror={mirror_key} variant={variant} failed: {e}")
+            return {"available": False, "url": probe_url, "error": str(e)}
+    elif src.index_style == "sjtu_s3":
+        # sjtu_s3 型（上海交大）：请求 {base}/?mirror_intel_list，检查是否有 variant 目录
+        probe_url = src.stable_html_base.rstrip("/") + "/?mirror_intel_list"
+        logger.debug(f"[torch] check_mirror_availability: sjtu_s3 mirror={mirror_key} variant={variant} url={probe_url}")
+        try:
+            html = _fetch_html(probe_url, proxy)
+            logger.debug(f"[torch] check_mirror_availability: sjtu_s3 mirror={mirror_key} html_snippet={html[:2000]!r}")
+            available = bool(re.search(rf'>{re.escape(variant)}/?<', html)) or variant == "cpu"
             logger.debug(f"[torch] check_mirror_availability: mirror={mirror_key} variant={variant} available={available}")
             return {"available": available, "url": probe_url, "error": ""}
         except Exception as e:
@@ -501,6 +549,32 @@ def fetch_mirror_supported_variants(mirror_key: str, proxy: str = "") -> MirrorV
             variants = [v for v in _VARIANT_ORDER if v in torch_versions]
             logger.info(f"[torch] fetch_mirror_variants: mirror={mirror_key} found variants={variants} torch_versions={torch_versions}")
             return {"variants": variants, "torch_versions": torch_versions, "error": ""}
+        except Exception as e:
+            logger.warning(f"[torch] fetch_mirror_variants: mirror={mirror_key} fetch failed: {e}")
+            return {"variants": [], "torch_versions": {}, "error": str(e)}
+    elif src.index_style == "dir_listing":
+        # dir_listing 型（如南京大学）：请求根目录，从目录列表链接提取 variant 子目录名
+        probe_url = src.stable_html_base.rstrip("/") + "/"
+        logger.debug(f"[torch] fetch_mirror_variants: dir_listing mirror={mirror_key} fetching {probe_url}")
+        try:
+            html = _fetch_html(probe_url, proxy, timeout=10)
+            logger.debug(f"[torch] fetch_mirror_variants: dir_listing mirror={mirror_key} html_snippet={html[:2000]!r}")
+            variants = _find_variants_in_dir_listing(html)
+            logger.info(f"[torch] fetch_mirror_variants: mirror={mirror_key} found variants={variants}")
+            return {"variants": variants, "torch_versions": {}, "error": ""}
+        except Exception as e:
+            logger.warning(f"[torch] fetch_mirror_variants: mirror={mirror_key} fetch failed: {e}")
+            return {"variants": [], "torch_versions": {}, "error": str(e)}
+    elif src.index_style == "sjtu_s3":
+        # sjtu_s3 型（上海交大）：请求 {base}/?mirror_intel_list，从 S3 目录列表提取 variant
+        probe_url = src.stable_html_base.rstrip("/") + "/?mirror_intel_list"
+        logger.debug(f"[torch] fetch_mirror_variants: sjtu_s3 mirror={mirror_key} fetching {probe_url}")
+        try:
+            html = _fetch_html(probe_url, proxy, timeout=10)
+            logger.debug(f"[torch] fetch_mirror_variants: sjtu_s3 mirror={mirror_key} html_snippet={html[:2000]!r}")
+            variants = _find_variants_in_sjtu_s3(html)
+            logger.info(f"[torch] fetch_mirror_variants: mirror={mirror_key} found variants={variants}")
+            return {"variants": variants, "torch_versions": {}, "error": ""}
         except Exception as e:
             logger.warning(f"[torch] fetch_mirror_variants: mirror={mirror_key} fetch failed: {e}")
             return {"variants": [], "torch_versions": {}, "error": str(e)}

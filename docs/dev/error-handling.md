@@ -54,6 +54,9 @@ Logger API 说明（`logger.kt` / `logger.jvm.kt`）：
 | `logger.exception(msg, err)` | `(String, Throwable)` | 底层实现，一般不直接调用 |
 
 ```kotlin
+import com.github.project_fredica.apputil.warn   // logger.warn(msg, isHappensFrequently, err) 扩展函数
+import com.github.project_fredica.apputil.error  // logger.error(msg, err) 扩展函数
+
 // ✅ warn — 不频繁的预期失败，输出完整 stacktrace
 } catch (e: Throwable) {
     logger.warn("[XxxHandler] Python call failed", isHappensFrequently = false, err = e)
@@ -65,7 +68,6 @@ Logger API 说明（`logger.kt` / `logger.jvm.kt`）：
 }
 
 // ✅ error — 不可预期异常，附加完整 stacktrace
-import com.github.project_fredica.apputil.error
 } catch (e: Throwable) {
     logger.error("[XxxExecutor] unexpected DB failure", e)
 }
@@ -140,6 +142,8 @@ Kotlin 层分两类入口，错误处理模式略有不同。
 参数解析失败属于调用方问题，用 `logger.warn` 记录，并通过 callback 返回 `{"error": "..."}` 给前端：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 val params = try {
     AppUtil.GlobalVars.json.parseToJsonElement(message.params) as? JsonObject
 } catch (e: Throwable) {
@@ -157,8 +161,9 @@ if (params == null) {
 Python 服务不可达属于运行时异常，用 `logger.warn` 记录（Python 服务本身会打 exception），并将错误透传给前端：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 val result = try {
-    FredicaApi.PyUtil.get(path)
 } catch (e: Throwable) {
     logger.warn("[XxxHandler] Python call failed", isHappensFrequently = false, err = e)
     buildValidJson { kv("error", e.message ?: "unknown error") }.str
@@ -179,6 +184,8 @@ logger.warn("[GetTorchMirrorVersionsJsMessageHandler] mirrorKey=$mirrorKey usePr
 Ktor 路由层用 `try/catch` 包裹业务逻辑，异常时返回带 `error` 字段的 JSON 响应：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 get("/some-route") {
     try {
         val result = doSomething()
@@ -368,6 +375,8 @@ if (!resp.ok) { print_error({ reason: "失败" }); }  // 应用 reportHttpError
 `launch` 启动的协程与调用方是并发关系，外层 try-catch 无法捕获协程内部抛出的异常：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 // ❌ 外层 try-catch 捕获不到协程内的异常
 try {
     scope.launch { riskyOperation() }  // 异常在协程内抛出，外层感知不到
@@ -390,6 +399,8 @@ scope.launch {
 用 `CoroutineScope(...)` 创建的孤立 scope，其 `launch` 协程抛出的未捕获异常默认只打印到 stderr，**不会传播给父协程，也不会触发任何回调**：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 // ❌ 孤立 scope — 异常静默丢失（只有 stderr 输出，生产环境可能看不到）
 CoroutineScope(Dispatchers.IO).launch {
     doSomething()  // 抛异常 → 静默丢失
@@ -414,6 +425,8 @@ CoroutineScope(Dispatchers.IO).launch {
 **情形一：需要结果，用 `await` + `runCatching`**
 
 ```kotlin
+import com.github.project_fredica.apputil.error  // logger.error(msg, err) 扩展函数
+
 val deferred = scope.async {
     try {
         riskyOperation()
@@ -436,6 +449,8 @@ val result = runCatching { deferred.await() }.getOrElse {
 不 `await` 是合法用法，但此时异常不会传播到任何地方，必须在块内捕获：
 
 ```kotlin
+import com.github.project_fredica.apputil.warn  // logger.warn(msg, isHappensFrequently, err) 扩展函数
+
 scope.async {
     try {
         riskyOperation()
@@ -456,6 +471,8 @@ scope.async {
 使用 `async(start = CoroutineStart.UNDISPATCHED)` 时，块内代码在当前线程同步执行直到第一个挂起点，此前抛出的异常会**立即**传播到调用方，而非延迟到 `await()`。此时行为更接近普通函数调用，需在调用处用 try-catch 处理：
 
 ```kotlin
+import com.github.project_fredica.apputil.error  // logger.error(msg, err) 扩展函数
+
 // UNDISPATCHED：第一个挂起点前的异常立即抛出，不等 await()
 try {
     val deferred = scope.async(start = CoroutineStart.UNDISPATCHED) {
@@ -497,6 +514,8 @@ supervisorScope {
 `CancellationException` 是协程取消的信号，catch `Throwable` 时必须重新抛出，否则会阻止协程正常取消：
 
 ```kotlin
+import com.github.project_fredica.apputil.error  // logger.error(msg, err) 扩展函数
+
 // ❌ 吞掉 CancellationException — 协程无法被取消
 } catch (e: Throwable) {
     logger.warn("failed", isHappensFrequently = false, err = e)

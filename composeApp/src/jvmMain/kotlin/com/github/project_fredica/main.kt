@@ -27,6 +27,7 @@ import com.github.project_fredica.apputil.getPlatform
 import com.github.project_fredica.apputil.globalVertx
 import com.github.project_fredica.apputil.readNetworkProxy
 import com.github.project_fredica.apputil.unsafe
+import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.resources.Res
 import com.github.project_fredica.resources.icon_512x512

@@ -5,6 +5,7 @@ import com.github.project_fredica.api.get
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.warn
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 import kotlinx.serialization.json.JsonObject

@@ -11,6 +11,7 @@ import com.github.project_fredica.apputil.getAsset
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toFixed
+import com.github.project_fredica.apputil.warn
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.timeout
