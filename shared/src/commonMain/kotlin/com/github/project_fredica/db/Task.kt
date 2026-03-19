@@ -146,6 +146,12 @@ data class TaskListResult(
     val total: Int,
 )
 
+@Serializable
+data class WorkflowRunIdListResult(
+    val ids: List<String>,
+    val total: Int,
+)
+
 interface TaskRepo {
     /**
      * 原子认领下一个可执行任务：
@@ -291,6 +297,25 @@ interface TaskRepo {
      * @return               被取消的 Task ID 列表
      */
     suspend fun cancelBlockedTasks(workflowRunId: String): List<String>
+
+    /**
+     * 按任务类型查询所有任务，按创建时间降序排列。
+     * 用于按 type 过滤活跃任务（如 DOWNLOAD_TORCH），替代全量扫描。
+     *
+     * @param type  任务类型，如 "DOWNLOAD_TORCH"
+     * @return      该类型的所有任务列表
+     */
+    suspend fun listByType(type: String): List<Task>
+
+    /**
+     * 按任务类型查询去重的 workflow_run_id 列表，按该 workflow 下最新任务的创建时间降序排列，支持分页。
+     *
+     * @param type      任务类型，如 "DOWNLOAD_TORCH"
+     * @param page      从 1 开始
+     * @param pageSize  每页条数
+     * @return          WorkflowRunIdListResult { ids: List<String>, total: Int }
+     */
+    suspend fun listWorkflowRunIdsByType(type: String, page: Int = 1, pageSize: Int = 20): WorkflowRunIdListResult
 }
 
 // =============================================================================

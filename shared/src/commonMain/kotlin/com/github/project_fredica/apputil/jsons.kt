@@ -60,7 +60,10 @@ fun JsonElement?.dumpJsonStr(pretty: Boolean = false) = this.dumpJsonStr0(pretty
  * 将任意可序列化对象序列化为 [ValidJsonString]，包装在 [Result] 中。
  * 通过 `AppUtil` 接收者调用以限制命名空间：`AppUtil.dumpJsonStr(obj)`。
  */
-fun AppUtil.dumpJsonStr(obj: Any?, pretty: Boolean = false) = obj.dumpJsonStr0(pretty = pretty)
+inline fun <reified T : Any> AppUtil.dumpJsonStr(obj: T?, pretty: Boolean = false)  = Result.wrap {
+    val j = if (pretty) AppUtil.GlobalVars.jsonPretty else AppUtil.GlobalVars.json
+    return@wrap ValidJsonString(j.encodeToString(obj))
+}
 
 /**
  * 将 JSON 字符串反序列化为 [JsonElement] 树，包装在 [Result] 中。

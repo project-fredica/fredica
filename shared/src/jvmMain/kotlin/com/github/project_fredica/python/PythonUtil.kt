@@ -119,6 +119,16 @@ object PythonUtil {
                     }
                     executablePath = executable.absolutePath
                     logger.debug("${Py314Embed::class.simpleName} executablePath is : $executablePath")
+                    // embed Python 的 ._pth 文件不可修改。
+                    // 在 Lib/site-packages 下写入 fredica_pip.pth，内容为 pipLibDir 绝对路径，
+                    // site 模块启动时会扫描 site-packages 下的 .pth 文件并加入 sys.path。
+                    val sitePackagesDir = File(executable.parent, "Lib/site-packages").also { it.mkdirs() }
+                    val fredPthFile = File(sitePackagesDir, "fredica_pip.pth")
+                    val pipLibPath = AppUtil.Paths.pipLibDir.absolutePath
+                    if (!fredPthFile.exists() || fredPthFile.readText().trim() != pipLibPath) {
+                        fredPthFile.writeText(pipLibPath)
+                        logger.debug("${Py314Embed::class.simpleName} wrote fredica_pip.pth -> $pipLibPath")
+                    }
                     val requirements =
                         JVMPlatform.getAsset("fredica-pyutil", "requirements.txt", autoCastSuffix = false)
                     if (requirements == null || !requirements.isFile) {
@@ -132,15 +142,21 @@ object PythonUtil {
                     runPythonSubprocess(
                         listOf("-m", "pip", "-V")
                     ).await()
-                    runPythonSubprocess(
-                        listOf("-m", "pip", "install", "--no-input", "-r", requirementsPath)
-                    ).await()
-                    runPythonSubprocess(
-                        listOf("-m", "pip", "list")
-                    ).await()
-                    runPythonSubprocess(
-                        listOf("-m", "pip", "freeze")
-                    ).await()
+                    AppUtil.Paths.pipLibDir.mkdirs()
+                    // 用 requirements.txt 内容哈希作为安装标志，哈希变化时重装
+                    val reqContent = File(requirementsPath).readText()
+                    val reqHash = reqContent.hashCode().toString()
+                    val hashFile = AppUtil.Paths.pipLibDir.resolve(".installed_hash")
+                    val installedHash = if (hashFile.exists()) hashFile.readText().trim() else ""
+                    if (installedHash != reqHash) {
+                        logger.debug("${Py314Embed::class.simpleName} requirements changed, running pip install")
+                        runPythonSubprocess(
+                            listOf("-m", "pip", "install", "--no-input", "--target", AppUtil.Paths.pipLibDir.absolutePath, "-r", requirementsPath)
+                        ).await()
+                        hashFile.writeText(reqHash)
+                    } else {
+                        logger.debug("${Py314Embed::class.simpleName} requirements unchanged, skip pip install")
+                    }
                     logger.debug("${Py314Embed::class.simpleName} init finish")
                     _isInit = true
                 }
@@ -231,7 +247,7 @@ object PythonUtil {
                 method: HttpMethod,
                 pth: String,
                 body: String? = null,
-                requestTimeoutMs: Long = 60_000L,
+                requestTimeoutMs: Long = 900_000L,
             ): T {
                 val text = requestText(method, pth, body, requestTimeoutMs)
                 try {
@@ -249,7 +265,7 @@ object PythonUtil {
                 method: HttpMethod,
                 pth: String,
                 body: String? = null,
-                requestTimeoutMs: Long = 60_000L,
+                requestTimeoutMs: Long = 900_000L,
             ): String {
                 logger.debug("request to $_PyUtilServer route ${method.value} $pth")
                 val resp = AppUtil.GlobalVars.ktorClientLocal.request {
@@ -281,6 +297,7 @@ object PythonUtil {
                         this.requestTimeoutMillis = requestTimeoutMs
                         this.socketTimeoutMillis = requestTimeoutMs
                     }
+                    // 默认超时 900s（15min），由调用方通过 requestTimeoutMs 覆盖
                 }
                 if (resp.status.value != 200) {
                     throw IllegalStateException("failed request $_PyUtilServer , status code is ${resp.status.value} , response body : ${resp.bodyAsText()}")
@@ -455,7 +472,11 @@ object PythonUtil {
                                 }
 
                                 else -> {
-                                    logger.warn("unexpected frame text in websocketTask : text is $text")
+                                    // check_result / download_start 是 torch 下载任务的中间状态消息，
+                                    // websocketTask 框架不需要处理，静默忽略即可
+                                    if (json["type"]?.jsonPrimitive?.content !in setOf("check_result", "download_start")) {
+                                        logger.warn("unexpected frame text in websocketTask : text is $text")
+                                    }
                                 }
                             }
                         }

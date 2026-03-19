@@ -245,7 +245,7 @@ export function useAppFetch<J = unknown>(param?: {
             appPath,
             init,
             parseJson = true,
-            timeout = 10_000,
+            timeout = 900_000,
         } = param ?? {};
 
         if (!url) return;
@@ -312,7 +312,7 @@ export function useAppFetch<J = unknown>(param?: {
             init?: RequestInit,
             options?: { parseJson?: boolean; timeout?: number; silent?: boolean; signal?: AbortSignal },
         ): Promise<{ resp: Response; data: unknown }> => {
-            const { parseJson = true, timeout = 10_000, silent = false, signal: externalSignal } = options ?? {};
+            const { parseJson = true, timeout = 900_000, silent = false, signal: externalSignal } = options ?? {};
             // 等待 storage 加载完成，确保 authToken 已从 localStorage 恢复
             await new Promise<void>(resolve => {
                 if (isStorageLoadedRef.current) { resolve(); return; }

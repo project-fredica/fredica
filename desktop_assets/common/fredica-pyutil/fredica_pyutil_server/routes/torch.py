@@ -2,16 +2,44 @@
 """
 torch 管理路由。
 
-路由：
-  WS   /torch/install-task   — 下载指定 variant 到隔离目录（长任务）
-  POST /torch/resolve-spec   — 探测 GPU，返回 TorchRecommendation JSON
-  POST /torch/setup-links    — 建立 torch 符号链接（启动后由 Kotlin 调用）
-  GET  /torch/pip-command    — 返回指定 variant 的 pip install 命令字符串
-  GET  /torch/check          — 检查各 variant 的下载状态
+## 路由一览
+  WS   /torch/install-task          — 下载指定 variant 到隔离目录（长任务，WebSocket）
+  POST /torch/resolve-spec          — 探测 GPU，返回 TorchRecommendation JSON
+  POST /torch/setup-links           — 建立 torch 符号链接（启动后由 Kotlin 调用）
+  GET  /torch/pip-command/          — 返回指定 variant 的 pip install 命令字符串（前端预览用）
+  GET  /torch/check/                — 检查各 variant 的下载状态
+  GET  /torch/mirror-list/          — 返回所有镜像源列表
+  GET  /torch/mirror-check/         — 探测各镜像站对指定 variant 的支持情况
+  GET  /torch/mirror-versions/      — 抓取指定镜像站支持的 variant 及版本列表
+  GET  /torch/all-mirror-variants/  — 并发查询所有镜像，合并返回 variant 列表
+
+## 关键设计说明
+
+### pip-command 与 install-task 的关系
+  - /torch/pip-command/ 仅用于前端预览，不实际执行下载
+  - /torch/install-task 通过 install_torch_worker.py 子进程执行实际下载
+  - 两者的命令构造逻辑**目前不完全一致**（已知问题，待重构修复）：
+      * pip-command 支持 --index-url（替换模式）和 --extra-index-url（追加模式）
+      * install_torch_worker 固定使用 --extra-index-url（追加模式）
+      * pip-command 支持 torch_version 参数（用户选择的具体版本号）
+      * install_torch_worker 不支持 torch_version，固定使用 VARIANT_OPTIONS 中的默认版本
+  - 重构目标：提取 build_pip_install_cmd() 函数，两者共用同一实现
+
+### index_url_mode 参数（pip-command 专用）
+  - "replace"（默认）：使用 --index-url，替换 pip 默认的 PyPI 源
+    适用场景：镜像站同时托管 torch 和其他依赖（如 NJU/SJTU）
+  - "extra"：使用 --extra-index-url，在默认 PyPI 源基础上追加
+    适用场景：镜像站只托管 torch wheel，其他包仍从 PyPI 下载
+
+### 动态 variant 支持
+  - VARIANT_OPTIONS 只包含固定的 8 个内置 variant
+  - 镜像查询可发现 cu129/cu130 等新版本（动态 variant）
+  - pip-command 对动态 variant 有 fallback 逻辑（构造默认 TorchVariantOption）
+  - install_torch_worker 对动态 variant 直接报错（待重构修复）
 """
 import json
 import os
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from loguru import logger
@@ -21,7 +49,7 @@ from starlette.websockets import WebSocket
 
 from fredica_pyutil_server.subprocess.install_torch_worker import install_torch_worker
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInSubProcess
-from fredica_pyutil_server.util.torch_version_util import VARIANT_OPTIONS, MIRROR_SOURCES, check_mirror_availability, fetch_mirror_supported_variants, _VARIANT_ORDER
+from fredica_pyutil_server.util.torch_version_util import MIRROR_SOURCES, check_mirror_availability, fetch_mirror_supported_variants, _sort_variants
 
 _router = APIRouter(prefix="/torch")
 
@@ -46,6 +74,10 @@ class InstallTorchTaskEndpoint(TaskEndpointInSubProcess):
         }
     """
 
+    async def _does_support_pause(self) -> Literal[
+        "supported_always", "unsupported_always", "supported_current_time", "unsupported_current_time"]:
+        return "unsupported_always"
+
     def _get_process_target(self):
         return install_torch_worker
 
@@ -67,11 +99,33 @@ async def install_torch_task(websocket: WebSocket):
     """
     下载 torch 任务端点（WebSocket）。
 
+    由 Kotlin DownloadTorchExecutor 通过 PythonUtil.websocketTask("/torch/install-task") 调用。
+    实际下载逻辑在 subprocess/install_torch_worker.py 子进程中执行。
+
     WebSocket 协议：
-      1. 发送 init_param_and_run：
-         {"command": "init_param_and_run", "data": {"variant": "cu124", "download_dir": "..."}}
-      2. 服务端推送 check_result / download_start / progress / done / error
-      3. 可随时发送 cancel / pause / resume
+      1. 客户端发送 init_param_and_run：
+         {"command": "init_param_and_run", "data": {
+             "variant":           str,   必填，如 "cu124"
+             "download_dir":      str,   必填，{dataDir}/download/torch/
+             "use_proxy":         bool,  可选
+             "proxy":             str,   可选，代理地址
+             "index_url":         str,   可选，自定义镜像 index-url（覆盖默认官方源）
+             "custom_packages":   str,   可选，variant=="custom" 时使用
+             "custom_index_url":  str,   可选，variant=="custom" 时使用
+             "custom_variant_id": str,   可选，variant=="custom" 时使用
+         }}
+      2. 服务端推送（来自 install_torch_worker.py）：
+         {"type": "check_result",   "already_ok": bool, "installed_version": str, "target_dir": str}
+         {"type": "download_start", "packages": [...], "target_dir": str, "cmd": str}
+         {"type": "progress",       "percent": int, "line": str}
+         {"type": "done",           "result": {"variant": str, "target_dir": str}}
+         {"type": "error",          "message": str}
+      3. 客户端可随时发送 cancel / pause / resume
+
+    已知问题（与 /torch/pip-command/ 不一致，待重构修复）：
+      - install_torch_worker 固定用 --extra-index-url，pip-command 支持 --index-url 替换模式
+      - install_torch_worker 不支持 torch_version 参数，固定使用 VARIANT_OPTIONS 默认版本
+      - install_torch_worker 不支持动态 variant（cu129/cu130 等），会直接报错
     """
     endpoint = InstallTorchTaskEndpoint(websocket=websocket)
     await endpoint.start_and_wait()
@@ -131,82 +185,70 @@ async def setup_links_route(request: Request):
 @_router.get("/pip-command/")
 async def pip_command(request: Request):
     """
-    返回指定 variant 的 pip install 命令字符串（含 --target 隔离目录）。
+    返回指定 variant 的 pip install 命令字符串（前端预览用）。
 
     Query params:
-        variant       (str)   必填，如 "cu124"；"custom" 时返回空命令
-        download_dir  (str)   可选，{dataDir}/download/torch/；传入时命令包含 --target
-        use_proxy     (bool)  可选，"true" 时追加 --proxy
-        proxy         (str)   可选，代理地址
+        torch_version  (str)   可选，torch 版本号，如 "2.7.0"；空串时安装最新版
+        index_url      (str)   必填，pip index-url
+        download_dir   (str)   可选，{dataDir}/download/torch/
+        variant        (str)   可选，用于构造 --target 子目录名
+        index_url_mode (str)   可选，"replace"（默认）或 "extra"
+        use_proxy      (bool)  可选，"true" 时追加 --proxy
+        proxy          (str)   可选，代理地址
 
-    响应：{ "command": "pip install --target ... --extra-index-url ..." }
+    响应：{ "command": "pip install --target ... --index-url ..." }
     """
-    variant = request.query_params.get("variant", "")
-    if not variant:
-        logger.warning("[torch] pip-command: missing variant param")
-        return JSONResponse(status_code=400, content={"error": "variant is required"})
-    if variant == "custom":
-        logger.debug("[torch] pip-command: variant=custom, returning empty command")
-        return JSONResponse(content={"command": ""})
-    opt = VARIANT_OPTIONS.get(variant)
-    if opt is None:
-        logger.warning(f"[torch] pip-command: unknown variant={variant!r}")
-        return JSONResponse(status_code=404, content={"error": f"unknown variant: {variant}"})
+    index_url = request.query_params.get("index_url", "").strip()
+    if not index_url:
+        return JSONResponse(status_code=400, content={"error": "index_url is required"})
 
+    torch_version = request.query_params.get("torch_version", "").strip()
+    variant = request.query_params.get("variant", "")
     download_dir = request.query_params.get("download_dir", "")
+    index_url_mode = request.query_params.get("index_url_mode", "replace")
     use_proxy = request.query_params.get("use_proxy", "").lower() == "true"
     proxy = request.query_params.get("proxy", "")
-    # 允许前端传入自定义 index_url（如国内镜像），覆盖默认官方源
-    custom_index_url = request.query_params.get("index_url", "").strip()
-    # index_url_mode: "replace" => --index-url（替换默认源），"extra" => --extra-index-url（追加）
-    index_url_mode = request.query_params.get("index_url_mode", "replace")
-    effective_index_url = custom_index_url or opt.index_url
 
-    pkgs = " ".join(opt.packages)
-    parts = ["pip install"]
-    if download_dir:
-        target_dir = os.path.join(download_dir, variant)
-        parts.append(f"--target {target_dir}")
-    parts.append(pkgs)
-    index_flag = "--extra-index-url" if index_url_mode == "extra" else "--index-url"
-    parts.append(f"{index_flag} {effective_index_url}")
-    if use_proxy and proxy:
-        parts.append(f"--proxy {proxy}")
+    target_dir = os.path.join(download_dir, variant) if download_dir and variant else download_dir
 
-    cmd = " ".join(parts)
-    logger.debug(f"[torch] pip-command: variant={variant} => {cmd}")
+    from fredica_pyutil_server.util.torch_version_util import build_pip_install_cmd, resolve_packages
+    packages = resolve_packages(torch_version)
+    cmd_parts = build_pip_install_cmd(
+        packages=packages,
+        target_dir=target_dir,
+        index_url=index_url,
+        index_url_mode=index_url_mode,
+        use_proxy=use_proxy,
+        proxy=proxy,
+    )
+    # cmd_parts = [sys.executable, "-m", "pip", "install", ...]
+    # 转为可读字符串（前端展示用），去掉 sys.executable -m
+    cmd = "pip " + " ".join(cmd_parts[3:])
+    logger.debug(f"[torch] pip-command: variant={variant} torch_version={torch_version!r} => {cmd}")
     return JSONResponse(content={"command": cmd})
 
 
 @_router.get("/check/")
 async def check_torch(request: Request):
     """
-    检查各 variant 的下载状态。
+    检查 pip 安装目录中是否已有可用的 torch。
 
     Query params:
-        download_dir  (str)  必填，{dataDir}/download/torch/
-        variant       (str)  可选，指定单个 variant；不传则检查所有内置 variant
+        download_dir      (str)  必填，{dataDir}/download/pip/
+        expected_version  (str)  可选，期望的 torch 版本号（如 "2.7.0"）；
+                                 传入时版本不匹配视为未安装；不传则有 dist-info 即视为已安装
     """
     try:
-        from fredica_pyutil_server.util.torch_version_util import (
-            VARIANT_OPTIONS, check_torch_download, _VARIANT_ORDER,
-        )
+        from fredica_pyutil_server.util.torch_version_util import check_torch_download
 
         download_dir = request.query_params.get("download_dir", "")
-        variant = request.query_params.get("variant", "")
+        expected_version = request.query_params.get("expected_version", "")
 
         if not download_dir:
             return JSONResponse(status_code=400, content={"error": "download_dir is required"})
 
-        if variant:
-            result = check_torch_download(variant, download_dir)
-            return JSONResponse(content=result.__dict__)
-
-        results = {}
-        for v in _VARIANT_ORDER:
-            r = check_torch_download(v, download_dir)
-            results[v] = {"already_ok": r.already_ok, "installed_version": r.installed_version}
-        return JSONResponse(content=results)
+        result = check_torch_download(download_dir, expected_version)
+        return JSONResponse(content=result.__dict__)
 
     except Exception as e:
         logger.exception("[torch] check failed")
@@ -286,7 +328,7 @@ async def all_mirror_variants(request: Request):
     响应：{
         "variants": ["cu128", "cu126", ...],
         "per_mirror": {"nju": [...], ...},
-        "per_mirror_torch_versions": {"nju": {"cu128": "2.7.0", ...}, ...}
+        "per_mirror_torch_versions": {"nju": {"cu128": ["2.7.0", "2.6.0"], ...}, ...}
     }
     """
     proxy = request.query_params.get("proxy", "")
@@ -304,11 +346,11 @@ async def all_mirror_variants(request: Request):
 
     per_mirror = {k: v for k, v, _ in results}
     per_mirror_torch_versions = {k: tv for k, _, tv in results}
-    # 合并所有 variant，按标准顺序排列
+    # 合并所有 variant，按标准顺序排列（_sort_variants 处理已知+未知 variant）
     found = set()
     for variants in per_mirror.values():
         found.update(variants)
-    merged = [v for v in _VARIANT_ORDER if v in found]
+    merged = _sort_variants(list(found))
 
     logger.info(f"[torch] all-mirror-variants: merged={merged} per_mirror={per_mirror}")
     return JSONResponse(content={

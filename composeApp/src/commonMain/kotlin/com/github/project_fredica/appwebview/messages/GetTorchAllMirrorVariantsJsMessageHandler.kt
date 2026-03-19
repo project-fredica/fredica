@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.db.TorchMirrorCacheService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 import kotlinx.serialization.json.JsonObject
@@ -14,6 +15,7 @@ import kotlinx.serialization.json.booleanOrNull
 
 /**
  * 并发查询所有镜像支持的 variant，合并返回去重后的列表。
+ * 结果由 [TorchMirrorCacheService] 缓存（TTL 1 小时），避免每次进入页面都发起网络请求。
  *
  * JS 调用：
  * ```js
@@ -38,15 +40,15 @@ class GetTorchAllMirrorVariantsJsMessageHandler : MyJsMessageHandler() {
         val proxy = params?.get("proxy")?.let { it as? JsonPrimitive }?.content ?: ""
 
         val path = buildString {
-            append("/torch/all-mirror-variants")
+            append("/torch/all-mirror-variants/")
             if (useProxy && proxy.isNotBlank()) append("?proxy=$proxy")
         }
         logger.debug("[GetTorchAllMirrorVariantsJsMessageHandler] useProxy=$useProxy path=$path")
 
         val result = try {
-            FredicaApi.PyUtil.get(path)
+            TorchMirrorCacheService.getOrFetch { FredicaApi.PyUtil.get(path) }
         } catch (e: Throwable) {
-            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] Python call failed", isHappensFrequently = false, err = e)
+            logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] fetch failed", isHappensFrequently = false, err = e)
             buildValidJson { kv("error", e.message ?: "unknown error") }.str
         }
         callback(result)

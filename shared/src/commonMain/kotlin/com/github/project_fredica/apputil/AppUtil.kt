@@ -64,6 +64,9 @@ object AppUtil {
         /** torch 隔离下载根目录：`{appDataDir}/download/torch` */
         val torchDownloadDir: File get() = appDataDir.resolve("download").resolve("torch")
 
+        /** pip 包安装目录：`{appDataDir}/download/pip`，通过 PYTHONPATH 注入 embed Python */
+        val pipLibDir: File get() = appDataDir.resolve("download").resolve("pip")
+
         /**
          * 返回指定素材的媒体工作目录（首次调用时自动创建）：
          * `{appDataDir}/media/{materialId}/`
@@ -150,6 +153,12 @@ object AppUtil {
 
 /** 读取当前平台的系统网络代理配置，返回 null 表示直连。由平台 actual 实现。 */
 expect fun AppUtil.readNetworkProxy(): ProxyConfig?
+
+/**
+ * 读取系统代理地址，返回 "http://host:port" 格式字符串。
+ * 无代理时返回空串。由平台 actual 实现，避免依赖 toString() 格式。
+ */
+expect fun AppUtil.readNetworkProxyUrl(): String
 
 /**
  * 判断此代理配置是否为直连（无代理）。

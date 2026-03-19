@@ -24,6 +24,27 @@ actual fun AppUtil.readNetworkProxy(): ProxyConfig? {
     return res
 }
 
+/**
+ * 读取系统代理地址，返回 "http://host:port" 格式字符串。
+ * 无代理时返回空串。
+ *
+ * 直接使用 [InetSocketAddress.getHostString] + [InetSocketAddress.getPort]，
+ * 避免依赖 toString() 的格式（如 "/127.0.0.1/<unresolved>:7890"）。
+ */
+actual fun AppUtil.readNetworkProxyUrl(): String {
+    val proxy = readNetworkProxy0() ?: return ""
+    return try {
+        val inetAddr = proxy.address() as? java.net.InetSocketAddress
+            ?: return ""
+        // getHostString() 返回原始主机名或 IP，不触发 DNS 解析，不含 <unresolved> 后缀
+        val host = inetAddr.hostString
+        val port = inetAddr.port
+        "http://$host:$port"
+    } catch (e: Throwable) {
+        ""
+    }
+}
+
 private fun AppUtil.readNetworkProxy0(): ProxyConfig? {
 //    val logger = createLogger()
     val availableProxies = mutableListOf<ProxyConfig>()

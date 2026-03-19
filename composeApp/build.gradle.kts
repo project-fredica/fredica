@@ -82,6 +82,24 @@ dependencies {
     debugImplementation(compose.uiTooling)
 }
 
+val cleanPipPth by tasks.registering {
+    description = "打包前删除 fredica_pip.pth，避免将用户路径打包进安装包"
+    val pthFile = rootProject.layout.projectDirectory.file(
+        "desktop_assets/windows/lfs/python-314-embed/Lib/site-packages/fredica_pip.pth"
+    )
+    doLast {
+        val f = pthFile.asFile
+        if (f.exists()) {
+            f.delete()
+            println("Deleted ${f.absolutePath}")
+        }
+    }
+}
+
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>().configureEach {
+    dependsOn(cleanPipPth)
+}
+
 compose.desktop {
     application {
         mainClass = "com.github.project_fredica.MainKt"
@@ -91,7 +109,6 @@ compose.desktop {
             packageName = "Fredica"
             packageVersion = "1.0.0"
 
-            // TODO: 应当在打包前移动安装包中的 torch。
             appResourcesRootDir = rootDir.resolve("desktop_assets")
 
             description = packageName

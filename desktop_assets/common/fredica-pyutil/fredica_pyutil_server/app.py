@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 import importlib
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -8,6 +9,10 @@ from pathlib import Path
 import psutil
 from fastapi import FastAPI
 from loguru import logger
+
+from fredica_pyutil_server.subprocess.python_process_init_util import init_loguru
+
+init_loguru(logger=logger)
 
 
 def _watch_parent(parent_pid: int, interval: float = 3.0):

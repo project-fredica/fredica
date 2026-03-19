@@ -3,6 +3,7 @@ import abc
 import asyncio
 import json
 import multiprocessing
+import os
 from typing import *
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -474,6 +475,10 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
 
     async def _on_init_param_and_run(self, param: Any):
         """收到 init_param_and_run 后，spawn 子进程并启动队列读取后台协程。"""
+        # spawn 子进程继承父进程 os.environ，在 start() 前设好 UTF-8 编码，
+        # 避免 Windows 控制台默认 GBK 导致子进程 loguru 输出中文乱码
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+        os.environ.setdefault("PYTHONUTF8", "1")
         self._process = self._mp_ctx.Process(
             target=self._get_process_target(),
             args=(param, self._status_queue, self._cancel_mp_event, self._resume_mp_event),

@@ -9,7 +9,7 @@ order: 10
 
 | 工具 | 版本要求 | 说明 |
 |------|---------|------|
-| JDK | 17 或更高 | 推荐 **JetBrains Runtime（JBR）17**（项目当前使用 `jbrsdk_jcef-17.0.14`）；JBR 针对 Compose Desktop / JCEF WebView 做了专项优化，使用普通 JDK 17/21 也可构建，但桌面渲染和 WebView 行为可能存在差异 |
+| JDK | 17 | **必须使用不含 JCEF 的标准 JDK 17**（推荐 Microsoft OpenJDK 17 或 Eclipse Temurin 17）。**不要使用 JetBrains Runtime（JBR）**：JBR 内置 `jcef.dll` / `libcef.dll`，与 KCEF 下载的 CEF bundle 版本冲突，会导致打包后 GPU 进程崩溃（`error_code=63`）。 |
 | Node.js | 18 或更高 | WebUI 前端与文档站均需要 |
 | Git | 任意版本 | |
 
@@ -135,4 +135,16 @@ systemProp.https.proxyPort=7890
 
 ::: details WebUI npm install 无效 / 找不到依赖
 确认是在 `fredica-webui/` 目录下执行，而非项目根目录。根目录的 `npm install` 只安装 VitePress 文档依赖。
+:::
+
+::: details 打包后应用启动即崩溃（KCEF GPU 进程 error_code=63）
+原因：使用了 JetBrains Runtime（JBR）作为构建 JDK。JBR 内置 `jcef.dll` / `libcef.dll`，打包时会被复制进 `runtime/bin/`，与 KCEF bundle 里的 `libcef.dll` 版本冲突，GPU 子进程启动时加载错误的库导致崩溃。
+
+解决：在 `gradle.properties` 中将 `org.gradle.java.home` 指向**不含 JCEF 的标准 JDK 17**（如 Microsoft OpenJDK 或 Eclipse Temurin），重新打包即可。
+
+```properties
+org.gradle.java.home=C\:/path/to/ms-17.0.17
+```
+
+验证方法：打包后检查 `<安装目录>/runtime/bin/` 下是否存在 `jcef.dll`，若不存在则说明使用了正确的 JDK。
 :::

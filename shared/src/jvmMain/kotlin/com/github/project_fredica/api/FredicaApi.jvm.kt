@@ -123,6 +123,12 @@ object FredicaApiJvmService {
             TaskDb(database).also              { it.initialize(); TaskService.initialize(it) }
             WorkflowRunDb(database).also       { it.initialize(); WorkflowRunService.initialize(it) }
             RestartTaskLogDb(database).also    { it.initialize(); RestartTaskLogService.initialize(it) }
+            // Torch 镜像缓存
+            TorchMirrorCacheDb(database).also { db ->
+                db.initialize()
+                TorchMirrorCacheService.initialize(db)
+                TorchMirrorVersionsCacheService.initialize(db)
+            }
             // Bilibili 缓存
             BilibiliAiConclusionCacheDb(database).also  { it.initialize(); BilibiliAiConclusionCacheService.initialize(it) }
             BilibiliSubtitleMetaCacheDb(database).also  { it.initialize(); BilibiliSubtitleMetaCacheService.initialize(it) }
@@ -248,7 +254,7 @@ object FredicaApiJvmService {
         // torch 版本探测（异步，不阻塞启动）
         try {
             val torchResult = PythonUtil.Py314Embed.PyUtilServer.requestText(
-                HttpMethod.Post, "/torch/resolve-spec", requestTimeoutMs = 30_000L
+                HttpMethod.Post, "/torch/resolve-spec", requestTimeoutMs = 900_000L
             )
             val torchJson = AppUtil.GlobalVars.json.parseToJsonElement(torchResult).jsonObject
             val recommendedVariant = torchJson["recommended_variant"]?.jsonPrimitive?.content ?: ""

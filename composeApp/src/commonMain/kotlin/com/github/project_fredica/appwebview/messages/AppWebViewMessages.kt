@@ -26,9 +26,12 @@ object AppWebViewMessages {
             RunTorchDetectJsMessageHandler(),
             SaveTorchConfigJsMessageHandler(),
             DownloadTorchJsMessageHandler(),
+            GetActiveTorchDownloadJsMessageHandler(),
             GetTorchMirrorCheckJsMessageHandler(),
             GetTorchMirrorVersionsJsMessageHandler(),
             GetTorchAllMirrorVariantsJsMessageHandler(),
+            RefreshTorchMirrorCacheJsMessageHandler(),
+            GetSystemProxyJsMessageHandler(),
         )
     }
 }

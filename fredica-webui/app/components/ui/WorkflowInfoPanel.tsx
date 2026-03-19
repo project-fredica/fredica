@@ -181,7 +181,7 @@ function TaskRow({ task, onPause, onResume, onCancel, pausingId, cancellingId, c
                         </Link>
                     )}
                     {!isAwaitingAsr && task.error && (
-                        <p className="mt-1 text-xs text-red-400 truncate" title={task.error}>{task.error}</p>
+                        <p className="mt-1 text-xs text-red-400 whitespace-pre-wrap break-all">{task.error}</p>
                     )}
                 </div>
                 {(canPause || canResume || canCancel) && (
@@ -268,7 +268,7 @@ function TaskRow({ task, onPause, onResume, onCancel, pausingId, cancellingId, c
                         </Link>
                     </div>
                 ) : task.error ? (
-                    <p className="mt-1 text-xs text-red-400 truncate" title={task.error}>
+                    <p className="mt-1 text-xs text-red-400 whitespace-pre-wrap break-all">
                         {task.error_type ? <span className="font-medium">[{task.error_type}] </span> : null}{task.error}
                     </p>
                 ) : null}

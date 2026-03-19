@@ -683,6 +683,31 @@ class TaskDbTest {
         assertTrue(third.isEmpty(), "第三次调用应返回空列表（幂等）")
     }
 
+    // ── 测试 17：listByType — 按任务类型查询 ─────────────────────────────────
+
+    /**
+     * 证明目的：listByType() 只返回指定 type 的任务，不同 type 互不干扰。
+     */
+    @Test
+    fun testListByType() = runBlocking {
+        taskDb.createAll(listOf(
+            Task(id = "type-a1", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+            Task(id = "type-a2", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 1),
+            Task(id = "type-b1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2),
+        ))
+
+        val torchTasks = taskDb.listByType("DOWNLOAD_TORCH")
+        assertEquals(2, torchTasks.size, "应返回 2 个 DOWNLOAD_TORCH 任务")
+        assertTrue(torchTasks.all { it.type == "DOWNLOAD_TORCH" }, "所有任务 type 必须是 DOWNLOAD_TORCH")
+
+        val videoTasks = taskDb.listByType("DOWNLOAD_VIDEO")
+        assertEquals(1, videoTasks.size, "应返回 1 个 DOWNLOAD_VIDEO 任务")
+        assertEquals("type-b1", videoTasks.first().id)
+
+        val emptyTasks = taskDb.listByType("NONEXISTENT")
+        assertTrue(emptyTasks.isEmpty(), "不存在的 type 应返回空列表")
+    }
+
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L

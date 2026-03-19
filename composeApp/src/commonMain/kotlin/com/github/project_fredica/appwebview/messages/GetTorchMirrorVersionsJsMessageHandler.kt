@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.db.TorchMirrorVersionsCacheService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 import kotlinx.serialization.json.JsonObject
@@ -44,15 +45,16 @@ class GetTorchMirrorVersionsJsMessageHandler : MyJsMessageHandler() {
         val proxy = params?.get("proxy")?.let { it as? JsonPrimitive }?.content ?: ""
 
         val path = buildString {
-            append("/torch/mirror-versions?mirror_key=$mirrorKey")
+            append("/torch/mirror-versions/")
+            append("?mirror_key=$mirrorKey")
             if (useProxy && proxy.isNotBlank()) append("&proxy=$proxy")
         }
         logger.debug("[GetTorchMirrorVersionsJsMessageHandler] mirrorKey=$mirrorKey useProxy=$useProxy path=$path")
 
         val result = try {
-            FredicaApi.PyUtil.get(path)
+            TorchMirrorVersionsCacheService.getOrFetch(mirrorKey) { FredicaApi.PyUtil.get(path) }
         } catch (e: Throwable) {
-            logger.warn("[GetTorchMirrorVersionsJsMessageHandler] Python call failed", isHappensFrequently = false, err = e)
+            logger.warn("[GetTorchMirrorVersionsJsMessageHandler] fetch failed", isHappensFrequently = false, err = e)
             buildValidJson { kv("error", e.message ?: "unknown error") }.str
         }
         callback(result)

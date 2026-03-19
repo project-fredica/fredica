@@ -469,6 +469,70 @@ class TaskDb(private val db: Database) : TaskRepo {
         isPausable        = rs.getInt("is_pausable") != 0,
     )
 
+    // ── listByType：按任务类型查询 ────────────────────────────────────────────
+
+    /** 按任务类型查询所有任务，按创建时间降序排列。 */
+    override suspend fun listByType(type: String): List<Task> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Task>()
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM task WHERE type = ? ORDER BY created_at DESC"
+            ).use { ps ->
+                ps.setString(1, type)
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) result.add(rowToTask(rs))
+                }
+            }
+        }
+        result
+    }
+
+    // ── listWorkflowRunIdsByType：按任务类型查去重 workflow_run_id ─────────────
+
+    /**
+     * 按任务类型查询去重的 workflow_run_id 列表，按该 workflow 下最新任务的创建时间降序，支持分页。
+     *
+     * 实现思路：
+     *   1. COUNT(DISTINCT workflow_run_id) 得到总去重数
+     *   2. GROUP BY workflow_run_id + ORDER BY MAX(created_at) DESC 实现去重并按最新活动排序
+     *   3. LIMIT/OFFSET 分页
+     */
+    override suspend fun listWorkflowRunIdsByType(
+        type: String,
+        page: Int,
+        pageSize: Int,
+    ): WorkflowRunIdListResult = withContext(Dispatchers.IO) {
+        val offset = (page - 1).coerceAtLeast(0) * pageSize
+        var total = 0
+        val ids = mutableListOf<String>()
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT COUNT(DISTINCT workflow_run_id) FROM task WHERE type = ?"
+            ).use { ps ->
+                ps.setString(1, type)
+                ps.executeQuery().use { rs -> if (rs.next()) total = rs.getInt(1) }
+            }
+            conn.prepareStatement(
+                """
+                SELECT workflow_run_id FROM task
+                WHERE type = ?
+                GROUP BY workflow_run_id
+                ORDER BY MAX(created_at) DESC
+                LIMIT ? OFFSET ?
+                """.trimIndent()
+            ).use { ps ->
+                ps.setString(1, type)
+                ps.setInt(2, pageSize)
+                ps.setInt(3, offset)
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) ids.add(rs.getString("workflow_run_id"))
+                }
+            }
+        }
+        logger.debug("[listWorkflowRunIdsByType] type=$type page=$page pageSize=$pageSize → ${ids.size}/$total")
+        WorkflowRunIdListResult(ids = ids, total = total)
+    }
+
     // ── snapshotNonTerminalTasks：快照非终态任务 ──────────────────────────────
 
     /**
