@@ -68,7 +68,9 @@ actual suspend fun FredicaApi.Companion.init(options: Any?) {
 }
 
 actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route> {
-    return listOf()
+    return listOf(
+        TorchInstallCheckRoute,
+    )
 }
 
 actual suspend fun FredicaApi.Companion.getNativeWebServerLocalDomainAndPort(): Pair<String, UShort>? {

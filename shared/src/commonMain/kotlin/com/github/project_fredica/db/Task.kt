@@ -121,6 +121,9 @@ data class Task(
     /** 任务执行进度（0–100），由 Executor 通过 TaskRepo.updateProgress() 实时写入 */
     val progress: Int = 0,
 
+    /** 任务最近一条状态文本（如 Python worker 透传的 progress line）。 */
+    @SerialName("status_text") val statusText: String? = null,
+
     /** 任务是否处于暂停状态；仅在 status=running 时有意义 */
     @SerialName("is_paused") val isPaused: Boolean = false,
 
@@ -210,6 +213,9 @@ interface TaskRepo {
 
     /** 更新任务执行进度（0–100）。 */
     suspend fun updateProgress(id: String, progress: Int)
+
+    /** 更新任务最近一条状态文本（如下载进度行）。 */
+    suspend fun updateStatusText(id: String, statusText: String?)
 
     /** 更新任务暂停状态（is_paused）。 */
     suspend fun updatePaused(id: String, paused: Boolean)

@@ -319,7 +319,7 @@ object PythonUtil {
              *
              * @param pth              WebSocket 路径
              * @param paramJson        init_param_and_run 命令的 data 字段（JSON 字符串）
-             * @param onProgress       进度回调（0-100），每次收到 progress 消息时调用
+             * @param onProgress       进度回调（0-100），每次收到 progress 消息时且进度值int有变化时调用。
              * @param onPausable       可暂停状态回调；Python 端 progress 消息含 pausable 字段时调用，
              *                         true = 当前可暂停，false = 不可暂停（前端据此禁用暂停按钮）
              * @param onPauseRequest   Python 主动发起暂停的回调；收到 {"type":"pause_request"} 时调用，
@@ -335,6 +335,7 @@ object PythonUtil {
                 pth: String,
                 paramJson: String,
                 onProgress: (suspend (Int) -> Unit)? = null,
+                onProgressLine: (suspend (String) -> Unit)? = null,
                 onPausable: (suspend (Boolean) -> Unit)? = null,
                 onPauseRequest: (suspend (reason: String) -> Unit)? = null,
                 onResumeRequest: (suspend () -> Unit)? = null,
@@ -433,8 +434,10 @@ object PythonUtil {
 
                             when (json["type"]?.jsonPrimitive?.content) {
                                 "progress" -> {
-                                    val pct = json["percent"]?.jsonPrimitive?.int ?: 0
-                                    if (onProgress !== null && lastPct != pct) {
+                                    val pct = json["percent"]?.jsonPrimitive?.int ?: -1
+                                    val statusText = json["statusText"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }
+                                    statusText?.let { onProgressLine?.invoke(it) }
+                                    if (onProgress !== null && pct >= 0 && lastPct != pct) {
                                         onProgress(pct)
                                         lastPct = pct
                                     }

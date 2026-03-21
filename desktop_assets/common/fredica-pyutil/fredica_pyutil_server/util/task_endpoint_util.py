@@ -509,6 +509,17 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
                     break
         logger.debug("[{}] queue reader stopped", self.tag)
 
+    def _get_cancel_cleanup_wait_config(self) -> tuple[int, float]:
+        """
+        返回父进程在发出 cancel_event 后，等待子进程自行清理的配置。
+
+        Returns:
+            (wait_count, sleep_seconds)
+            - wait_count: 最多轮询次数
+            - sleep_seconds: 每次轮询间隔秒数
+        """
+        return 10, 0.2
+
     async def _check_is_stopped(self) -> bool:
         """
         检查子进程是否已退出。
@@ -517,12 +528,26 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
         if self._process is None:
             return False
         if self._cancel_flag and self._process.is_alive():
-            # multiprocessing.Event.set() 和 process.terminate() 均为阻塞系统调用
+            # 先通知子进程自行清理（例如先终止其内部启动的 pip 子进程），再在超时后强杀。
             await run_blocking(self._cancel_mp_event.set)
             # 解除子进程可能的 wait() 暂停，确保其能检查到 cancel_event
             await run_blocking(self._resume_mp_event.set)
-            await run_blocking(self._process.terminate)
-            logger.info("[{}] subprocess terminated, pid={}", self.tag, self._process.pid)
+            wait_count, sleep_seconds = self._get_cancel_cleanup_wait_config()
+            logger.info(
+                "[{}] cancel signal sent, waiting subprocess cleanup, pid={}, wait_count={}, sleep_seconds={}",
+                self.tag, self._process.pid, wait_count, sleep_seconds,
+            )
+
+            for _ in range(wait_count):
+                if not self._process.is_alive():
+                    break
+                await asyncio.sleep(sleep_seconds)
+
+            if self._process.is_alive():
+                await run_blocking(self._process.terminate)
+                logger.info("[{}] subprocess terminated after cleanup timeout, pid={}", self.tag, self._process.pid)
+            else:
+                logger.info("[{}] subprocess exited after cancel callback, pid={}", self.tag, self._process.pid)
         if not self._process.is_alive():
             if self._queue_reader_task and not self._queue_reader_task.done():
                 self._queue_reader_task.cancel()

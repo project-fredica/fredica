@@ -78,6 +78,10 @@ class InstallTorchTaskEndpoint(TaskEndpointInSubProcess):
         "supported_always", "unsupported_always", "supported_current_time", "unsupported_current_time"]:
         return "unsupported_always"
 
+    def _get_cancel_cleanup_wait_config(self) -> tuple[int, float]:
+        # torch 下载取消时需要留更多时间，让 worker 先清理内部 pip 子进程。
+        return 20, 0.2
+
     def _get_process_target(self):
         return install_torch_worker
 
@@ -85,11 +89,6 @@ class InstallTorchTaskEndpoint(TaskEndpointInSubProcess):
         if not isinstance(msg, dict):
             self._current_status = msg
             return
-        msg_type = msg.get("type")
-        if msg_type == "progress":
-            pct = msg.get("percent", -1)
-            if pct >= 0:
-                self.report_progress(pct)
         self._current_status = msg
         await self.send_json(msg)
 
@@ -117,7 +116,7 @@ async def install_torch_task(websocket: WebSocket):
       2. 服务端推送（来自 install_torch_worker.py）：
          {"type": "check_result",   "already_ok": bool, "installed_version": str, "target_dir": str}
          {"type": "download_start", "packages": [...], "target_dir": str, "cmd": str}
-         {"type": "progress",       "percent": int, "line": str}
+         {"type": "progress",       "percent": int, "statusText": str}
          {"type": "done",           "result": {"variant": str, "target_dir": str}}
          {"type": "error",          "message": str}
       3. 客户端可随时发送 cancel / pause / resume
@@ -189,19 +188,15 @@ async def pip_command(request: Request):
 
     Query params:
         torch_version  (str)   可选，torch 版本号，如 "2.7.0"；空串时安装最新版
-        index_url      (str)   必填，pip index-url
-        download_dir   (str)   可选，{dataDir}/download/torch/
-        variant        (str)   可选，用于构造 --target 子目录名
+        index_url      (str)   可选，pip index-url；空串时使用官方源
+        download_dir   (str)   可选，{dataDir}/download/pip/
+        variant        (str)   可选，官方源为空时用于构造默认 index-url
         index_url_mode (str)   可选，"replace"（默认）或 "extra"
         use_proxy      (bool)  可选，"true" 时追加 --proxy
         proxy          (str)   可选，代理地址
 
     响应：{ "command": "pip install --target ... --index-url ..." }
     """
-    index_url = request.query_params.get("index_url", "").strip()
-    if not index_url:
-        return JSONResponse(status_code=400, content={"error": "index_url is required"})
-
     torch_version = request.query_params.get("torch_version", "").strip()
     variant = request.query_params.get("variant", "")
     download_dir = request.query_params.get("download_dir", "")
@@ -209,13 +204,15 @@ async def pip_command(request: Request):
     use_proxy = request.query_params.get("use_proxy", "").lower() == "true"
     proxy = request.query_params.get("proxy", "")
 
-    target_dir = os.path.join(download_dir, variant) if download_dir and variant else download_dir
+    index_url = request.query_params.get("index_url", "").strip()
+    if not index_url and variant:
+        index_url = f"https://download.pytorch.org/whl/{variant}"
 
     from fredica_pyutil_server.util.torch_version_util import build_pip_install_cmd, resolve_packages
     packages = resolve_packages(torch_version)
     cmd_parts = build_pip_install_cmd(
         packages=packages,
-        target_dir=target_dir,
+        target_dir=download_dir,
         index_url=index_url,
         index_url_mode=index_url_mode,
         use_proxy=use_proxy,

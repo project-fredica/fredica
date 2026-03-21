@@ -126,6 +126,10 @@ export default function TorchConfigPage() {
     // detect state
     const [detecting, setDetecting] = useState(false);
 
+    // install check
+    const [checkingInstall, setCheckingInstall] = useState(false);
+    const [installCheckResult, setInstallCheckResult] = useState<{ already_ok: boolean; installed_version: string | null } | null>(null);
+
     // pip command preview
     const [pipCommand, setPipCommand] = useState<string>("");
 
@@ -378,6 +382,26 @@ export default function TorchConfigPage() {
         }
     };
 
+    const runInstallCheck = async () => {
+        if (checkingInstall) return;
+        setCheckingInstall(true);
+        try {
+            const params = new URLSearchParams();
+            if (selectedVariant && selectedVariant !== "custom") params.set("expected_version", "");
+            const { resp, data } = await apiFetch<{ already_ok?: boolean; installed_version?: string | null; error?: string }>(
+                `/api/v1/TorchInstallCheckRoute`,
+            );
+            if (!resp.ok) { print_error({ reason: `检测 torch 安装状态失败: HTTP ${resp.status}` }); return; }
+            if (!data) return;
+            if (data.error) { print_error({ reason: `检测 torch 安装状态失败: ${data.error}` }); return; }
+            setInstallCheckResult({ already_ok: data.already_ok ?? false, installed_version: data.installed_version ?? null });
+        } catch (e) {
+            print_error({ reason: "检测 torch 安装状态异常", err: e });
+        } finally {
+            setCheckingInstall(false);
+        }
+    };
+
     const runDetect = async () => {
         if (detecting) return;
         setDetecting(true);
@@ -532,6 +556,31 @@ export default function TorchConfigPage() {
                     <button onClick={runDetect} disabled={detecting} style={secondaryBtnStyle}>
                         {detecting ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         {detecting ? "检测中…" : "重新检测"}
+                    </button>
+                </div>
+
+                {/* torch 安装状态卡片 */}
+                <div style={{ backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px 20px", marginBottom: "20px", display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: "200px" }}>
+                        {installCheckResult ? (
+                            installCheckResult.already_ok ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#15803d" }}>
+                                    <CheckCircle size={16} />
+                                    <span>torch 已安装{installCheckResult.installed_version ? `，版本 ${installCheckResult.installed_version}` : ""}</span>
+                                </div>
+                            ) : (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#b45309" }}>
+                                    <AlertTriangle size={16} />
+                                    <span>未检测到 torch{installCheckResult.installed_version ? `（检测到版本 ${installCheckResult.installed_version}，可能不匹配）` : ""}</span>
+                                </div>
+                            )
+                        ) : (
+                            <span style={{ fontSize: "13px", color: "#9ca3af" }}>点击右侧按钮检测 torch 是否已安装。</span>
+                        )}
+                    </div>
+                    <button onClick={runInstallCheck} disabled={checkingInstall} style={secondaryBtnStyle}>
+                        {checkingInstall ? <Loader size={14} className="animate-spin" /> : <Search size={14} />}
+                        {checkingInstall ? "检测中…" : "检测安装状态"}
                     </button>
                 </div>
 
@@ -869,7 +918,7 @@ export default function TorchConfigPage() {
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             {historyIds.map(wfId => (
-                                <WorkflowInfoPanel key={wfId} workflowRunId={wfId} active={false} defaultExpanded={false} />
+                                <WorkflowInfoPanel key={wfId} workflowRunId={wfId} active={true} defaultExpanded={false} />
                             ))}
                         </div>
                         {/* 分页控件 */}

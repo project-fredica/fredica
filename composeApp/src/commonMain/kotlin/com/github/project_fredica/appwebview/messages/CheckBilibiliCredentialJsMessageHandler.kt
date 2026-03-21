@@ -69,7 +69,7 @@ class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
         val proxy = params.proxy?.takeIf { it.isNotBlank() } ?: cfg.bilibiliProxy
 
         // sessdata 为空视为未配置，无需调用 Python
-        if (sessdata.isNullOrBlank()) {
+        if (sessdata.isBlank()) {
             logger.debug("CheckBilibiliCredential: 未配置 bilibiliSessdata，跳过检测")
             callback(buildValidJson {
                 kv("configured", false)

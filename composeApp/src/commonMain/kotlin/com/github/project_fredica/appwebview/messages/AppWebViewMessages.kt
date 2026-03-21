@@ -18,20 +18,10 @@ object AppWebViewMessages {
             LlmProxyChatJsMessageHandler(),
             CheckBilibiliCredentialJsMessageHandler(),
             TryRefreshBilibiliCredentialJsMessageHandler(),
-            RunFasterWhisperCompatEvalJsMessageHandler(),
-            RunFasterWhisperModelDownloadJsMessageHandler(),
-            GetTorchInfoJsMessageHandler(),
-            GetTorchCheckJsMessageHandler(),
-            GetTorchPipCommandJsMessageHandler(),
-            RunTorchDetectJsMessageHandler(),
-            SaveTorchConfigJsMessageHandler(),
-            DownloadTorchJsMessageHandler(),
-            GetActiveTorchDownloadJsMessageHandler(),
-            GetTorchMirrorCheckJsMessageHandler(),
-            GetTorchMirrorVersionsJsMessageHandler(),
-            GetTorchAllMirrorVariantsJsMessageHandler(),
-            RefreshTorchMirrorCacheJsMessageHandler(),
             GetSystemProxyJsMessageHandler(),
+            *native.toTypedArray()
         )
     }
 }
+
+expect val AppWebViewMessages.native: List<MyJsMessageHandler>

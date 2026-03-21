@@ -59,9 +59,13 @@ object DownloadTorchExecutor : WebSocketTaskExecutor() {
         }
 
         val downloadDir = AppUtil.Paths.pipLibDir.absolutePath
+        val pipLogFilePath = AppUtil.Paths.appDataLogDir
+            .resolve("install_torch_worker")
+            .resolve("pip.stdout.log")
+            .absolutePath
         logger.info("DownloadTorchExecutor: 开始下载 variant=$variant " +
             "torchVersion=${payload.torchVersion} indexUrl=${payload.indexUrl} " +
-            "indexUrlMode=${payload.indexUrlMode} downloadDir=$downloadDir [taskId=${task.id}]")
+            "indexUrlMode=${payload.indexUrlMode} downloadDir=$downloadDir pipLogFilePath=$pipLogFilePath [taskId=${task.id}]")
 
         val paramJson = buildValidJson {
             kv("variant", variant)
@@ -69,6 +73,7 @@ object DownloadTorchExecutor : WebSocketTaskExecutor() {
             kv("use_proxy", payload.useProxy)
             kv("proxy", payload.proxy)
             kv("index_url_mode", payload.indexUrlMode)
+            kv("pip_log_file_path", pipLogFilePath)
             if (payload.expectedVersion.isNotBlank()) kv("expected_version", payload.expectedVersion)
             if (variant == "custom") {
                 kv("custom_packages", payload.customPackages)
@@ -86,7 +91,12 @@ object DownloadTorchExecutor : WebSocketTaskExecutor() {
         val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
             pth = "/torch/install-task",
             paramJson = paramJson,
-            onProgress = { pct -> TaskService.repo.updateProgress(task.id, pct) },
+            onProgress = { pct ->
+                TaskService.repo.updateProgress(task.id, pct)
+            },
+            onProgressLine = { line ->
+                TaskService.repo.updateStatusText(task.id, line)
+            },
             onPausable = { pausable ->
                 logger.debug("DownloadTorchExecutor: updatePausable pausable=$pausable [taskId=${task.id}]")
                 TaskService.repo.updatePausable(task.id, pausable)

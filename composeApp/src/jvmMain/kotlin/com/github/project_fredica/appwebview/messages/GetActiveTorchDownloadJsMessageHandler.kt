@@ -1,7 +1,6 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.python.TorchService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 
@@ -31,13 +30,6 @@ class GetActiveTorchDownloadJsMessageHandler : MyJsMessageHandler() {
         navigator: WebViewNavigator?,
         callback: (String) -> Unit,
     ) {
-        val activeStatuses = setOf("pending", "claimed", "running")
-        val task = TaskService.repo.listByType("DOWNLOAD_TORCH")
-            .firstOrNull { it.status in activeStatuses }
-        callback(buildValidJson {
-            kv("workflow_run_id", task?.workflowRunId ?: "")
-            kv("task_id", task?.id ?: "")
-            kv("status", task?.status ?: "")
-        }.str)
+        callback(TorchService.getActiveDownload())
     }
 }

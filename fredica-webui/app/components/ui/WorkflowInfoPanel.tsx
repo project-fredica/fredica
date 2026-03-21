@@ -10,6 +10,7 @@ export interface WorkerTask {
     type: string;
     status: string;
     progress: number;
+    status_text?: string | null;
     error: string | null;
     error_type: string | null;
     result?: string | null;
@@ -144,6 +145,7 @@ function TaskRow({ task, onPause, onResume, onCancel, pausingId, cancellingId, c
     const isRunning     = task.status === 'running' && !task.is_paused;
     const pct           = task.status === 'completed' ? 100 : task.progress;
     const isAwaitingAsr = task.error_type === 'AWAITING_ASR_CONFIG';
+    const statusText    = task.status_text?.trim() || null;
     const canPause      = task.status === 'running' && !task.is_paused && !!task.is_pausable;
     const canResume     = task.status === 'running' && !!task.is_paused;
     const canCancel     = isActive;
@@ -175,6 +177,9 @@ function TaskRow({ task, onPause, onResume, onCancel, pausingId, cancellingId, c
                         </div>
                     </div>
                     <ProgressBar value={pct} color={taskBarColor(task)} height="h-1" />
+                    {statusText && !isAwaitingAsr && !task.error && (
+                        <p className="mt-1 text-xs text-gray-400 whitespace-pre-wrap break-all">{statusText}</p>
+                    )}
                     {isAwaitingAsr && (
                         <Link to="/settings?section=asr" className="inline-flex items-center gap-1 mt-1.5 text-xs text-amber-600 hover:text-amber-800">
                             <Settings className="w-3 h-3" />前往配置 ASR
@@ -259,6 +264,9 @@ function TaskRow({ task, onPause, onResume, onCancel, pausingId, cancellingId, c
                     </div>
                 </div>
                 <ProgressBar value={pct} color={taskBarColor(task)} height="h-1" />
+                {statusText && !isAwaitingAsr && !task.error && (
+                    <p className="mt-1 text-xs text-gray-400 whitespace-pre-wrap break-all">{statusText}</p>
+                )}
                 {isAwaitingAsr ? (
                     <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
                         <p className="text-xs text-amber-800 mb-1.5">该视频无 Bilibili 字幕，需配置本地语音识别（ASR）才能继续分析。</p>
@@ -337,6 +345,12 @@ function InternalTaskList({ tasks, onPause, onResume, onCancel, pausingId, cance
 
 // ─── WorkflowInfoPanel ───────────────────────────────────────────────────────
 
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+function allTerminal(tasks: WorkerTask[]): boolean {
+    return tasks.length > 0 && tasks.every(t => TERMINAL_STATUSES.has(t.status));
+}
+
 const POLL_INTERVAL_MS = 2_000;
 
 export function WorkflowInfoPanel({ workflowRunId, materialId, active = true, onActiveState, defaultExpanded = false }: {
@@ -381,12 +395,13 @@ export function WorkflowInfoPanel({ workflowRunId, materialId, active = true, on
                 if (d?.items) {
                     setTasks(d.items);
                     onActiveStateRef.current?.(deriveActiveState(d.items));
+                    if (allTerminal(d.items)) cancelledRef.current = true;
                 }
                 setError(null);
             } catch {
                 if (!cancelledRef.current) setError('获取任务信息失败');
             } finally {
-                if (!cancelledRef.current) setLoading(false);
+                setLoading(false);
             }
         };
 
@@ -551,12 +566,13 @@ export function TaskList({ workflowRunId, materialId, active = true, onActiveSta
                 if (d?.items) {
                     setTasks(d.items);
                     onActiveStateRef.current?.(deriveActiveState(d.items));
+                    if (allTerminal(d.items)) cancelledRef.current = true;
                 }
                 setError(null);
             } catch {
                 if (!cancelledRef.current) setError('获取任务信息失败');
             } finally {
-                if (!cancelledRef.current) setLoading(false);
+                setLoading(false);
             }
         };
 

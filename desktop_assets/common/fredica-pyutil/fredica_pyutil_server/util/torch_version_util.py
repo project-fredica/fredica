@@ -86,7 +86,7 @@ def build_pip_install_cmd(
     Returns:
         命令列表，如 [sys.executable, "-m", "pip", "install", "--target", "...", ...]
     """
-    cmd = [sys.executable, "-m", "pip", "install"]
+    cmd = [sys.executable, "-m", "pip", "install", "-vv"]
     if target_dir:
         cmd += ["--target", target_dir]
     cmd += packages

@@ -1,7 +1,6 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.python.TorchService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 
@@ -29,17 +28,6 @@ class GetTorchInfoJsMessageHandler : MyJsMessageHandler() {
         navigator: WebViewNavigator?,
         callback: (String) -> Unit,
     ) {
-        val cfg = AppConfigService.repo.getConfig()
-        callback(buildValidJson {
-            kv("torch_variant", cfg.torchVariant)
-            kv("torch_recommended_variant", cfg.torchRecommendedVariant)
-            kv("torch_recommendation_json", cfg.torchRecommendationJson)
-            kv("torch_download_use_proxy", cfg.torchDownloadUseProxy)
-            kv("torch_download_proxy_url", cfg.torchDownloadProxyUrl)
-            kv("torch_download_index_url", cfg.torchDownloadIndexUrl)
-            kv("torch_custom_packages", cfg.torchCustomPackages)
-            kv("torch_custom_index_url", cfg.torchCustomIndexUrl)
-            kv("torch_custom_variant_id", cfg.torchCustomVariantId)
-        }.str)
+        callback(TorchService.getInfo())
     }
 }

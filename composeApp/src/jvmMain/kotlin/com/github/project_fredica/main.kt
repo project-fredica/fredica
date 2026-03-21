@@ -150,7 +150,6 @@ fun main() {
                             logFile = kcefLogPath.toString()
                             logSeverity = KCEFBuilder.Settings.LogSeverity.Default
                         }
-                        args("--disable-gpu", "--disable-gpu-compositing", "--use-gl=swiftshader", "--no-sandbox")
                     }, onError = {
                         if (it !== null) {
                             logger.exception("Error on KCEF init", it)

@@ -36,7 +36,7 @@ torch 下载子进程 worker。
       — 下载前先检查目标目录是否已有可用版本；already_ok=True 时直接结束
   {"type": "download_start", "packages": [...], "target_dir": str, "cmd": str}
       — 即将执行的 pip 命令（cmd 字段为完整命令字符串，便于调试）
-  {"type": "progress",       "percent": int, "line": str}
+  {"type": "progress",       "percent": int, "statusText": str}
       — pip 输出的每一行；percent=-1 表示非进度行（如 WARNING/INFO）
   {"type": "done",           "result": {"variant": str, "target_dir": str}}
       — 下载成功
@@ -47,7 +47,9 @@ import re
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
 
@@ -68,6 +70,7 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
     logger.info(f"[install_torch_worker] 启动，param={{"
                 f"variant={param.get('variant')!r}, "
                 f"download_dir={param.get('download_dir')!r}, "
+                f"pip_log_file_path={param.get('pip_log_file_path')!r}, "
                 f"use_proxy={param.get('use_proxy')}, "
                 f"index_url={param.get('index_url')!r}, "
                 f"proxy={'***' if param.get('proxy') else ''}}}")
@@ -77,6 +80,7 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
         download_dir: str = param.get("download_dir", "")
         use_proxy: bool = bool(param.get("use_proxy", False))
         proxy: str = param.get("proxy", "")
+        pip_log_file_path: str = param.get("pip_log_file_path", "")
         index_url_mode: str = param.get("index_url_mode", "replace")
         expected_version: str = param.get("expected_version", "")
 
@@ -104,9 +108,9 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
             from fredica_pyutil_server.util.torch_version_util import resolve_packages
             packages = resolve_packages(torch_version)
             if not index_url:
-                logger.error("[install_torch_worker] index_url 为空，终止")
-                _put({"type": "error", "message": "index_url 为空，无法下载"})
-                return
+                # 官方源：index_url 为空时使用 pytorch.org 默认源
+                index_url = f"https://download.pytorch.org/whl/{variant}"
+                logger.info(f"[install_torch_worker] index_url 为空，使用官方源: {index_url!r}")
             logger.info(f"[install_torch_worker] variant={variant!r} torch_version={torch_version!r} "
                         f"packages={packages} index_url={index_url!r} index_url_mode={index_url_mode!r}")
 
@@ -145,9 +149,15 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
             use_proxy=use_proxy,
             proxy=proxy,
         )
-        cmd += ["--progress-bar", "on"]
-
+        cmd += ["--progress-bar", "raw"]
         cmd_str = " ".join(cmd)
+
+        pip_log_file = Path(pip_log_file_path) if pip_log_file_path else None
+        pip_log_fp: TextIO | None = None
+        if pip_log_file is not None:
+            pip_log_file.parent.mkdir(parents=True, exist_ok=True)
+            pip_log_fp = pip_log_file.open("w", encoding="utf-8")
+
         logger.info(f"[install_torch_worker] 执行 pip 命令: {cmd_str}")
         _put({"type": "download_start", "packages": packages, "target_dir": str(target_dir), "cmd": cmd_str})
 
@@ -159,78 +169,181 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=0,  # 无缓冲，确保字符实时到达
+            bufsize=0,
         )
 
         def _iter_lines(stream):
-            """按字符读取，遇到 \\r 或 \\n 都 yield 一行（去掉末尾空白）。"""
+            """
+            后台线程读取字符，主线程每 0.1s 轮询队列并检查取消信号。
+            兼容 Windows（select 不支持 pipe）。
+            遇到 \\r 或 \\n 都 yield 一行。
+            """
+            import queue
+            import threading
+
+            char_queue: queue.Queue = queue.Queue()
+
+            def _reader():
+                try:
+                    while True:
+                        ch = stream.read(1)
+                        if isinstance(ch, bytes):
+                            ch = ch.decode("utf-8", errors="replace")
+                        char_queue.put(ch)
+                        if not ch:
+                            break
+                except Exception:
+                    char_queue.put("")
+
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+
             buf = []
+            char_count = 0
             while True:
-                ch = stream.read(1)
+                if _cancelled():
+                    logger.info("[_iter_lines] 取消信号，退出读取")
+                    break
+                try:
+                    ch = char_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                char_count += 1
+                # if char_count <= 500:
+                # pass
+                # logger.debug(f"[_iter_lines] #{char_count} ch={ch!r} ord={ord(ch) if ch else 'EOF'}")
                 if not ch:
+                    # logger.debug(f"[_iter_lines] EOF, buf={(''.join(buf))!r}")
                     if buf:
                         yield "".join(buf).rstrip()
                     break
                 if ch in ("\r", "\n"):
-                    line = "".join(buf).rstrip()
+                    _line = "".join(buf).rstrip()
                     buf.clear()
-                    if line:
-                        yield line
+                    if _line:
+                        # logger.debug(f"[_iter_lines] yield line={_line!r}")
+                        yield _line
                 else:
                     buf.append(ch)
 
         # 进度解析：
-        #   "Downloading torch-2.7.0+cu128-... (2.5 GB)" → 只匹配 torch 主包，记录总大小
-        #   "   ━━━━━ 0.7/2.9 GB 4.6 MB/s eta 0:10:32"  → 解析已下载/总量，计算百分比
-        _download_size_mb = 0.0
-        # 只匹配 torch 主包行（"Downloading torch-"），避免把依赖包的小文件大小覆盖掉
-        _size_pattern = re.compile(r"^Downloading torch-[^\s].*\((\d+(?:\.\d+)?)\s*(MB|GB|kB|B)\)")
-        # pip 新版进度条格式：数字/数字 单位，如 "0.7/2.9 GB" 或 "693.0/2886.1 MB"
-        _progress_pattern = re.compile(r"(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s*(MB|GB|kB|B)")
+        #   pip --progress-bar raw 输出格式："Progress <done> of <total>"
+        #   同一次 pip 会依次下载多个包，每个包的进度从 0 重新开始，
+        #   通过 _PackageProgressTracker 将多包进度合并为单调递增的总进度。
+        _progress_pattern = re.compile(r"^Progress\s+(\d+)\s+of\s+(\d+)$")
         _error_lines: list[str] = []  # 收集 pip ERROR 行，失败时附加到 error message
+        _recent_lines: deque[str] = deque(maxlen=5)
+        _last_pip_summary_ts = 0.0
+
+        class _PackageProgressTracker:
+            """
+            将 pip 多包下载的分段进度合并为单调递增的总进度（0-100）。
+
+            pip 每下载一个包都会重新从 Progress 0 of <N> 开始。
+            满足以下任一条件时视为新包开始：
+              1. total_bytes 与当前包不同（不同包大小不同）
+              2. done 相比上次出现倒退（同大小的不同包）
+
+            旧包强制标记为 100%，新包作为新槽位加入列表。
+            总进度 = 所有槽的平均值
+            """
+
+            def __init__(self) -> None:
+                self._slots: list[int] = []   # 每个已见包的当前进度 (0-100)
+                self._current_total: int = 0   # 当前包的 total_bytes
+                self._current_done: int = 0    # 当前包上次的 done_bytes
+
+            def update(self, done: int, total: int) -> int:
+                """
+                更新进度，返回合并后的总进度 (0-100)。
+                total=0 时返回 -1（无法计算）。
+                """
+                if total <= 0:
+                    return -1
+
+                is_new_package = (total != self._current_total) or (done < self._current_done)
+                if is_new_package:
+                    # 新包出现：把上一个槽标记为 100%（若有），然后开新槽
+                    if self._slots:
+                        self._slots[-1] = 100
+                    self._slots.append(0)
+                    self._current_total = total
+
+                # 更新当前槽的进度
+                pct = int(done / total * 100)
+                self._slots[-1] = pct
+                self._current_done = done
+
+                # 总进度 = 所有槽的平均值
+                return int(sum(self._slots) / len(self._slots))
+
+        _tracker = _PackageProgressTracker()
+
+        def _append_pip_log_line(line: str) -> None:
+            nonlocal _last_pip_summary_ts
+            if not line:
+                return
+            _recent_lines.append(line)
+            if pip_log_fp is not None:
+                pip_log_fp.write(line)
+                pip_log_fp.write("\n")
+                pip_log_fp.flush()
+            now = time.monotonic()
+            if now - _last_pip_summary_ts >= 15:
+                _last_pip_summary_ts = now
+                log_size = pip_log_file.stat().st_size if pip_log_file is not None and pip_log_file.exists() else 0
+                logger.debug(
+                    f"[install_torch_worker] pip log summary: path={pip_log_file_path!r} size={log_size} last_lines={list(_recent_lines)!r}"
+                )
+
+        def _stop_pip_process() -> None:
+            if proc.poll() is not None:
+                return
+            logger.info(f"[install_torch_worker] stopping pip process pid={proc.pid}")
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+                logger.info(f"[install_torch_worker] pip terminated pid={proc.pid} returncode={proc.returncode}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"[install_torch_worker] pip terminate timeout, kill pid={proc.pid}")
+                proc.kill()
+                proc.wait()
+                logger.info(f"[install_torch_worker] pip killed pid={proc.pid} returncode={proc.returncode}")
 
         for line in _iter_lines(proc.stdout):
+            if not str(line).startswith(" "):
+                logger.debug("[install_torch_worker] pip: {}", line)
             if _cancelled():
                 logger.info("[install_torch_worker] 已取消（下载中），终止子进程")
-                proc.terminate()
+                _stop_pip_process()
                 return
-
             # 收集 ERROR 行，供失败时上报
             if line.startswith("ERROR:"):
                 _error_lines.append(line)
 
-            # 解析文件大小（仅记录日志，不上报）
-            m = _size_pattern.search(line)
-            if m:
-                size_val = float(m.group(1))
-                unit = m.group(2)
-                if unit == "GB":
-                    _download_size_mb = size_val * 1024
-                elif unit == "MB":
-                    _download_size_mb = size_val
-                elif unit == "kB":
-                    _download_size_mb = size_val / 1024
-                logger.debug(f"[install_torch_worker] torch 主包大小: {size_val}{unit} ({_download_size_mb:.1f} MB)")
+            _append_pip_log_line(line)
 
-            # 解析进度：匹配 "已下载/总量 单位" 格式，计算百分比上报给 Kotlin 层
+            # 解析进度：匹配 pip --progress-bar raw 的 "Progress <done> of <total>" 格式
             m2 = _progress_pattern.search(line)
             if m2:
                 try:
-                    done_val = float(m2.group(1))
-                    total_val = float(m2.group(2))
-                    pct = int(done_val / total_val * 100) if total_val > 0 else -1
+                    done_val = int(m2.group(1))
+                    total_val = int(m2.group(2))
+                    pct = _tracker.update(done_val, total_val)
                 except Exception:
                     pct = -1
-                _put({"type": "progress", "percent": pct, "line": line})
+                _put({"type": "progress", "percent": pct, "statusText": line})
                 continue
 
             # 非进度行（WARNING / INFO / 包名等），原样上报，percent=-1 表示无进度信息
             if line:
-                logger.debug(f"[install_torch_worker] pip: {line}")
-                _put({"type": "progress", "percent": -1, "line": line})
+                _put({"type": "progress", "percent": -1, "statusText": line})
+
+        # _iter_lines 因取消信号 break 后，需在此终止子进程
+        if _cancelled():
+            logger.info("[install_torch_worker] 已取消（读取结束后），终止子进程")
+            _stop_pip_process()
+            return
 
         proc.wait()
         elapsed = time.monotonic() - t_start
@@ -253,3 +366,6 @@ def install_torch_worker(param: dict, status_queue, cancel_event, resume_event):
     except Exception as e:
         logger.exception(f"[install_torch_worker] 未预期异常: {e}")
         _put({"type": "error", "message": str(e)})
+    finally:
+        if 'pip_log_fp' in locals() and pip_log_fp is not None:
+            pip_log_fp.close()

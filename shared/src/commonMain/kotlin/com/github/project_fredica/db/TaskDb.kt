@@ -76,6 +76,11 @@ class TaskDb(private val db: Database) : TaskRepo {
                     try {
                         stmt.execute("ALTER TABLE task ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
                     } catch (_: Exception) { /* column already exists */ }
+                    // Schema migration: add status_text column if it doesn't exist yet
+                    @Suppress("SwallowedException")
+                    try {
+                        stmt.execute("ALTER TABLE task ADD COLUMN status_text TEXT")
+                    } catch (_: Exception) { /* column already exists */ }
                     // Schema migration: add is_paused column if it doesn't exist yet
                     @Suppress("SwallowedException")
                     try {
@@ -220,6 +225,16 @@ class TaskDb(private val db: Database) : TaskRepo {
         db.useConnection { conn ->
             conn.prepareStatement("UPDATE task SET progress = ? WHERE id = ?").use { ps ->
                 ps.setInt(1, progress.coerceIn(0, 100))
+                ps.setString(2, id)
+                ps.executeUpdate()
+            }
+        }
+    }
+
+    override suspend fun updateStatusText(id: String, statusText: String?): Unit = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement("UPDATE task SET status_text = ? WHERE id = ?").use { ps ->
+                ps.setString(1, statusText)
                 ps.setString(2, id)
                 ps.executeUpdate()
             }
@@ -465,6 +480,7 @@ class TaskDb(private val db: Database) : TaskRepo {
         staleAt           = rs.getLong("stale_at").takeIf         { !rs.wasNull() },
         reclaimedAt       = rs.getLong("reclaimed_at").takeIf     { !rs.wasNull() },
         progress          = rs.getInt("progress"),
+        statusText        = rs.getString("status_text"),
         isPaused          = rs.getInt("is_paused") != 0,
         isPausable        = rs.getInt("is_pausable") != 0,
     )
