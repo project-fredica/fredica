@@ -201,6 +201,7 @@ export default function TorchConfigPage() {
 
     // fetch supported variants for the selected mirror whenever it changes
     useEffect(() => {
+        setSelectedTorchVersions({});
         if (selectedMirrorKey === "custom" || selectedMirrorKey === "official") {
             setMirrorSupportedVariants(null);
             return;
@@ -386,10 +387,14 @@ export default function TorchConfigPage() {
         if (checkingInstall) return;
         setCheckingInstall(true);
         try {
+            const mirrorBestVer = perMirrorTorchVersions[selectedMirrorKey]?.[selectedVariant]?.[0] ?? "";
+            const expectedVersion = selectedVariant && selectedVariant !== "custom"
+                ? (selectedTorchVersions[selectedVariant] || mirrorBestVer)
+                : "";
             const params = new URLSearchParams();
-            if (selectedVariant && selectedVariant !== "custom") params.set("expected_version", "");
+            if (expectedVersion) params.set("expected_version", expectedVersion);
             const { resp, data } = await apiFetch<{ already_ok?: boolean; installed_version?: string | null; error?: string }>(
-                `/api/v1/TorchInstallCheckRoute`,
+                `/api/v1/TorchInstallCheckRoute${params.size > 0 ? `?${params}` : ""}`,
             );
             if (!resp.ok) { print_error({ reason: `检测 torch 安装状态失败: HTTP ${resp.status}` }); return; }
             if (!data) return;
@@ -691,7 +696,7 @@ export default function TorchConfigPage() {
                                             {isSelected && mirrorTorchVers.length > 1 && (
                                                 <div style={{ paddingLeft: "24px", paddingBottom: "4px" }}>
                                                     <select
-                                                        value={selectedTorchVer || mirrorTorchVerBest}
+                                                        value={mirrorTorchVers.includes(selectedTorchVer) ? selectedTorchVer : mirrorTorchVerBest}
                                                         onChange={e => setSelectedTorchVersions(prev => ({ ...prev, [v]: e.target.value }))}
                                                         style={{ fontSize: "11px", padding: "2px 4px", border: "1px solid #d1d5db", borderRadius: "4px", color: "#374151", backgroundColor: "#fff" }}
                                                     >

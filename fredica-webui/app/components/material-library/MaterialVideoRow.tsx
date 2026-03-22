@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
-import { ExternalLink, Brain } from "lucide-react";
+import { Link } from "react-router";
+import { ExternalLink, SquareArrowOutUpRight } from "lucide-react";
 import { useImageProxyUrl } from "~/util/app_fetch";
 import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
@@ -15,7 +16,6 @@ export function MaterialVideoRow({
     tasksMap,
     deletingVideoIds,
     onOpenAction,
-    onOpenActionWeben,
     onOpenAiConclusion,
     onSelectCategory,
 }: {
@@ -25,7 +25,6 @@ export function MaterialVideoRow({
     tasksMap: Map<string, MaterialTask[]>;
     deletingVideoIds: Set<string>;
     onOpenAction: (video: MaterialVideo) => void;
-    onOpenActionWeben: (video: MaterialVideo) => void;
     onOpenAiConclusion: (bvid: string, pageIndex: number) => void;
     onSelectCategory: (id: string) => void;
 }) {
@@ -76,9 +75,11 @@ export function MaterialVideoRow({
 
             {/* Content */}
             <div className="flex-1 min-w-0 flex flex-col justify-between gap-1">
-                <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
-                    {video.title || video.source_id}
-                </h3>
+                <Link to={`/material/${video.id}`} className="group/title">
+                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug group-hover/title:text-violet-700 transition-colors">
+                        {video.title || video.source_id}
+                    </h3>
+                </Link>
                 {extraInfo}
 
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -130,14 +131,14 @@ export function MaterialVideoRow({
                         onClick={() => onOpenAiConclusion(video.source_id, bilibiliPage - 1)}
                     />
                 )}
-                <button
-                    onClick={() => onOpenActionWeben(video)}
+                <Link
+                    to={`/material/${video.id}`}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors whitespace-nowrap"
-                    title="知识提取"
+                    title="进入工作区"
                 >
-                    <Brain className="w-3.5 h-3.5" />
-                    知识
-                </button>
+                    <SquareArrowOutUpRight className="w-3.5 h-3.5" />
+                    工作区
+                </Link>
                 <button
                     onClick={() => onOpenAction(video)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"

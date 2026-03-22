@@ -27,6 +27,16 @@ package com.github.project_fredica.db
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+// =============================================================================
+// WorkflowRunListResult —— listHistoryByMaterial 分页查询结果
+// =============================================================================
+
+@Serializable
+data class WorkflowRunListResult(
+    val items: List<WorkflowRun>,
+    val total: Int,
+)
+
 /**
  * 工作流运行实例，记录一次处理流程的整体状态和进度。
  *
@@ -79,6 +89,23 @@ interface WorkflowRunRepo {
      * 由 WorkerEngine 在每次任务状态变更后触发。
      */
     suspend fun recalculate(workflowRunId: String)
+
+    /**
+     * 查询指定素材下所有**活跃**（非终态）WorkflowRun，按创建时间降序，不分页。
+     * 供 [com.github.project_fredica.db.MaterialWorkflowService.queryActive] 使用。
+     */
+    suspend fun listActiveByMaterial(materialId: String): List<WorkflowRun>
+
+    /**
+     * 查询指定素材下所有**终态**（completed / failed / cancelled）WorkflowRun，
+     * 按创建时间降序，支持分页。
+     * 供 [com.github.project_fredica.db.MaterialWorkflowService.queryHistory] 使用。
+     */
+    suspend fun listHistoryByMaterial(
+        materialId: String,
+        page: Int = 1,
+        pageSize: Int = 20,
+    ): WorkflowRunListResult
 
     /**
      * 对账：对所有非终态 WorkflowRun 重新从 Task 实际状态推导，修正可能落后的汇总状态。

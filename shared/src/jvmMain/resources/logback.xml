@@ -1,5 +1,10 @@
 <configuration>
 
+    <!-- 过滤 Netty I/O 事件线程产生的 "Connection reset" 断连噪音日志。
+         该异常来自 NioByteUnsafe.read，在应用 coroutine 之外，route 层无法 catch，
+         只能在此处精准过滤（仅 DEBUG + "I/O operation failed" + SocketException 三者同时满足时 DENY）。 -->
+    <turboFilter class="com.github.project_fredica.apputil.NettyConnectionResetFilter" />
+
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <!-- encoders are assigned the type
              ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->

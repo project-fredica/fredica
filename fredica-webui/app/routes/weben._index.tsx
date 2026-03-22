@@ -3,7 +3,6 @@ import { Link } from "react-router";
 import { Brain, BookOpen, RefreshCw, ArrowRight, Layers, Clock, ChevronRight } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
-import { WebenSourceAnalysisModal } from "~/components/weben/WebenSourceAnalysisModal";
 import {
     type WebenConcept, type WebenSource, type WebenReviewQueueResponse,
     getAnalysisStatusInfo, masteryBarColor, masteryLabel, formatRelativeTime,
@@ -30,18 +29,12 @@ function StatCard({ icon, label, value, sub, to, color }: {
     );
 }
 
-function SourceRow({ source, onSelect }: { source: WebenSource; onSelect: (s: WebenSource) => void }) {
+function SourceRow({ source }: { source: WebenSource }) {
     const status = getAnalysisStatusInfo(source.analysis_status);
-    const isNonTerminal = source.analysis_status === 'pending' || source.analysis_status === 'analyzing';
-    // 非终态且有工作流 ID 时可点击查看进度详情
-    const clickable = isNonTerminal && source.workflow_run_id != null;
+    const workspaceUrl = source.material_id ? `/material/${source.material_id}/tasks` : null;
 
-    return (
-        <div
-            className={`relative flex items-center gap-3 px-4 py-3 overflow-hidden
-                ${clickable ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
-            onClick={clickable ? () => onSelect(source) : undefined}
-        >
+    const inner = (
+        <>
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${status.dot}`} />
             <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">{source.title}</p>
@@ -50,13 +43,25 @@ function SourceRow({ source, onSelect }: { source: WebenSource; onSelect: (s: We
             <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${status.badge}`}>
                 {status.label}
             </span>
-            {/* 分析中且有进度时，底部显示细进度条 */}
             {source.analysis_status === 'analyzing' && source.progress > 0 && (
                 <div
                     className="absolute bottom-0 left-0 h-[1.5px] bg-blue-500 transition-all duration-500"
                     style={{ width: `${source.progress}%` }}
                 />
             )}
+        </>
+    );
+
+    if (workspaceUrl) {
+        return (
+            <Link to={workspaceUrl} className="relative flex items-center gap-3 px-4 py-3 overflow-hidden hover:bg-gray-50 transition-colors">
+                {inner}
+            </Link>
+        );
+    }
+    return (
+        <div className="relative flex items-center gap-3 px-4 py-3 overflow-hidden">
+            {inner}
         </div>
     );
 }
@@ -89,11 +94,10 @@ function LowMasteryConceptRow({ concept }: { concept: WebenConcept }) {
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function WebenIndexPage() {
-    const [concepts,      setConcepts]      = useState<WebenConcept[]>([]);
-    const [sources,       setSources]       = useState<WebenSource[]>([]);
-    const [dueCount,      setDueCount]      = useState(0);
-    const [refreshing,    setRefreshing]    = useState(false);
-    const [selectedSource, setSelectedSource] = useState<WebenSource | null>(null);
+    const [concepts,   setConcepts]   = useState<WebenConcept[]>([]);
+    const [sources,    setSources]    = useState<WebenSource[]>([]);
+    const [dueCount,   setDueCount]   = useState(0);
+    const [refreshing, setRefreshing] = useState(false);
 
     const { apiFetch } = useAppFetch();
 
@@ -130,7 +134,6 @@ export default function WebenIndexPage() {
     const weakConcepts  = concepts.filter(c => c.mastery < 0.5).slice(0, 5);
 
     return (
-        <>
         <SidebarLayout>
             <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
 
@@ -205,7 +208,7 @@ export default function WebenIndexPage() {
                         ) : (
                             <div className="divide-y divide-gray-50">
                                 {sources.map(s => (
-                                    <SourceRow key={s.id} source={s} onSelect={setSelectedSource} />
+                                    <SourceRow key={s.id} source={s} />
                                 ))}
                             </div>
                         )}
@@ -231,13 +234,5 @@ export default function WebenIndexPage() {
 
             </div>
         </SidebarLayout>
-        {/* 分析进度模态框：使用 sources.find 确保显示父组件轮询到的最新 source 数据 */}
-        {selectedSource && (
-            <WebenSourceAnalysisModal
-                source={sources.find(s => s.id === selectedSource.id) ?? selectedSource}
-                onClose={() => setSelectedSource(null)}
-            />
-        )}
-    </>
     );
 }

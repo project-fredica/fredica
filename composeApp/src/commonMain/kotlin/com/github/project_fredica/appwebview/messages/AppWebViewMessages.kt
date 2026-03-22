@@ -4,6 +4,7 @@ object AppWebViewMessages {
     val all by lazy {
         listOf(
             OpenBrowserJsMessageHandler(),
+            OpenInternalTabJsMessageHandler(),
             GetAppConfigJsMessageHandler(),
             SaveAppConfigJsMessageHandler(),
             GetServerInfoJsMessageHandler(),

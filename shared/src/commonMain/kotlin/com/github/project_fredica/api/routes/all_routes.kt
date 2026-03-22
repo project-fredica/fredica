@@ -24,8 +24,12 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     MaterialGetRoute,
     MaterialListRoute,
     MaterialSetCategoriesRoute,
+    MaterialSubtitleListRoute,
     MaterialTaskListRoute,
+    MaterialVideoCheckRoute,
     MaterialVideoTranscodeMp4Route,
+    MaterialWorkflowRoute,
+    MaterialWorkflowStatusRoute,
     NetworkTestRoute,
     RestartTaskLogListRoute,
     RestartTaskLogUpdateDispositionRoute,
@@ -50,5 +54,4 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     WebenSourceListRoute,
     WorkerTaskListRoute,
     WorkerTaskWfIdListRoute,
-    WorkflowRunStartRoute,
 )

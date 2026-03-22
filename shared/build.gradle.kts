@@ -63,6 +63,11 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
             implementation(libs.sqlite.jdbc)
+            implementation(libs.ktor.serverTestHost)
+            implementation(libs.ktor.server.content.negotiation)
+            implementation(libs.ktor.server.cors)
+            implementation(libs.ktor.server.partial.content)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
         androidMain.dependencies {
             //noinspection UseTomlInstead
@@ -76,6 +81,7 @@ kotlin {
             implementation(libs.ktor.server.content.negotiation)
             implementation(libs.ktor.server.cors)
             implementation(libs.ktor.server.swagger)
+            implementation(libs.ktor.server.partial.content)
             implementation(libs.ktor.serialization.kotlinx.json)
 
             implementation("org.burningwave:core:12.66.2") {

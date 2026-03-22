@@ -80,7 +80,21 @@ export async function callBridgeOrNull(
 }
 
 /**
- * 打开外部链接。
+ * 打开内部路由（应用内页面）。
+ * - WebView 环境：调用 open_internal_tab bridge，在系统浏览器（Phase 1）或新 WebView 窗口（Phase 6）打开。
+ * - 普通浏览器开发环境：window.open 新标签。
+ */
+export function openInternalUrl(path: string) {
+    if (typeof window === "undefined") return;
+    if (window.kmpJsBridge) {
+        callBridge("open_internal_tab", JSON.stringify({ path })).catch(() => {});
+    } else {
+        window.open(path, "_blank", "noopener,noreferrer");
+    }
+}
+
+/**
+ * 打开外部 URL。
  * - WebView 环境（kmpJsBridge 存在）：调用 open_browser bridge，由原生系统浏览器打开。
  * - 普通浏览器环境：直接 window.open。
  */

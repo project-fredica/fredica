@@ -18,6 +18,7 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.plugins.partialcontent.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -296,10 +297,12 @@ object FredicaApiJvmService {
         install(ContentNegotiation) {
             json()
         }
+        install(PartialContent)
         install(CORS) {
             option.ktorServerAllowHosts().forEach {
                 allowHost(it)
             }
+            allowCredentials = true
             arrayOf(
                 HttpHeaders.ContentType,
                 HttpHeaders.Authorization,
@@ -357,6 +360,11 @@ object FredicaApiJvmService {
                     return@post
                 }
                 LlmProxyChatRoute.handle(this)
+            }
+
+            // 视频流（Cookie 认证 + Range 支持，单独注册绕过通用路由框架）
+            get(MaterialVideoStreamRoute.PATH) {
+                MaterialVideoStreamRoute.handle(this)
             }
 
             for (route in allRoutes) {

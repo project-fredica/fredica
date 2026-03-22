@@ -5,6 +5,126 @@ order: 130
 
 # 测试指南
 
+## 前端测试（fredica-webui）
+
+测试文件位于 `fredica-webui/tests/`，使用 [Vitest](https://vitest.dev/) + jsdom + @testing-library/react。
+
+```
+fredica-webui/tests/
+├── mocks/
+│   └── broadcastChannel.ts   # MockBroadcastChannel（内存路由，替换 JSDOM 缺失的原生实现）
+├── setup.ts                  # 全局初始化（注入 MockBroadcastChannel）
+├── util/
+│   └── videoPlayerChannel.test.ts   # BroadcastChannel hook 测试（C1–C9，8 cases）
+├── hooks/
+│   └── useVideoPlayerState.test.ts  # 播放器状态机测试（V1–V14，14 cases）
+└── context/
+    └── floatingPlayer.test.tsx      # 悬浮播放器 Context 测试（F1–F4，4 cases）
+```
+
+### 运行命令
+
+```shell
+cd fredica-webui
+
+# 首次运行前安装依赖
+npm install
+
+# 一次性跑完所有测试（CI 模式）
+npm test
+
+# 监视模式（文件改动自动重跑）
+npm run test:watch
+
+# 跑单个测试文件
+npx vitest run tests/util/videoPlayerChannel.test.ts
+npx vitest run tests/hooks/useVideoPlayerState.test.ts
+npx vitest run tests/context/floatingPlayer.test.tsx
+```
+
+**预期输出（全部通过）**：
+
+```
+ ✓ tests/context/floatingPlayer.test.tsx    (4 tests)
+ ✓ tests/util/videoPlayerChannel.test.ts   (8 tests)
+ ✓ tests/hooks/useVideoPlayerState.test.ts (14 tests)
+
+ Test Files  3 passed (3)
+       Tests  26 passed (26)
+```
+
+### 测试用例覆盖一览
+
+| 文件 | 用例 | 说明 |
+|------|------|------|
+| `videoPlayerChannel.test.ts` | C1 | `playing(instanceId=自身)` → `onForcePause` 不调用 |
+| | C2 | `playing(instanceId=他人)` → `onForcePause` 调用一次 |
+| | C3 | `seek-and-play(tabId不匹配)` → `onSeekAndPlay` 不调用 |
+| | C4 | `seek-and-play(tabId匹配)` → `onSeekAndPlay(42)` |
+| | C5 | 同一 seekId 发两次 → 只响应一次 |
+| | C6 | 环形缓冲（容量 20）溢出后接受旧 seekId |
+| | C8 | 组件 unmount → 广播 `destroyed`，channel 关闭 |
+| | C9 | `broadcastSeekPassive` 100ms 内连续调用 → channel 只收 1 条 |
+| `useVideoPlayerState.test.ts` | V1 | 挂载后初始状态为 `checking` |
+| | V2 | check 成功，无 pendingSeek → `paused`，fileMtime 正确 |
+| | V3 | check 成功，预设 pendingSeek{autoPlay:true} → 保留 |
+| | V4 | check 成功，预设 pendingSeek{autoPlay:false} → 保留 |
+| | V5 | check 返回 not ready → `needs_encode` |
+| | V6 | `startEncode()` → `encoding`，调用 TranscodeMp4Route |
+| | V7 | encoding 轮询检测到就绪 → 回到 `checking` |
+| | V8 | `onPlaybackStarted()` → `playing` |
+| | V9 | `onPlaybackPaused()` → `paused` |
+| | V10 | playing 时 `onForcePause()` → `paused` |
+| | V11 | paused 时 `onForcePause()` → 无变化 |
+| | V12 | 暂停时写入 `localStorage[fredica-video-progress-*]` |
+| | V13 | localStorage 记录在 30 天内 → pendingSeek 恢复 |
+| | V14 | localStorage 记录超过 30 天 → pendingSeek 为 null |
+| `floatingPlayer.test.tsx` | F1 | 初始：`isVisible=false`，`currentMaterialId=null` |
+| | F2 | `openFloatingPlayer('mat-1')` → `isVisible=true` |
+| | F3 | `openFloatingPlayer('mat-1', 42)` → `pendingSeek={seconds:42, autoPlay:true}` |
+| | F4 | `closeFloatingPlayer()` → `isVisible=false`，`currentMaterialId=null` |
+
+### 关键 Mock 策略
+
+**`MockBroadcastChannel`**（`tests/mocks/broadcastChannel.ts`）
+
+JSDOM 不原生支持 `BroadcastChannel`，用内存 Map 路由代替：
+- 同 channel name 的实例共享一个 `Set`，`postMessage` 发给同名其他实例
+- `static reset()` 在每个测试的 `beforeEach`/`afterEach` 中清除，防止跨测试污染
+- 在 `tests/setup.ts` 中全局替换 `globalThis.BroadcastChannel`
+
+**`fetch` mock**
+
+各测试用 `vi.stubGlobal("fetch", ...)` 替换，`afterEach` 中 `vi.unstubAllGlobals()` 恢复：
+
+```typescript
+vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ ready: true, file_mtime: 100, file_size: 500 }),
+}));
+```
+
+**`useAppConfig` mock**
+
+```typescript
+vi.mock("~/context/appConfig", () => ({
+    useAppConfig: () => ({
+        appConfig: {
+            webserver_schema: "http",
+            webserver_domain: "localhost",
+            webserver_port: "7631",
+            webserver_auth_token: "test-token",
+        },
+    }),
+}));
+```
+
+**fake timers**（C9、V7）
+
+使用 `vi.useFakeTimers()` / `vi.advanceTimersByTime(ms)` 测试节流和轮询，测试结束后 `vi.useRealTimers()` 恢复。
+
+---
+
 ## Kotlin / Gradle 测试（shared 模块）
 
 测试文件位于 `shared/src/jvmTest/kotlin/`，按包结构组织：

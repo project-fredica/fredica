@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
+import { startMaterialWorkflow, type WorkflowTemplate } from "~/util/materialWorkflowApi";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
@@ -216,17 +217,17 @@ export default function LibraryPage() {
         } finally { setRunningTaskType(null); }
     };
 
-    const handleStartWorkflow = async (template: string) => {
+    const handleStartWorkflow = async (template: WorkflowTemplate) => {
         if (!actionTarget || runningTaskType) return;
         setRunningTaskType(template);
         try {
-            const { resp } = await apiFetch('/api/v1/WorkflowRunStartRoute', { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id, template }) });
+            const { resp } = await startMaterialWorkflow(apiFetch, actionTarget.id, template);
             if (!resp.ok) reportHttpError('启动工作流失败', resp);
         } finally { setRunningTaskType(null); }
     };
 
     const buildAnalyzeUrl = (video: MaterialVideo): string => {
-        return `/weben-analyze/${video.id}`;
+        return `/material/${video.id}/summary`;
     };
 
     // ── Filtering & pagination ────────────────────────────────────────────────
@@ -355,7 +356,6 @@ export default function LibraryPage() {
                                         tasksMap={tasksMap}
                                         deletingVideoIds={deletingVideoIds}
                                         onOpenAction={handleOpenAction}
-                                        onOpenActionWeben={(v) => { handleOpenAction(v); setActionTab('weben'); }}
                                         onOpenAiConclusion={(bvid, pageIndex) => setAiConclusionTarget({ bvid, pageIndex })}
                                         onSelectCategory={setSelectedCategoryId}
                                     />

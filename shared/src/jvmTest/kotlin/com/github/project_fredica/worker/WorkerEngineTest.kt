@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -64,9 +65,12 @@ class WorkerEngineTest {
     private val activeScopes = mutableListOf<CoroutineScope>()
 
     @AfterTest
-    fun teardown() {
-        // 取消所有本轮测试的引擎协程，确保不干扰下一个测试
-        activeScopes.forEach { it.cancel() }
+    fun teardown() = runBlocking {
+        // cancel() 仅设置取消标志，join() 等待协程实际退出，
+        // 确保 Dispatchers.IO 线程释放后 JVM 才能干净退出，避免 binary/output.bin 文件锁。
+        activeScopes.forEach { scope ->
+            scope.coroutineContext[Job]?.cancelAndJoin()
+        }
         activeScopes.clear()
     }
 
@@ -136,7 +140,7 @@ class WorkerEngineTest {
 
     /**
      * 创建一个带 Job 的引擎 scope，并记录到 [activeScopes]。
-     * @AfterTest 时调用 cancel() 停止所有轮询协程，防止跨测试干扰。
+     * @AfterTest 时调用 cancelAndJoin() 等待协程实际退出，确保 JVM 能干净退出。
      */
     private fun engineScope(): CoroutineScope =
         CoroutineScope(Dispatchers.IO + Job()).also { activeScopes.add(it) }

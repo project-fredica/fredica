@@ -241,6 +241,76 @@ class WorkflowRunDb(private val db: Database) : WorkflowRunRepo {
         modifiedCount
     }
 
+    // ── listActiveByMaterial / listHistoryByMaterial：按素材查询 ──────────────
+
+    /**
+     * 查询指定素材下所有**活跃**（非终态）WorkflowRun，按创建时间降序，不分页。
+     *
+     * 活跃 = status NOT IN ('completed', 'failed', 'cancelled')，
+     * 即 pending / running 两种状态。
+     */
+    override suspend fun listActiveByMaterial(materialId: String): List<WorkflowRun> =
+        withContext(Dispatchers.IO) {
+            val result = mutableListOf<WorkflowRun>()
+            db.useConnection { conn ->
+                conn.prepareStatement(
+                    """
+                    SELECT * FROM workflow_run
+                    WHERE material_id = ?
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    ORDER BY created_at DESC
+                    """.trimIndent()
+                ).use { ps ->
+                    ps.setString(1, materialId)
+                    ps.executeQuery().use { rs ->
+                        while (rs.next()) result.add(rowToWorkflowRun(rs))
+                    }
+                }
+            }
+            result
+        }
+
+    /**
+     * 查询指定素材下所有**终态**（completed / failed / cancelled）WorkflowRun，
+     * 按创建时间降序，支持分页。
+     */
+    override suspend fun listHistoryByMaterial(
+        materialId: String,
+        page: Int,
+        pageSize: Int,
+    ): WorkflowRunListResult = withContext(Dispatchers.IO) {
+        val offset = (page - 1).coerceAtLeast(0) * pageSize
+        var total = 0
+        val items = mutableListOf<WorkflowRun>()
+
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT COUNT(*) FROM workflow_run WHERE material_id = ? AND status IN ('completed', 'failed', 'cancelled')"
+            ).use { ps ->
+                ps.setString(1, materialId)
+                ps.executeQuery().use { rs -> if (rs.next()) total = rs.getInt(1) }
+            }
+            conn.prepareStatement(
+                """
+                SELECT * FROM workflow_run
+                WHERE material_id = ?
+                  AND status IN ('completed', 'failed', 'cancelled')
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """.trimIndent()
+            ).use { ps ->
+                ps.setString(1, materialId)
+                ps.setInt(2, pageSize)
+                ps.setInt(3, offset)
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) items.add(rowToWorkflowRun(rs))
+                }
+            }
+        }
+
+        WorkflowRunListResult(items = items, total = total)
+    }
+
     // ── rowToWorkflowRun：ResultSet → WorkflowRun ────────────────────────────
 
     private fun rowToWorkflowRun(rs: java.sql.ResultSet): WorkflowRun = WorkflowRun(

@@ -65,6 +65,10 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
             if (stored) {
                 const parsed = JSON.parse(stored) as AppConfig;
                 setAppConfigState(parsed);
+                // 从 localStorage 恢复时也写入 Cookie，供 <video src> 使用
+                if (parsed.webserver_auth_token) {
+                    document.cookie = `fredica_token=${parsed.webserver_auth_token}; path=/; SameSite=Strict`;
+                }
             }
         } catch {
             console.debug(`failed load local storage key`, STORAGE_KEY);
@@ -75,6 +79,10 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         callBridge("get_server_info").then(raw => {
             const info = JSON.parse(raw) as Partial<AppConfig>;
             setAppConfigState(prev => ({ ...prev, ...info }));
+            // 写入 fredica_token Cookie，供 <video src> 使用
+            if (info.webserver_auth_token) {
+                document.cookie = `fredica_token=${info.webserver_auth_token}; path=/; SameSite=Strict`;
+            }
         }).catch(() => {
             // 浏览器环境或 bridge 未就绪时忽略
         });

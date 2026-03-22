@@ -463,7 +463,7 @@ export function WorkflowInfoPanel({ workflowRunId, materialId, active = true, on
         });
 
     return (
-        <div className={`rounded-lg border-l-2 ${headerAccent} bg-gray-50/60 px-3 py-2.5`}>
+        <div className={`rounded-lg border-l-2 ${headerAccent} bg-white px-3 py-2.5`}>
             {/* 摘要行 */}
             <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2 text-xs">
@@ -480,11 +480,11 @@ export function WorkflowInfoPanel({ workflowRunId, materialId, active = true, on
                 <div className="flex items-center gap-2">
                     {inferredMaterialId && (
                         <Link
-                            to={`/material-library?task_id=${encodeURIComponent(tasks[0]?.id ?? '')}`}
+                            to={`/material/${inferredMaterialId}/tasks`}
                             className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                         >
                             <Library className="w-3 h-3" />
-                            素材
+                            工作区
                         </Link>
                     )}
                     {tasks.length > 1 && (
@@ -526,11 +526,12 @@ export function WorkflowInfoPanel({ workflowRunId, materialId, active = true, on
 
 // ─── TaskList (exported, with lifecycle) ─────────────────────────────────────
 
-export function TaskList({ workflowRunId, materialId, active = true, onActiveState }: {
+export function TaskList({ workflowRunId, materialId, active = true, onActiveState, filterStatuses }: {
     workflowRunId?: string | null;
     materialId?: string | null;
     active?: boolean;
     onActiveState?: (state: ActiveTaskState) => void;
+    filterStatuses?: string[];
 }) {
     const [tasks,        setTasks]        = useState<WorkerTask[]>([]);
     const [loading,      setLoading]      = useState(true);
@@ -603,9 +604,13 @@ export function TaskList({ workflowRunId, materialId, active = true, onActiveSta
     if (error)     return <div className="py-6 text-center text-sm text-red-400">{error}</div>;
     if (tasks.length === 0) return <div className="py-6 text-center text-sm text-gray-400">暂无任务数据</div>;
 
+    const visibleTasks = filterStatuses ? tasks.filter(t => filterStatuses.includes(t.status)) : tasks;
+
+    if (visibleTasks.length === 0) return <div className="py-6 text-center text-sm text-gray-400">该分类暂无任务</div>;
+
     return (
         <InternalTaskList
-            tasks={tasks}
+            tasks={visibleTasks}
             onPause={handlePause}
             onResume={handleResume}
             onCancel={handleCancel}
