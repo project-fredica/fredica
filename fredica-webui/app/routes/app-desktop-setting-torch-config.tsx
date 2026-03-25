@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, RefreshCw, Download, CheckCircle, Loader, AlertTriangle, ChevronDown, Search } from "lucide-react";
-import type { Route } from "./+types/app-desktop-setting.torch-config";
+import type { Route } from "./+types/app-desktop-setting-torch-config";
 import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, callBridgeOrNull, BridgeUnavailableError } from "~/util/bridge";
 import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
@@ -272,13 +272,14 @@ export default function TorchConfigPage() {
     const loadHistory = async (page: number) => {
         try {
             const params = new URLSearchParams({ task_type: "DOWNLOAD_TORCH", page: String(page), page_size: String(HISTORY_PAGE_SIZE) });
-            const { resp, data } = await apiFetch<{ ids: string[]; total: number }>(
+            const { resp, data } = await apiFetch(
                 `/api/v1/WorkerTaskWfIdListRoute?${params}`,
             );
             if (!resp.ok) { print_error({ reason: `加载历史下载任务失败: HTTP ${resp.status}` }); return; }
-            if (!data) return;
-            setHistoryIds(data.ids ?? []);
-            setHistoryTotal(data.total ?? 0);
+            const payload = data as { ids?: string[]; total?: number } | null;
+            if (!payload) return;
+            setHistoryIds(payload.ids ?? []);
+            setHistoryTotal(payload.total ?? 0);
         } catch (e) {
             print_error({ reason: "加载历史下载任务失败", err: e });
         }
@@ -393,13 +394,14 @@ export default function TorchConfigPage() {
                 : "";
             const params = new URLSearchParams();
             if (expectedVersion) params.set("expected_version", expectedVersion);
-            const { resp, data } = await apiFetch<{ already_ok?: boolean; installed_version?: string | null; error?: string }>(
+            const { resp, data } = await apiFetch(
                 `/api/v1/TorchInstallCheckRoute${params.size > 0 ? `?${params}` : ""}`,
             );
             if (!resp.ok) { print_error({ reason: `检测 torch 安装状态失败: HTTP ${resp.status}` }); return; }
-            if (!data) return;
-            if (data.error) { print_error({ reason: `检测 torch 安装状态失败: ${data.error}` }); return; }
-            setInstallCheckResult({ already_ok: data.already_ok ?? false, installed_version: data.installed_version ?? null });
+            const payload = data as { already_ok?: boolean; installed_version?: string | null; error?: string } | null;
+            if (!payload) return;
+            if (payload.error) { print_error({ reason: `检测 torch 安装状态失败: ${payload.error}` }); return; }
+            setInstallCheckResult({ already_ok: payload.already_ok ?? false, installed_version: payload.installed_version ?? null });
         } catch (e) {
             print_error({ reason: "检测 torch 安装状态异常", err: e });
         } finally {

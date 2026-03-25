@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { RefreshCw, ListChecks } from "lucide-react";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { TaskList } from "~/components/ui/WorkflowInfoPanel";
@@ -30,13 +31,21 @@ export default function TasksPage() {
                     <ListChecks className="w-4 h-4 text-gray-400" />
                     <h2 className="text-sm font-semibold text-gray-700">任务历史</h2>
                 </div>
-                <button
-                    onClick={() => setRefreshKey(k => k + 1)}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="刷新"
-                >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                    <Link
+                        to={`/tasks/status?material_id=${encodeURIComponent(material.id)}`}
+                        className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                    >
+                        前往任务中心查看详情 →
+                    </Link>
+                    <button
+                        onClick={() => setRefreshKey(k => k + 1)}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="刷新"
+                    >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                </div>
             </div>
 
             {/* Filter tabs */}

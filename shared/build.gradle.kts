@@ -18,6 +18,7 @@ dependencies {
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xannotation-default-target=param-property")
+        freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 
     @Suppress("DEPRECATION")

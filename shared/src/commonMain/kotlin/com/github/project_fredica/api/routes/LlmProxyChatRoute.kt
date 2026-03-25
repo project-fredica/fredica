@@ -1,7 +1,6 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
@@ -49,7 +48,7 @@ object LlmProxyChatRoute {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<LlmProxyChatRequest>().getOrElse { e ->
             logger.error("LlmProxyChatRoute: 请求体解析失败", e)
-            call.response.status(HttpStatusCode.BadRequest)
+            call.response.status(HttpStatusCode.Companion.BadRequest)
             return
         }
 
@@ -59,7 +58,7 @@ object LlmProxyChatRoute {
         val modelConfig = models.find { it.appModelId == req.appModelId }
         if (modelConfig == null) {
             logger.error("LlmProxyChatRoute: 未找到模型 appModelId=${req.appModelId}")
-            call.response.status(HttpStatusCode.NotFound)
+            call.response.status(HttpStatusCode.Companion.NotFound)
             return
         }
 
@@ -71,8 +70,8 @@ object LlmProxyChatRoute {
                 kv("model", modelConfig.model)
                 kv(
                     "messages", listOf(
-                    createJson { obj { kv("role", "user"); kv("content", req.message) } }
-                ).toJsonArray())
+                        createJson { obj { kv("role", "user"); kv("content", req.message) } }
+                    ).toJsonArray())
                 kv("stream", true)
             }
         }.toString()
@@ -109,7 +108,7 @@ object LlmProxyChatRoute {
             }
         } catch (e: Exception) {
             logger.error("LlmProxyChatRoute: 转发异常", e)
-            runCatching { call.response.status(HttpStatusCode.BadGateway) }
+            runCatching { call.response.status(HttpStatusCode.Companion.BadGateway) }
         }
     }
 }

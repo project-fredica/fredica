@@ -3,11 +3,9 @@ import { Loader, X, Trash2, Download, Clapperboard } from "lucide-react";
 import { Link } from "react-router";
 import { type MaterialVideo } from "./materialTypes";
 import { InfoTab } from "./InfoTab";
-import { WebenTab } from "./WebenTab";
-import { type WebenSource } from "~/util/weben";
 import { TaskList, type ActiveTaskState } from "~/components/ui/WorkflowInfoPanel";
 
-type ActionTab = 'workflow' | 'info' | 'weben';
+type ActionTab = 'workflow' | 'info';
 
 export interface WorkflowCtx {
     materialId: string;
@@ -18,15 +16,6 @@ export interface WorkflowCtx {
     onDeleteVideo: (id: string) => void;
 }
 
-export interface WebenCtx {
-    total: number;
-    sources: WebenSource[];
-    page: number;
-    loading: boolean;
-    onPageChange: (page: number) => void;
-    analyzeUrl: string;
-}
-
 export function MaterialActionModal({
     actionTarget,
     actionTab,
@@ -35,7 +24,6 @@ export function MaterialActionModal({
     workflow,
     onOpenAiConclusion,
     onOpenSubtitle,
-    weben,
 }: {
     actionTarget: MaterialVideo;
     actionTab: ActionTab;
@@ -44,7 +32,6 @@ export function MaterialActionModal({
     workflow: WorkflowCtx;
     onOpenAiConclusion: (bvid: string) => void;
     onOpenSubtitle: (bvid: string) => void;
-    weben: WebenCtx;
 }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -69,7 +56,7 @@ export function MaterialActionModal({
 
                 {/* Tabs */}
                 <div className="flex border-b border-gray-200 px-5 flex-shrink-0">
-                    {(['workflow', 'info', 'weben'] as const).map(tab => (
+                    {(['workflow', 'info'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => onTabChange(tab)}
@@ -78,7 +65,7 @@ export function MaterialActionModal({
                                 : 'border-transparent text-gray-500 hover:text-gray-700'
                             }`}
                         >
-                            {tab === 'workflow' ? '一键流程' : tab === 'info' ? '信息拉取' : '知识提取'}
+                            {tab === 'workflow' ? '一键流程' : '信息拉取'}
                         </button>
                     ))}
                 </div>
@@ -93,16 +80,6 @@ export function MaterialActionModal({
                             actionTarget={actionTarget}
                             onOpenModal={onOpenAiConclusion}
                             onOpenSubtitleModal={onOpenSubtitle}
-                        />
-                    )}
-                    {actionTab === 'weben' && (
-                        <WebenTab
-                            total={weben.total}
-                            sources={weben.sources}
-                            sourcePage={weben.page}
-                            sourceLoading={weben.loading}
-                            onPageChange={weben.onPageChange}
-                            analyzeUrl={weben.analyzeUrl}
                         />
                     )}
                 </div>
@@ -176,7 +153,7 @@ function WorkflowTabBody({ actionTarget, ctx, onClose }: {
             {/* 任务中心链接 */}
             <div className="pt-2 border-t border-gray-100">
                 <Link
-                    to={`/tasks?material_id=${encodeURIComponent(actionTarget.id)}`}
+                    to={`/tasks/status?material_id=${encodeURIComponent(actionTarget.id)}`}
                     className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
                     onClick={onClose}
                 >

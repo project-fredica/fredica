@@ -7,7 +7,6 @@ import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
 import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
-import { type WebenSource } from "~/util/weben";
 import {
     type MaterialVideo, type MaterialCategory, type MaterialTask,
     POLL_INTERVAL_MS, PAGE_SIZE,
@@ -15,8 +14,6 @@ import {
 import { MaterialCategoryPanel } from "~/components/material-library/MaterialCategoryPanel";
 import { MaterialVideoRow } from "~/components/material-library/MaterialVideoRow";
 import { MaterialActionModal } from "~/components/material-library/MaterialActionModal";
-
-const SOURCE_PAGE_SIZE = 5;
 
 export default function LibraryPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -39,13 +36,8 @@ export default function LibraryPage() {
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
     const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
-    const [actionTab, setActionTab] = useState<'workflow' | 'info' | 'weben'>('workflow');
+    const [actionTab, setActionTab] = useState<'workflow' | 'info'>('workflow');
     const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
-
-    const [webenSources, setWebenSources] = useState<WebenSource[]>([]);
-    const [webenSourcesTotal, setWebenSourcesTotal] = useState(0);
-    const [webenSourcePage, setWebenSourcePage] = useState(1);
-    const [webenSourcesLoading, setWebenSourcesLoading] = useState(false);
 
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
@@ -128,28 +120,6 @@ export default function LibraryPage() {
         }
     };
 
-    const fetchWebenSources = useCallback(async (materialId: string, pg: number = 1) => {
-        setWebenSourcesLoading(true);
-        try {
-            const params = new URLSearchParams();
-            params.set('material_id', materialId);
-            params.set('limit', String(SOURCE_PAGE_SIZE));
-            params.set('offset', String((pg - 1) * SOURCE_PAGE_SIZE));
-            const { data } = await apiFetch(`/api/v1/WebenSourceListRoute?${params}`, { method: 'GET' }, { silent: true });
-            const d = data as { items: WebenSource[]; total: number } | null;
-            if (d?.items) { setWebenSources(d.items); setWebenSourcesTotal(d.total); }
-        } catch { /* silent */ } finally {
-            setWebenSourcesLoading(false);
-        }
-    }, [apiFetch]);
-
-    useEffect(() => {
-        if (!actionTarget) return;
-        fetchWebenSources(actionTarget.id, webenSourcePage);
-        const id = setInterval(() => fetchWebenSources(actionTarget.id, webenSourcePage), 5_000);
-        return () => clearInterval(id);
-    }, [actionTarget, fetchWebenSources, webenSourcePage]);
-
     // ── Handlers ─────────────────────────────────────────────────────────────
 
     const handleDeleteVideo = async (id: string) => {
@@ -188,18 +158,12 @@ export default function LibraryPage() {
     const handleOpenAction = (video: MaterialVideo) => {
         setActionTarget(video);
         setRunningTaskType(null);
-        setWebenSources([]);
-        setWebenSourcesTotal(0);
-        setWebenSourcePage(1);
     };
 
     const handleCloseAction = () => {
         setActionTarget(null);
         setActionTab('workflow');
         setRunningTaskType(null);
-        setWebenSources([]);
-        setWebenSourcesTotal(0);
-        setWebenSourcePage(1);
     };
 
     const handleRunTask = async (taskType: string) => {
@@ -224,10 +188,6 @@ export default function LibraryPage() {
             const { resp } = await startMaterialWorkflow(apiFetch, actionTarget.id, template);
             if (!resp.ok) reportHttpError('启动工作流失败', resp);
         } finally { setRunningTaskType(null); }
-    };
-
-    const buildAnalyzeUrl = (video: MaterialVideo): string => {
-        return `/material/${video.id}/summary`;
     };
 
     // ── Filtering & pagination ────────────────────────────────────────────────
@@ -275,20 +235,12 @@ export default function LibraryPage() {
                         materialId: actionTarget.id,
                         runningTaskType,
                         deletingVideoIds,
-                        onStartWorkflow: handleStartWorkflow,
+                        onStartWorkflow: (type) => handleStartWorkflow(type as WorkflowTemplate),
                         onRunTask: handleRunTask,
                         onDeleteVideo: handleDeleteVideo,
                     }}
                     onOpenAiConclusion={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })}
                     onOpenSubtitle={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })}
-                    weben={{
-                        total: webenSourcesTotal,
-                        sources: webenSources,
-                        page: webenSourcePage,
-                        loading: webenSourcesLoading,
-                        onPageChange: setWebenSourcePage,
-                        analyzeUrl: buildAnalyzeUrl(actionTarget),
-                    }}
                 />
             )}
 

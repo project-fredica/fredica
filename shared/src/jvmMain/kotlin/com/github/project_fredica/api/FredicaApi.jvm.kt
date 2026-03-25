@@ -143,6 +143,8 @@ object FredicaApiJvmService {
             WebenSegmentDb(database).also   { it.initialize(); WebenSegmentService.initialize(it) }
             WebenFlashcardDb(database).also { it.initialize(); WebenFlashcardService.initialize(it) }
             WebenNoteDb(database).also      { it.initialize(); WebenNoteService.initialize(it) }
+            // Prompt 脚本模板
+            PromptTemplateDb(database).also { it.initialize(); PromptTemplateService.initialize(it) }
 
             logger.debug("All DB services initialized")
         }

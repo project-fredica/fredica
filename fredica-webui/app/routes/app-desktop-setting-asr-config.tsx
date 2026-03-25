@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Play, Download, CheckCircle, XCircle, Loader, AlertTriangle, Cpu } from "lucide-react";
-import type { Route } from "./+types/app-desktop-setting.asr-config";
+import type { Route } from "./+types/app-desktop-setting-asr-config";
 import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
 

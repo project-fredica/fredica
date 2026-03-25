@@ -248,8 +248,9 @@ function RelationsTab({ conceptId, relations, onRelationDeleted, onRelationAdded
         peerIds.forEach(async (id) => {
             try {
                 const { data } = await apiFetch(`/api/v1/WebenConceptGetRoute?id=${id}`, { method: 'GET' }, { silent: true });
-                if (data?.concept?.canonical_name) {
-                    setPeerNames(prev => ({ ...prev, [id]: data.concept.canonical_name }));
+                const payload = data as { concept?: { canonical_name?: string } } | null;
+                if (payload?.concept?.canonical_name) {
+                    setPeerNames(prev => ({ ...prev, [id]: payload.concept!.canonical_name! }));
                 }
             } catch { /* silent */ }
         });
@@ -539,7 +540,7 @@ function NotesTab({ conceptId, initialNotes }: { conceptId: string; initialNotes
     const [notes, setNotes] = useState<WebenNote[]>(initialNotes);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
-    const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+    const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const saveNote = useCallback(async (content: string) => {
         if (!content.trim()) return;
@@ -670,9 +671,10 @@ export default function WebenConceptDetailPage() {
         setLoading(true);
         try {
             const { data } = await apiFetch(`/api/v1/WebenConceptGetRoute?id=${id}`, { method: 'GET' }, { silent: true });
-            if (data?.concept) {
-                setDetail(data as WebenConceptDetailResponse);
-                setRelations(data.relations ?? []);
+            const payload = data as WebenConceptDetailResponse | null;
+            if (payload?.concept) {
+                setDetail(payload);
+                setRelations(payload.relations ?? []);
             }
         } catch { /* silent */ } finally {
             setLoading(false);
