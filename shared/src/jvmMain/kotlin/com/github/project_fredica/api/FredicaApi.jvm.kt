@@ -369,6 +369,16 @@ object FredicaApiJvmService {
                 MaterialVideoStreamRoute.handle(this)
             }
 
+            // Prompt 脚本沙箱执行（GraalJS，依赖 jvmMain，单独注册）
+            post("/api/v1/PromptTemplateRunRoute") {
+                if (!checkAuth()) return@post
+                PromptTemplateRunRoute.handle(this)
+            }
+            post("/api/v1/PromptTemplatePreviewRoute") {
+                if (!checkAuth()) return@post
+                PromptTemplatePreviewRoute.handle(this)
+            }
+
             for (route in allRoutes) {
                 when (route.mode) {
                     FredicaApi.Route.Mode.Get -> get("/api/v1/${route.name}") {

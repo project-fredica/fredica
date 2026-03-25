@@ -98,6 +98,9 @@ kotlin {
             implementation(libs.sqlite.jdbc)
             //noinspection NewerVersionAvailable,UseTomlInstead
             implementation("aws.smithy.kotlin:http-client-engine-okhttp-jvm:1.5.24")
+            // GraalJS 沙箱执行
+            implementation("org.graalvm.polyglot:polyglot:23.1.4")
+            implementation("org.graalvm.polyglot:js-community:23.1.4")
         }
     }
 }

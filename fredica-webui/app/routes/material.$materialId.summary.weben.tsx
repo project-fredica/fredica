@@ -18,7 +18,6 @@ import {
     validateWebenResult,
     type WebenValidationIssue,
 } from "~/util/materialWebenGuards";
-import { buildPrompt } from "~/util/prompt-builder/buildPrompt";
 import { createVariableResolver } from "~/util/prompt-builder/createVariableResolver";
 import { VariableResolverCache } from "~/util/prompt-builder/VariableResolverCache";
 import type { BuildPromptResult } from "~/util/prompt-builder/types";
@@ -30,6 +29,7 @@ import {
     fetchLlmModels,
     getWebenPromptVariables,
     importWebenResult,
+    previewPromptScript,
     type LlmModelMeta,
     type MaterialSubtitleItem,
     type MaterialWebenLlmResult,
@@ -395,8 +395,23 @@ export default function SummaryWebenPage() {
     const handlePreview = async () => {
         setPreviewLoading(true);
         try {
-            const result = await buildPrompt(template, variableResolver, { mode: "preview" });
-            setPreviewResult(result);
+            // 调用后端 GraalJS 沙箱执行脚本，返回解析后的 Prompt 文本
+            const { promptText, error } = await previewPromptScript({
+                scriptCode: template,
+                materialId: material.id,
+                connection: {
+                    domain: appConfig.webserver_domain,
+                    port: appConfig.webserver_port,
+                    schema: appConfig.webserver_schema,
+                    appAuthToken: appConfig.webserver_auth_token,
+                },
+            });
+            if (error) {
+                setPreviewResult({ text: `脚本执行失败：${error}`, charCount: 0, blocked: true, warnings: [] });
+            } else {
+                const text = promptText ?? "";
+                setPreviewResult({ text, charCount: text.length, blocked: false, warnings: [] });
+            }
             setStage("previewed");
         } catch (error) {
             print_error({ reason: "构建 Prompt 预览失败", err: error });
@@ -408,13 +423,26 @@ export default function SummaryWebenPage() {
     const handleGenerate = async () => {
         setPreviewLoading(true);
         try {
-            const prompt = await buildPrompt(template, variableResolver, { mode: "submit" });
-            setPreviewResult(prompt);
-            if (prompt.blocked) {
-                setStage("previewed");
+            // Step 1: 调用后端 GraalJS 沙箱执行脚本，获取解析后的 Prompt 文本
+            const { promptText, error: scriptError } = await previewPromptScript({
+                scriptCode: template,
+                materialId: material.id,
+                connection: {
+                    domain: appConfig.webserver_domain,
+                    port: appConfig.webserver_port,
+                    schema: appConfig.webserver_schema,
+                    appAuthToken: appConfig.webserver_auth_token,
+                },
+            });
+
+            if (scriptError || !promptText?.trim()) {
+                setStreamError(scriptError ?? "脚本未返回 Prompt 文本");
+                setStage("parse_error");
                 return;
             }
 
+            const resolvedText = promptText;
+            setPreviewResult({ text: resolvedText, charCount: resolvedText.length, blocked: false, warnings: [] });
             setStage("generating");
             setStreamText("");
             setStreamError(null);
@@ -422,9 +450,10 @@ export default function SummaryWebenPage() {
             setReviewedResult(null);
             setParseError(null);
 
+            // Step 2: 将 Prompt 文本发送给 LLM，流式接收输出
             const fullText = await streamLlmRouterText({
                 appModelId: selectedModelId,
-                message: prompt.text,
+                message: resolvedText,
                 connection: {
                     domain: appConfig.webserver_domain,
                     port: appConfig.webserver_port,

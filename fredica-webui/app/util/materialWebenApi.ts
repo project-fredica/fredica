@@ -5,6 +5,7 @@ import {
     normalizeSubtitleItems,
 } from "./materialWebenGuards";
 import type { VariableMeta } from "./prompt-builder/types";
+import { buildAuthHeaders, DEFAULT_SERVER_PORT } from "~/util/app_fetch";
 
 export interface ApiFetchFn {
     (
@@ -163,4 +164,111 @@ export function getWebenPromptVariables(): VariableMeta[] {
             required: true,
         },
     ];
+}
+
+// ── GraalJS 沙箱执行 ──────────────────────────────────────────────────────────
+
+export interface PromptSandboxLog {
+    level: string;
+    args: string;
+    ts: number;
+}
+
+export interface PromptSandboxResult {
+    prompt_text: string | null;
+    error: string | null;
+    error_type: string | null;
+    logs: PromptSandboxLog[];
+}
+
+/**
+ * 调用后端 PromptTemplateRunRoute，在 GraalJS 沙箱执行脚本并返回结果 JSON。
+ * 适合非流式场景（一次性获取执行结果）。
+ */
+export async function runPromptScript(
+    apiFetch: ApiFetchFn,
+    params: { script_code: string; material_id: string },
+): Promise<PromptSandboxResult> {
+    const { resp, data } = await apiFetch(
+        "/api/v1/PromptTemplateRunRoute",
+        { method: "POST", body: JSON.stringify(params) },
+        { silent: true, timeout: 15_000 },
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return data as PromptSandboxResult;
+}
+
+/**
+ * 调用后端 PromptTemplatePreviewRoute（SSE），执行脚本并流式返回日志与最终 Prompt 文本。
+ * 使用原始 fetch 直连 Ktor 服务，与 streamLlmRouterText 模式一致。
+ */
+export async function previewPromptScript(params: {
+    scriptCode: string;
+    materialId: string;
+    connection: {
+        domain?: string | null;
+        port?: string | null;
+        schema?: string | null;
+        appAuthToken?: string | null;
+    };
+    onLog?: (log: PromptSandboxLog) => void;
+}): Promise<{ promptText: string | null; error: string | null; errorType: string | null; logs: PromptSandboxLog[] }> {
+    const { connection } = params;
+    const schema = connection.schema ?? "http";
+    const domain = connection.domain ?? "localhost";
+    const port = connection.port ?? DEFAULT_SERVER_PORT;
+
+    const resp = await fetch(`${schema}://${domain}:${port}/api/v1/PromptTemplatePreviewRoute`, {
+        method: "POST",
+        headers: {
+            ...buildAuthHeaders(connection.appAuthToken),
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ script_code: params.scriptCode, material_id: params.materialId }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("无法读取响应流");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let promptText: string | null = null;
+    let error: string | null = null;
+    let errorType: string | null = null;
+    const logs: PromptSandboxLog[] = [];
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (value) buffer += decoder.decode(value, { stream: !done });
+            const lines = buffer.split("\n");
+            buffer = done ? "" : (lines.pop() ?? "");
+            for (const line of lines) {
+                const trimmed = line.replace(/\r$/, "").trim();
+                if (!trimmed.startsWith("data:")) continue;
+                const dataStr = trimmed.slice(5).trim();
+                try {
+                    const event = JSON.parse(dataStr) as Record<string, unknown>;
+                    if (event.type === "log") {
+                        const log: PromptSandboxLog = { level: String(event.level ?? "log"), args: String(event.args ?? ""), ts: Number(event.ts ?? 0) };
+                        logs.push(log);
+                        params.onLog?.(log);
+                    } else if (event.type === "result") {
+                        promptText = String(event.prompt_text ?? "");
+                    } else if (event.type === "error") {
+                        error = String(event.error ?? "");
+                        errorType = String(event.error_type ?? "unknown");
+                    }
+                } catch {
+                    // ignore malformed events
+                }
+            }
+            if (done) break;
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return { promptText, error, errorType, logs };
 }
