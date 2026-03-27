@@ -96,22 +96,45 @@ function sanitizeForJsonParse(raw: string): string {
 // ─── json_parse ───────────────────────────────────────────────────────────────
 
 /**
- * 安全的 `JSON.parse` 封装，返回 `JsonValue | null`。
+ * 安全的 `JSON.parse` 封装。
  *
  * 与直接调用 `JSON.parse` 相比，额外提供：
  * 1. **U+2028/U+2029 净化**：解析前替换行分隔符转义，避免旧引擎语法错误。
- * 2. **异常转 null**：解析失败时抛出异常。
- * 3. **类型安全**：返回值类型为 `JsonValue`，无需额外断言。
+ * 2. **抛异常而非返回 null**：解析失败时 throw，调用方按需 try/catch。
+ * 3. **类型安全（无 typeCheck 时）**：返回值类型为 `JsonValue`，无需额外断言。
+ * 4. **运行时类型收窄（有 typeCheck 时）**：typeCheck 不通过则 throw，返回 `R`。
+ *    `R` 无 `extends JsonValue` 约束，可直接传入 domain 接口的类型守卫。
+ *
+ * ## 使用模式
+ *
+ * ```ts
+ * // 无 typeCheck → 返回 JsonValue，无需强制转换
+ * const v: JsonValue = json_parse(raw);
+ *
+ * // 有 typeCheck → 返回 R（domain 类型），无需强制转换
+ * const cfg = json_parse(raw, isAppConfig); // AppConfig
+ * ```
  *
  * @param raw 待解析的 JSON 字符串
- * @returns 解析成功时返回 `JsonValue`，失败时抛出异常。
+ * @returns 解析成功时返回 `R`（有 typeCheck）或 `JsonValue`（无 typeCheck）
  */
-export function json_parse<R extends JsonValue = JsonValue>(
+export function json_parse<R>(raw: string, typeCheck: (data: unknown) => data is R): R;
+export function json_parse<R = JsonValue>(raw: string): R;
+export function json_parse<R>(
     raw: string,
+    typeCheck?: (data: unknown) => data is R,
 ): R {
     const data = JSON.parse(sanitizeForJsonParse(raw));
     if (!isJsonValue(data)) {
         throw new Error(`why JSON.parse not isJsonValue ? raw is ${raw}`);
+    }
+    if (typeof typeCheck === "undefined") {
+        return data as R;
+    }
+    if (!typeCheck(data)) {
+        throw new Error(
+            `typeCheck failed after json_parse success , data is ${data} , raw is ${raw}`,
+        );
     }
     return data as R;
 }

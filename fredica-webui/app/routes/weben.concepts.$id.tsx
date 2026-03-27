@@ -261,12 +261,12 @@ function RelationsTab({ conceptId, relations, onRelationDeleted, onRelationAdded
         if (!newObjectName.trim() || selectedObject) { setSearchResults([]); return; }
         const id = setTimeout(async () => {
             try {
-                const { data } = await apiFetch(
+                const { data } = await apiFetch<WebenConcept[]>(
                     `/api/v1/WebenConceptListRoute?limit=6&offset=0`,
                     { method: 'GET' }, { silent: true }
                 );
                 if (Array.isArray(data)) {
-                    const filtered = (data as WebenConcept[])
+                    const filtered = data
                         .filter(c => c.id !== conceptId && c.canonical_name.includes(newObjectName))
                         .slice(0, 5);
                     setSearchResults(filtered);
@@ -290,7 +290,7 @@ function RelationsTab({ conceptId, relations, onRelationDeleted, onRelationAdded
         if (!selectedObject) return;
         setAdding(true);
         try {
-            const { data } = await apiFetch('/api/v1/WebenRelationCreateRoute', {
+            const { data } = await apiFetch<WebenRelation>('/api/v1/WebenRelationCreateRoute', {
                 method: 'POST',
                 body: JSON.stringify({
                     subject_id: conceptId,
@@ -300,7 +300,7 @@ function RelationsTab({ conceptId, relations, onRelationDeleted, onRelationAdded
                 }),
             }, { silent: true });
             if (data) {
-                onRelationAdded(data as WebenRelation);
+                onRelationAdded(data);
                 setShowAddForm(false);
                 setNewObjectName('');
                 setSelectedObject(null);
@@ -460,8 +460,8 @@ function FlashcardsTab({ conceptId, flashcardCount }: { conceptId: string; flash
     const [adding, setAdding] = useState(false);
 
     useEffect(() => {
-        apiFetch(`/api/v1/WebenFlashcardListRoute?concept_id=${conceptId}`, { method: 'GET' }, { silent: true })
-            .then(({ data }) => { if (Array.isArray(data)) setCards(data as WebenFlashcard[]); })
+        apiFetch<WebenFlashcard[]>(`/api/v1/WebenFlashcardListRoute?concept_id=${conceptId}`, { method: 'GET' }, { silent: true })
+            .then(({ data }) => { if (Array.isArray(data)) setCards(data); })
             .catch(() => {})
             .finally(() => setLoading(false));
     }, [conceptId]);
@@ -470,12 +470,12 @@ function FlashcardsTab({ conceptId, flashcardCount }: { conceptId: string; flash
         if (!newQ.trim() || !newA.trim()) return;
         setAdding(true);
         try {
-            const { data } = await apiFetch('/api/v1/WebenFlashcardCreateRoute', {
+            const { data } = await apiFetch<WebenFlashcard>('/api/v1/WebenFlashcardCreateRoute', {
                 method: 'POST',
                 body: JSON.stringify({ concept_id: conceptId, question: newQ, answer: newA, card_type: newType }),
             }, { silent: true });
             if (data) {
-                setCards(prev => [data as WebenFlashcard, ...prev]);
+                setCards(prev => [data, ...prev]);
                 setShowAddForm(false);
                 setNewQ(''); setNewA('');
             }
@@ -546,12 +546,12 @@ function NotesTab({ conceptId, initialNotes }: { conceptId: string; initialNotes
         if (!content.trim()) return;
         setSaving(true);
         try {
-            const { data } = await apiFetch('/api/v1/WebenNoteSaveRoute', {
+            const { data } = await apiFetch<WebenNote>('/api/v1/WebenNoteSaveRoute', {
                 method: 'POST',
                 body: JSON.stringify({ concept_id: conceptId, content }),
             }, { silent: true });
             if (data) {
-                setNotes(prev => [data as WebenNote, ...prev]);
+                setNotes(prev => [data, ...prev]);
                 setDraft('');
             }
         } catch { /* silent */ } finally {

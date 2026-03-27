@@ -58,11 +58,11 @@ function SubtitleBodyPanel({ metaItem, isUpdate, currentTime, onSeek }: {
 
         setLoading(true);
         setResult(null);
-        apiFetch("/api/v1/BilibiliVideoSubtitleBodyRoute", {
+        apiFetch<SubtitleBodyResult>("/api/v1/BilibiliVideoSubtitleBodyRoute", {
             method: "POST",
             body: JSON.stringify({ subtitle_url: metaItem.subtitle_url, is_update: isUpdate }),
         }, { timeout: 5 * 60 * 1000, signal: abort.signal })
-            .then(({ data }) => { if (!cancelled) setResult(data as SubtitleBodyResult); })
+            .then(({ data }) => { if (!cancelled) setResult(data); })
             .catch((err) => {
                 if (!cancelled && err?.name !== "AbortError")
                     setResult({ code: -1, message: "请求失败", body: null });
@@ -122,15 +122,14 @@ export function BilibiliSubtitlePanel({
         setMetaLoading(true);
         setMetaResult(null);
         setSelectedLan(null);
-        apiFetch("/api/v1/BilibiliVideoSubtitleRoute", {
+        apiFetch<SubtitleMetaResult>("/api/v1/BilibiliVideoSubtitleRoute", {
             method: "POST",
             body: JSON.stringify({ bvid, page_index: pageIndex, is_update: refreshCount > 0 }),
         }, { timeout: 5 * 60 * 1000 })
             .then(({ data }) => {
                 if (!cancelled) {
-                    const r = data as SubtitleMetaResult;
-                    setMetaResult(r);
-                    if (r.subtitles && r.subtitles.length > 0) setSelectedLan(r.subtitles[0].lan);
+                    setMetaResult(data);
+                    if (data && data.subtitles && data.subtitles.length > 0) setSelectedLan(data.subtitles[0].lan);
                 }
             })
             .catch(() => {

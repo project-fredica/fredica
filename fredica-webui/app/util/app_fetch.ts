@@ -113,7 +113,7 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * `apiFetch` 返回 `{ resp, data }`，**不会**因 HTTP 非 2xx 抛错，调用方需检查 `resp.ok`。
  * 仅在网络故障、超时、请求被中止时 throw，建议在调用处用 try/catch 处理。
  *
- * 请求体用 `JSON.stringify` 序列化；响应体已通过 `parseJsonBody`（内部调用 `json_parse`）解析。
+ * 请求体用 `JSON.stringify` 序列化；响应体由内部的 `json_parse` 解析，`data` 类型由泛型参数决定。
  *
  * ```tsx
  * const { apiFetch } = useAppFetch();
@@ -187,7 +187,7 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * - 声明式模式中，`init` / `parseJson` / `timeout` 不在 deps 内，更改这些参数
  *   不会自动重新请求；若需动态变化，请改用命令式 `apiFetch`。
  */
-export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
+export function useAppFetch<J = JsonValue>(param?: {
     /** 声明式自动请求的路径（相对于 API host）。不传则仅使用命令式 apiFetch。 */
     appPath?: string;
     /** 声明式请求的 fetch init（signal 由内部管理，勿传）。 */
@@ -198,6 +198,7 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
     allowNot2XX?: boolean;
     /** 请求超时毫秒（默认 10000；0 表示不超时）。 */
     timeout?: number;
+    typeCheck?: (data: unknown) => data is J;
 }) {
     const { allowNot2XX = false } = param ?? {};
 
@@ -234,6 +235,7 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
             init,
             parseJson = true,
             timeout = 900_000,
+            typeCheck: jsonTypeCheck,
         } = param ?? {};
 
         if (!url) return;
@@ -266,7 +268,10 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    setData(json_parse<J>(await resp.text()));
+                    setData(jsonTypeCheck
+                        ? json_parse(await resp.text(), jsonTypeCheck)
+                        : json_parse<J>(await resp.text())
+                    );
                 }
                 setError(null);
             } catch (err) {
@@ -297,7 +302,7 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
     // useCallback 保证引用稳定，host / authToken 变化时才重建，
     // 可安全放入其他 hook 的 deps 数组。
     const apiFetch = useCallback(
-        async <J2 extends JsonValue = JsonValue>(
+        async <J2 = JsonValue>(
             path: string,
             init?: RequestInit,
             options?: {
@@ -305,6 +310,7 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
                 timeout?: number;
                 silent?: boolean;
                 signal?: AbortSignal;
+                typeCheck?: (data: unknown) => data is J2;
             },
         ): Promise<{ resp: Response; data: J2 | null }> => {
             const {
@@ -312,6 +318,7 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
                 timeout = 900_000,
                 silent = false,
                 signal: externalSignal,
+                typeCheck,
             } = options ?? {};
             // 等待 storage 加载完成，确保 authToken 已从 localStorage 恢复
             await new Promise<void>((resolve) => {
@@ -345,7 +352,12 @@ export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    return { resp, data: json_parse<J2>(await resp.text()) };
+                    return {
+                        resp,
+                        data: typeCheck
+                            ? json_parse(await resp.text(), typeCheck)
+                            : json_parse<J2>(await resp.text()),
+                    };
                 }
                 return { resp, data: null };
             } catch (err) {

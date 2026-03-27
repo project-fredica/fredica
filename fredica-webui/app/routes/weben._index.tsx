@@ -103,21 +103,21 @@ export default function WebenIndexPage() {
 
     const refresh = useCallback(async () => {
         const [conceptsRes, sourcesRes, reviewRes] = await Promise.allSettled([
-            apiFetch('/api/v1/WebenConceptListRoute?limit=10&offset=0', { method: 'GET' }, { silent: true }),
-            apiFetch('/api/v1/WebenSourceListRoute',                    { method: 'GET' }, { silent: true }),
-            apiFetch('/api/v1/WebenReviewQueueRoute?limit=200',         { method: 'GET' }, { silent: true }),
+            apiFetch<WebenConcept[]>('/api/v1/WebenConceptListRoute?limit=10&offset=0', { method: 'GET' }, { silent: true }),
+            apiFetch<WebenSource[]>('/api/v1/WebenSourceListRoute',                    { method: 'GET' }, { silent: true }),
+            apiFetch<WebenReviewQueueResponse>('/api/v1/WebenReviewQueueRoute?limit=200',         { method: 'GET' }, { silent: true }),
         ]);
 
         if (conceptsRes.status === 'fulfilled') {
             const data = conceptsRes.value.data;
-            if (Array.isArray(data)) setConcepts(data as WebenConcept[]);
+            if (Array.isArray(data)) setConcepts(data);
         }
         if (sourcesRes.status === 'fulfilled') {
             const data = sourcesRes.value.data;
-            if (Array.isArray(data)) setSources((data as WebenSource[]).slice(0, 8));
+            if (Array.isArray(data)) setSources(data.slice(0, 8));
         }
         if (reviewRes.status === 'fulfilled') {
-            const data = reviewRes.value.data as WebenReviewQueueResponse | null;
+            const data = reviewRes.value.data;
             if (data?.flashcards) setDueCount(data.flashcards.length);
         }
     }, [apiFetch]);

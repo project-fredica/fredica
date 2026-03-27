@@ -85,8 +85,8 @@ export default function TasksStatusPage() {
     // ── Fetch categories + material titles once ───────────────────────────────
 
     useEffect(() => {
-        apiFetch('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true })
-            .then(({ data }) => { if (Array.isArray(data)) setCategories(data as MaterialCategory[]); })
+        apiFetch<MaterialCategory[]>('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true })
+            .then(({ data }) => { if (Array.isArray(data)) setCategories(data); })
             .catch(() => {});
 
         apiFetch('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { silent: true })
@@ -112,12 +112,12 @@ export default function TasksStatusPage() {
             params.set('page_size', String(PAGE_SIZE));
             params.set('sort',      sortDesc ? 'desc' : 'asc');
 
-            const { data } = await apiFetch(
+            const { data } = await apiFetch<TaskListResult>(
                 `/api/v1/WorkerTaskListRoute?${params.toString()}`,
                 { method: 'GET' },
                 { silent: true },
             );
-            const result = data as TaskListResult;
+            const result = data;
             if (result && Array.isArray(result.items)) {
                 setTasks(result.items);
                 setTotal(result.total);

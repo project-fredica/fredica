@@ -281,13 +281,13 @@ export function BilibiliVideoList(param: {
 
     const fetchLibraryMapData = async (): Promise<Map<string, LibraryEntry>> => {
         try {
-            const { resp, data } = await apiFetch('/api/v1/MaterialListRoute', {
+            const { resp, data } = await apiFetch<MaterialVideoItem[]>('/api/v1/MaterialListRoute', {
                 method: 'POST',
                 body: '{}',
             });
             if (!resp.ok) { reportHttpError('获取素材库状态失败', resp); return new Map(); }
             const map = new Map<string, LibraryEntry>();
-            for (const v of data as MaterialVideoItem[]) {
+            for (const v of data ?? []) {
                 if (v.source_type === 'bilibili') {
                     // Key by DB ID so each page of a multi-P video has its own entry
                     map.set(v.id, { id: v.id, categoryIds: v.category_ids ?? [] });

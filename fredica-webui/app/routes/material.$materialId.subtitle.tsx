@@ -147,12 +147,12 @@ export default function SubtitlePage() {
         let cancelled = false;
         setSubtitlesLoading(true);
         setSubtitles([]);
-        apiFetch(
+        apiFetch<SubtitleApiItem[]>(
             `/api/v1/MaterialSubtitleListRoute?material_id=${encodeURIComponent(material.id)}`,
             { method: 'GET' },
             { silent: true },
         )
-            .then(({ data }) => { if (!cancelled && Array.isArray(data)) setSubtitles(data as SubtitleApiItem[]); })
+            .then(({ data }) => { if (!cancelled && Array.isArray(data)) setSubtitles(data); })
             .catch(() => { /* ignore */ })
             .finally(() => { if (!cancelled) setSubtitlesLoading(false); });
         return () => { cancelled = true; };

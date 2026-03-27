@@ -49,8 +49,8 @@ function MaterialSwitcherDrawer({ currentId, onClose }: { currentId: string; onC
 
     useEffect(() => {
         let cancelled = false;
-        apiFetch('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { silent: true })
-            .then(({ data }) => { if (!cancelled && Array.isArray(data)) setMaterials(data as MaterialVideo[]); })
+        apiFetch<MaterialVideo[]>('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { silent: true })
+            .then(({ data }) => { if (!cancelled && Array.isArray(data)) setMaterials(data); })
             .catch(() => { /* ignore */ })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
@@ -229,11 +229,11 @@ export default function MaterialWorkspaceLayout() {
     const loadMaterial = async () => {
         if (!materialId) return;
         try {
-            const { data } = await apiFetch(
+            const { data } = await apiFetch<MaterialVideo>(
                 `/api/v1/MaterialGetRoute?id=${encodeURIComponent(materialId)}`,
                 { method: 'GET' }, { silent: true },
             );
-            if (data) setMaterial(data as MaterialVideo);
+            if (data) setMaterial(data);
         } catch { /* ignore */ }
     };
 

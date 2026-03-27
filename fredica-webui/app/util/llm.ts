@@ -63,7 +63,7 @@ async function* sseChunks(resp: Response): AsyncGenerator<string> {
                 } else {
                     continue;
                 }
-                const dataObj = json_parse(data);
+                const dataObj = json_parse(data) as unknown as { choices?: { delta?: { content?: string } }[] };
                 if (dataObj === null) continue;
                 try {
                     const content = dataObj?.choices?.[0]?.delta?.content;
@@ -130,9 +130,9 @@ export async function* llmChat(params: LlmChatParams): AsyncGenerator<string> {
                 message: params.message,
             }),
         );
-        const parsed = json_parse(raw);
-        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as Record<string, unknown>).error) {
-            throw new Error(String((parsed as Record<string, unknown>).error));
+        const parsed = json_parse(raw) as unknown as { error?: string; content?: string };
+        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && parsed.error) {
+            throw new Error(String(parsed.error));
         }
         const content = parsed?.content ?? "";
         if (content) yield content;

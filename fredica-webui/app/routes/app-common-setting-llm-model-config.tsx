@@ -158,7 +158,7 @@ export default function Component({ }: Route.ComponentProps) {
         setQueryResult(null);
         setQueryLoading(true);
         try {
-            const { data } = await apiFetch("/api/v1/LlmModelProbeRoute", {
+            const { data } = await apiFetch<LlmModelProbeResponse>("/api/v1/LlmModelProbeRoute", {
                 method: "POST",
                 body: JSON.stringify({
                     provider_type: m.provider_type ?? "OPENAI_COMPATIBLE",
@@ -167,7 +167,11 @@ export default function Component({ }: Route.ComponentProps) {
                     model: m.model,
                 }),
             }, { silent: true });
-            const probe = data as LlmModelProbeResponse;
+            const probe = data;
+            if (!probe) {
+                setQueryError("探测请求未返回数据");
+                return;
+            }
             if (probe?.error) {
                 setQueryError(probe.error);
                 return;

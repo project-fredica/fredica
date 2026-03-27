@@ -64,7 +64,7 @@ export default function MultiPartPage() {
         setImportingState('idle');
 
         try {
-            const { resp, data } = await apiFetch('/api/v1/BilibiliVideoGetPagesRoute', {
+            const { resp, data } = await apiFetch<PageInfo[]>('/api/v1/BilibiliVideoGetPagesRoute', {
                 method: 'POST',
                 body: JSON.stringify({ bvid }),
             });
@@ -72,7 +72,7 @@ export default function MultiPartPage() {
                 reportHttpError('获取分P失败', resp);
                 return;
             }
-            const pageList = data as PageInfo[];
+            const pageList = data ?? [];
             setPages(pageList.map(p => ({ ...p, selected: true })));
         } catch (err) {
             print_error({ reason: '网络错误，请检查服务器连接', err });

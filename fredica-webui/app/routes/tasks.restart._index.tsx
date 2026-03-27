@@ -92,12 +92,12 @@ export default function TasksRestartPage() {
         try {
             const params = new URLSearchParams();
             if (dispositionFilter) params.set('disposition', dispositionFilter);
-            const { data } = await apiFetch(
+            const { data } = await apiFetch<RestartTaskLogListResult>(
                 `/api/v1/RestartTaskLogListRoute?${params.toString()}`,
                 { method: 'GET' },
                 { silent: true },
             );
-            const result = data as RestartTaskLogListResult;
+            const result = data;
             if (result) {
                 setItems(result.items ?? []);
                 setPendingReviewCount(result.pending_review_count ?? 0);

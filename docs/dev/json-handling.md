@@ -238,17 +238,27 @@ if (res.error) { print_error({ reason: res.error }); return; }
 
 ### 3.4 API 响应解析
 
-`apiFetch` 返回 `Response`，用 `parseJsonBody` 解析（内部调用 `json_parse`）：
+`apiFetch<T>` 在内部自动调用 `json_parse<T>` 解析响应体，`data` 的类型由泛型参数决定：
 
 ```ts
-import { parseJsonBody } from "~/util/app_fetch";
-
-const { resp } = await apiFetch("/api/v1/SomeRoute", {
+// 普通调用：通过泛型参数获得类型安全的 data
+const { resp, data } = await apiFetch<{ id: string }>("/api/v1/SomeRoute", {
     method: "POST",
-    body: JSON.stringify({ key: value }),   // 请求体用 JSON.stringify 序列化
+    body: JSON.stringify({ key: value }),
 });
 if (!resp.ok) { reportHttpError("操作失败", resp); return; }
-const data = await parseJsonBody<{ id: string }>(resp);
+// data: { id: string } | null
+```
+
+需要运行时类型验证时，可传入 `typeCheck` 类型守卫；验证失败时 `json_parse` 内部抛出异常：
+
+```ts
+import { isJsonObject } from "~/util/json";
+
+const { data } = await apiFetch("/api/v1/SomeRoute", { method: "POST" }, {
+    typeCheck: isJsonObject,
+});
+// data: JsonObject | null（运行时已验证为 JSON 对象）
 ```
 
 ### 3.5 从 LLM 输出提取 JSON — `parseJsonFromText`
@@ -281,6 +291,7 @@ body: JSON.stringify({ variant, download_dir: downloadDir })
 | 序列化 JsonElement | `elem.dumpJsonStr()` | — | — |
 | 安全反序列化 | `str.loadJson()` | `await request.json()` | `json_parse<T>(raw)` |
 | 反序列化为模型 | `str.loadJsonModel<T>()` | `TypedDict` / `dataclass` | `json_parse<T>(raw)` |
+| API 响应解析 | — | — | `apiFetch<T>(path, init)` → `data: T \| null` |
 | 从 LLM 文本提取 JSON | — | — | `parseJsonFromText(raw)` |
 | 类型守卫 | — | — | `isJsonObject(x)` / `isJsonValue(x)` |
 | 提取字段 | `jsonObj["key"].asT<String>()` | `data.get("key", "")` | `res.key ?? ""` |

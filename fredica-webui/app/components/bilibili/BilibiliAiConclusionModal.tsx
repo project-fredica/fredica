@@ -59,13 +59,13 @@ export function BilibiliAiConclusionModal({
 
         let cancelled = false;
         setLoading(true);
-        apiFetch('/api/v1/BilibiliVideoAiConclusionRoute', {
+        apiFetch<AiConclusionResult>('/api/v1/BilibiliVideoAiConclusionRoute', {
             method: 'POST',
             body: JSON.stringify({ bvid, page_index: pageIndex, is_update: refreshCount > 0 }),
         }, { signal: abort.signal }).then(({ data }) => {
             if (!cancelled) {
                 setRawData(data);
-                setResult2(data as AiConclusionResult);
+                if (data) setResult2(data);
             }
         }).catch((err) => {
             if (!cancelled && err?.name !== 'AbortError') {

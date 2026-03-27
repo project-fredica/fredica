@@ -74,9 +74,9 @@ export default function AsrConfigPage() {
 
     // Load config on mount
     useEffect(() => {
-        apiFetch("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true })
+        apiFetch<FasterWhisperConfig>("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true })
             .then(res => {
-                if (res.data) setCfg(res.data as FasterWhisperConfig);
+                if (res.data) setCfg(res.data);
             })
             .catch(() => {});
     }, []);
@@ -152,8 +152,8 @@ export default function AsrConfigPage() {
                     if (task.status === "completed") {
                         clearInterval(poll);
                         setEvalLog(prev => [...prev, "评估完成，正在刷新配置…"]);
-                        const cfgRes = await apiFetch("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true });
-                        if (cfgRes.data) setCfg(cfgRes.data as FasterWhisperConfig);
+                        const cfgRes = await apiFetch<FasterWhisperConfig>("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true });
+                        if (cfgRes.data) setCfg(cfgRes.data);
                         setEvalLog(prev => [...prev, "✓ 兼容性数据已更新"]);
                         setEvalRunning(false);
                     } else if (task.status === "failed") {

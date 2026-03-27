@@ -53,13 +53,13 @@ export default function LibraryPage() {
     const fetchData = useCallback(async () => {
         try {
             const [videosResp, categoriesResp] = await Promise.all([
-                apiFetch('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { timeout: 15_000, silent: true }),
-                apiFetch('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true }),
+                apiFetch<MaterialVideo[]>('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { timeout: 15_000, silent: true }),
+                apiFetch<MaterialCategory[]>('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true }),
             ]);
-            const fetchedVideos = videosResp.data as MaterialVideo[];
+            const fetchedVideos = videosResp.data ?? [];
             setVideos(fetchedVideos);
             setVideosError(null);
-            setCategories(categoriesResp.data as MaterialCategory[]);
+            setCategories(categoriesResp.data);
 
             const bilibiliIds = fetchedVideos.filter(v => v.source_type === 'bilibili').map(v => v.id);
             if (bilibiliIds.length > 0) {
@@ -106,12 +106,12 @@ export default function LibraryPage() {
     const loadTasksForMaterial = async (materialId: string) => {
         if (tasksMap.has(materialId)) return;
         try {
-            const { resp, data } = await apiFetch('/api/v1/MaterialTaskListRoute', {
+            const { resp, data } = await apiFetch<MaterialTask[]>('/api/v1/MaterialTaskListRoute', {
                 method: 'POST',
                 body: JSON.stringify({ material_id: materialId }),
             });
             if (resp.ok) {
-                setTasksMap(prev => new Map(prev).set(materialId, data as MaterialTask[]));
+                setTasksMap(prev => new Map(prev).set(materialId, data ?? []));
             } else {
                 reportHttpError('加载任务状态失败', resp);
             }
