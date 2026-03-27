@@ -8,6 +8,7 @@ import {
     type MaterialVideo, type MaterialCategory, type MaterialTask, type BilibiliExtra,
     SOURCE_BADGE, formatDuration, formatCount,
 } from "./materialTypes";
+import { json_parse } from "~/util/json";
 
 export function MaterialVideoRow({
     video,
@@ -42,18 +43,16 @@ export function MaterialVideoRow({
         : null;
 
     let extraInfo: ReactNode = null;
-    try {
-        const ext = JSON.parse(video.extra) as BilibiliExtra;
-        if (video.source_type === 'bilibili') {
-            extraInfo = (
-                <div className="flex items-center gap-3 text-xs text-gray-400">
-                    {ext.upper_name && <span>UP: {ext.upper_name}</span>}
-                    {ext.cnt_play !== undefined && <span>播放 {formatCount(ext.cnt_play)}</span>}
-                    {ext.cnt_collect !== undefined && <span>收藏 {formatCount(ext.cnt_collect)}</span>}
-                </div>
-            );
-        }
-    } catch { /* ignore */ }
+    if (video.source_type === 'bilibili') {
+        const ext = json_parse<BilibiliExtra>(video.extra);
+        extraInfo = (
+            <div className="flex items-center gap-3 text-xs text-gray-400">
+                {ext?.upper_name && <span>UP: {ext.upper_name}</span>}
+                {ext?.cnt_play !== undefined && <span>播放 {formatCount(ext.cnt_play)}</span>}
+                {ext?.cnt_collect !== undefined && <span>收藏 {formatCount(ext.cnt_collect)}</span>}
+            </div>
+        );
+    }
 
     return (
         <div

@@ -3,6 +3,7 @@ import datetime
 import os
 from pathlib import Path
 from typing import Annotated, Any, Optional
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from loguru import logger
 import bilibili_api
@@ -142,14 +143,21 @@ class _SubtitleBodyBody(BaseModel):
     subtitle_url: str
 
 
+def _normalize_subtitle_body_url(url: str) -> str:
+    raw = "https:" + url if url.startswith("//") else url
+    parsed = urlsplit(raw)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"invalid subtitle_url: {url}")
+    normalized_path = quote(parsed.path, safe="/%")
+    return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, parsed.query, parsed.fragment))
+
+
 @_router.post("/subtitle-body")
 async def get_subtitle_body(body: _SubtitleBodyBody):
     logger.debug("[bilibili] subtitle-body start url={}", body.subtitle_url)
     try:
         import httpx
-        url = body.subtitle_url
-        if url.startswith("//"):
-            url = "https:" + url
+        url = _normalize_subtitle_body_url(body.subtitle_url)
         async with httpx.AsyncClient(headers=_BILIBILI_HEADERS, follow_redirects=True) as client:
             resp = await client.get(url)
             logger.debug("[bilibili] subtitle-body http status={} url={}", resp.status_code, url)

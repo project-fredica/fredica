@@ -11,8 +11,10 @@ import kotlinx.coroutines.sync.withLock
 class PyCallGuard {
     private val guardMutex = Mutex()
     private val locks = mutableMapOf<String, Mutex>()
+    private val logger = createLogger()
 
     suspend fun <T> withLock(key: String, block: suspend () -> T): T {
+        logger.debug("py call guard with lock : $key")
         val mutex = guardMutex.withLock { locks.getOrPut(key) { Mutex() } }
         return mutex.withLock { block() }
     }

@@ -4,6 +4,7 @@ import { ArrowLeft, Play, Download, CheckCircle, XCircle, Loader, AlertTriangle,
 import type { Route } from "./+types/app-desktop-setting-asr-config";
 import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
+import { json_parse } from "~/util/json";
 
 export function meta({ }: Route.MetaArgs) {
     return [{ title: "ASR 语音识别配置 - Fredica" }];
@@ -82,14 +83,10 @@ export default function AsrConfigPage() {
 
     // Parse compat JSON whenever cfg changes
     useEffect(() => {
-        try {
-            const parsed = JSON.parse(cfg.compat_json);
-            if (parsed && typeof parsed === "object" && "model_support" in parsed) {
-                setCompat(parsed as CompatResult);
-            } else {
-                setCompat(null);
-            }
-        } catch {
+        const parsed = json_parse<CompatResult>(cfg.compat_json);
+        if (parsed && typeof parsed === "object" && "model_support" in parsed) {
+            setCompat(parsed);
+        } else {
             setCompat(null);
         }
     }, [cfg.compat_json]);
@@ -128,13 +125,13 @@ export default function AsrConfigPage() {
         setEvalLog(["开始兼容性评估…"]);
         try {
             const raw = await callBridge("run_faster_whisper_compat_eval", "{}");
-            const res = JSON.parse(raw);
-            if (res.error) {
+            const res = json_parse<any>(raw);
+            if (res?.error) {
                 setEvalLog(prev => [...prev, `错误: ${res.error}`]);
                 setEvalRunning(false);
                 return;
             }
-            const taskId = res.task_id;
+            const taskId = res?.task_id;
             if (!taskId) {
                 setEvalLog(prev => [...prev, "创建任务失败"]);
                 return;
@@ -190,13 +187,13 @@ export default function AsrConfigPage() {
         setDlLog([`开始下载模型 ${cfg.model}…`]);
         try {
             const raw = await callBridge("run_faster_whisper_model_download", JSON.stringify({ model_name: cfg.model }));
-            const res = JSON.parse(raw);
-            if (res.error) {
+            const res = json_parse<any>(raw);
+            if (res?.error) {
                 setDlLog(prev => [...prev, `错误: ${res.error}`]);
                 setDlRunning(false);
                 return;
             }
-            const taskId = res.task_id;
+            const taskId = res?.task_id;
             if (!taskId) {
                 setDlLog(prev => [...prev, "创建任务失败"]);
                 return;

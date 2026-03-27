@@ -19,6 +19,7 @@
     "clsx": "^2.1.1",
     "isbot": "^5.1.31",
     "json-schema-to-ts": "^3.1.1",
+    "json5": "^2.2.3",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

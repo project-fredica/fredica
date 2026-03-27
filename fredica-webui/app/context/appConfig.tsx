@@ -1,5 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useState } from "react";
 import { callBridge } from "~/util/bridge";
+import { json_parse } from "~/util/json";
 
 type WebserverSchema = "http" | "https";
 
@@ -63,7 +64,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         try {
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
-                const parsed = JSON.parse(stored) as AppConfig;
+                const parsed = json_parse<AppConfig>(stored);
                 setAppConfigState(parsed);
                 // 从 localStorage 恢复时也写入 Cookie，供 <video src> 使用
                 if (parsed.webserver_auth_token) {
@@ -77,7 +78,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
 
         // WebView 环境：通过 bridge 获取服务器连接信息（含 auth token）
         callBridge("get_server_info").then(raw => {
-            const info = JSON.parse(raw) as Partial<AppConfig>;
+            const info = json_parse<Partial<AppConfig>>(raw);
             setAppConfigState(prev => ({ ...prev, ...info }));
             // 写入 fredica_token Cookie，供 <video src> 使用
             if (info.webserver_auth_token) {

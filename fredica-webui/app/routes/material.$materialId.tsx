@@ -10,6 +10,7 @@ import {
     type MaterialVideo, type BilibiliExtra,
     SOURCE_BADGE, formatDuration,
 } from "~/components/material-library/materialTypes";
+import { json_parse } from "~/util/json";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -120,10 +121,7 @@ function MaterialHeader({ material, onToggleSwitcher }: {
     const buildProxyUrl = useImageProxyUrl();
 
     let upperName: string | undefined;
-    try {
-        const ext = JSON.parse(material?.extra ?? '{}') as BilibiliExtra;
-        upperName = ext.upper_name;
-    } catch { /* ignore */ }
+    upperName = json_parse<BilibiliExtra>(material?.extra ?? '{}')?.upper_name;
 
     const sourceBadge = SOURCE_BADGE[material?.source_type ?? '']
         ?? { label: material?.source_type ?? '', className: 'bg-gray-100 text-gray-600' };

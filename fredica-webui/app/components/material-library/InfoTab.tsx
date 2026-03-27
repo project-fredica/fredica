@@ -1,4 +1,5 @@
 import { type MaterialVideo, type BilibiliExtra } from "./materialTypes";
+import { json_parse } from "~/util/json";
 
 export function InfoTab({ actionTarget, onOpenModal, onOpenSubtitleModal }: {
     actionTarget: MaterialVideo;
@@ -6,7 +7,7 @@ export function InfoTab({ actionTarget, onOpenModal, onOpenSubtitleModal }: {
     onOpenSubtitleModal: (bvid: string) => void;
 }) {
     const bvid = actionTarget.source_type === 'bilibili'
-        ? ((() => { try { return (JSON.parse(actionTarget.extra) as BilibiliExtra).bvid; } catch { return null; } })() ?? actionTarget.source_id)
+        ? (json_parse<BilibiliExtra>(actionTarget.extra)?.bvid ?? actionTarget.source_id)
         : null;
 
     if (!bvid) {

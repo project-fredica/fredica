@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
+import { json_parse } from "~/util/json";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -143,20 +144,19 @@ export default function NetworkTestPage() {
 
             pollRef.current = setInterval(async () => {
                 try {
-                    const { data: taskData } = await apiFetch(
+                    const { data: taskData } = await apiFetch<NetworkTestTask>(
                         `/api/v1/WorkerTaskListRoute?pipeline_id=${newPipelineId}`,
                         { method: "GET" },
                     );
                     if (!Array.isArray(taskData) || taskData.length === 0) return;
-                    const task = taskData[0] as NetworkTestTask;
+                    const task = taskData[0];
 
                     if (task.status === "completed") {
                         stopPolling();
                         setPhase("done");
                         setRound(r => r + 1);
                         if (task.result) {
-                            try { setOutput(JSON.parse(task.result) as NetworkTestOutput); }
-                            catch { setOutput(null); }
+                            setOutput(json_parse<NetworkTestOutput>(task.result) ?? null);
                         }
                     } else if (task.status === "failed") {
                         stopPolling();

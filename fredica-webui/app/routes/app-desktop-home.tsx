@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
+import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
 import { print_error } from "~/util/error_handler";
+import { json_parse } from "~/util/json";
+import { fetchLlmModelAvailability } from "~/util/materialWebenApi";
 import type { Route } from "./+types/app-desktop-home";
 
 export function meta({ }: Route.MetaArgs) {
@@ -15,8 +18,10 @@ export default function Component({
     params,
 }: Route.ComponentProps) {
     const navigate = useNavigate();
+    const { apiFetch } = useAppFetch();
     // null = 检测中，true = 已失效，false = 正常或未配置
     const [credExpired, setCredExpired] = useState<boolean | null>(null);
+    const [modelConfigInvalid, setModelConfigInvalid] = useState<boolean | null>(null);
 
     useEffect(() => {
         // App 启动时通过 kmpJsBridge 检测 B 站账号登录态，
@@ -40,7 +45,7 @@ export default function Component({
                 // 传入空对象：使用 AppConfig 中已保存的凭据（首页检测不需要表单值）
                 const raw = await callBridge("check_bilibili_credential");
                 if (cancelled) return;
-                const r = JSON.parse(raw) as { configured: boolean; valid: boolean; message: string };
+                const r = json_parse<{ configured: boolean; valid: boolean; message: string }>(raw);
                 console.debug("[app-desktop-home] B 站登录态检测结果:", r);
 
                 // message 以"检测失败"开头 → Python 服务尚未就绪，重试
@@ -56,7 +61,6 @@ export default function Component({
                 if (cancelled) return;
                 if (e instanceof BridgeUnavailableError) {
                     // 浏览器开发模式：bridge 不可用，跳过检测
-                    console.debug("[app-desktop-home] kmpJsBridge 不可用，跳过登录态检测");
                     setCredExpired(false);
                     return;
                 }
@@ -77,6 +81,25 @@ export default function Component({
             if (retryTimer !== null) clearTimeout(retryTimer);
         };
     }, []); // bridge 在页面加载时已注入，不存在竞态，空依赖即可
+
+    useEffect(() => {
+        let cancelled = false;
+
+        fetchLlmModelAvailability(apiFetch)
+            .then(result => {
+                if (cancelled) return;
+                setModelConfigInvalid(!result.has_any_available_model);
+            })
+            .catch(error => {
+                if (cancelled) return;
+                console.debug("[app-desktop-home] 模型配置检查失败，不影响主功能", error);
+                setModelConfigInvalid(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [apiFetch]);
 
     const handleOpenBrowser = async () => {
         try {
@@ -152,6 +175,11 @@ export default function Component({
             >
                 打开桌面服务器设置
             </button>
+            {modelConfigInvalid && (
+                <p style={{ fontSize: '12px', color: '#b45309', margin: 0 }}>
+                    ⚠&nbsp;&nbsp;当前未检测到可用模型，请先前往桌面服务器设置中的模型配置完成设置
+                </p>
+            )}
             {credExpired && (
                 <p style={{ fontSize: '12px', color: '#b45309', margin: 0 }}>
                     ⚠&nbsp;&nbsp;设置的 B 站账号已失效

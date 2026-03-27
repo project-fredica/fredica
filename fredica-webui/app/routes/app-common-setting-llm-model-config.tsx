@@ -1,12 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, Plus, Pencil, Trash2, Save, X, ExternalLink, Compass, FlaskConical, Download, Upload, Copy, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Save, X, ExternalLink, Compass, FlaskConical, Download, Upload, Copy, Eye, EyeOff, Sparkles, Loader2, AlertCircle } from "lucide-react";
 import type { Route } from "./+types/app-common-setting-llm-model-config";
 import { print_error } from "../util/error_handler";
 import { openExternalUrl, callBridge, BridgeUnavailableError } from "../util/bridge";
-import { llmChat, type LlmChatParams, type LlmChatConnectionConfig } from "../util/llm";
+import { llmProxyChat, llmChat, type LlmChatParams, type LlmChatConnectionConfig, parseJsonFromText } from "../util/llm";
+import { DEFAULT_SERVER_PORT, useAppFetch } from "../util/app_fetch";
 import { useAppConfig } from "~/context/appConfig";
-import { DEFAULT_SERVER_PORT } from "../util/app_fetch";
+import {
+    ALL_CAPABILITIES,
+    getModelValidationErrors as buildModelValidationErrors,
+    mergeQueryResult,
+    normalizeCapabilities,
+    type LlmCapability,
+    type LlmModelProbeResponse,
+    type ModelParamQueryResult,
+} from "~/util/llmModelConfigHelpers";
+import { isJsonObject, json_parse, type JsonValue } from "~/util/json";
 
 export function meta({ }: Route.MetaArgs) {
     return [{ title: "LLM 模型配置 - Fredica" }];
@@ -14,7 +24,6 @@ export function meta({ }: Route.MetaArgs) {
 
 // ─── 类型定义 ────────────────────────────────────────────────────────────────
 
-type LlmCapability = "VISION" | "JSON_SCHEMA" | "MCP" | "FUNCTION_CALLING" | "LONG_CONTEXT";
 type LlmProviderType = "OPENAI_COMPATIBLE";
 
 interface LlmModelConfig {
@@ -50,8 +59,6 @@ const CAPABILITY_META: Record<LlmCapability, { label: string; color: string; tex
     MCP: { label: "MCP", color: "#fee2e2", textColor: "#991b1b", desc: "支持 Model Context Protocol" },
 };
 
-const ALL_CAPABILITIES: LlmCapability[] = ["VISION", "JSON_SCHEMA", "FUNCTION_CALLING", "LONG_CONTEXT", "MCP"];
-
 const EMPTY_MODEL: LlmModelConfig = {
     id: "", name: "", provider_type: "OPENAI_COMPATIBLE",
     base_url: "", api_key: "", model: "",
@@ -62,10 +69,14 @@ const EMPTY_ROLES: LlmDefaultRoles = {
     chat_model_id: "", vision_model_id: "", coding_model_id: "", dev_test_model_id: "",
 };
 
+function getModelValidationErrors(model: LlmModelConfig): Partial<Record<keyof LlmModelConfig, string>> {
+    return buildModelValidationErrors(model) as Partial<Record<keyof LlmModelConfig, string>>;
+}
+
 // ─── Bridge 工具 ──────────────────────────────────────────────────────────────
 
 function bridgeCall(method: string, param: string): Promise<any> {
-    return callBridge(method, param).then(result => JSON.parse(result));
+    return callBridge(method, param).then(result => json_parse<any>(result));
 }
 
 // ─── 主组件 ──────────────────────────────────────────────────────────────────
@@ -76,6 +87,8 @@ const placeholderStyle = `
 
 export default function Component({ }: Route.ComponentProps) {
     const navigate = useNavigate();
+    const { apiFetch } = useAppFetch();
+    const { appConfig } = useAppConfig();
     const [models, setModels] = useState<LlmModelConfig[]>([]);
     const [roles, setRoles] = useState<LlmDefaultRoles>(EMPTY_ROLES);
     const [testConfig, setTestConfig] = useState({ api_key: "", base_url: "", model: "" });
@@ -86,6 +99,11 @@ export default function Component({ }: Route.ComponentProps) {
     const [exportJson, setExportJson] = useState<string | null>(null);
     const [rolesSaved, setRolesSaved] = useState(false);
     const [testSaved, setTestSaved] = useState(false);
+    const [lastSuccessfulTestModelId, setLastSuccessfulTestModelId] = useState<string | null>(null);
+    const [queryingModel, setQueryingModel] = useState<LlmModelConfig | null>(null);
+    const [queryResult, setQueryResult] = useState<ModelParamQueryResult | null>(null);
+    const [queryLoading, setQueryLoading] = useState(false);
+    const [queryError, setQueryError] = useState<string | null>(null);
 
     useEffect(() => {
         bridgeCall("get_llm_models", "{}").then(v => { if (Array.isArray(v)) setModels(v); }).catch(err => print_error({ reason: "加载模型列表失败", err }));
@@ -99,12 +117,114 @@ export default function Component({ }: Route.ComponentProps) {
         }).catch(err => print_error({ reason: "加载测试配置失败", err }));
     }, []);
 
-    const handleSaveModel = async (m: LlmModelConfig) => {
+    const handleSaveModel = async (m: LlmModelConfig, options?: { keepOpen?: boolean }): Promise<LlmModelConfig | null> => {
         try {
             const updated = await bridgeCall("save_llm_model", JSON.stringify(m));
-            if (Array.isArray(updated)) setModels(updated);
-            setEditingModel(null);
-        } catch (err) { print_error({ reason: "保存模型失败", err }); }
+            if (!Array.isArray(updated)) return null;
+            setModels(updated);
+            const saved = updated.find((item: LlmModelConfig) => item.id === m.id) ?? null;
+            if (!options?.keepOpen) setEditingModel(null);
+            else if (saved) setEditingModel(saved);
+            return saved;
+        } catch (err) {
+            print_error({ reason: "保存模型失败", err });
+            return null;
+        }
+    };
+
+    const handleRunTest = async (m: LlmModelConfig) => {
+        const errors = getModelValidationErrors(m);
+        if (Object.keys(errors).length > 0) {
+            setEditingModel(m);
+            return;
+        }
+        if (!isNew && m.app_model_id?.trim()) {
+            setTestingModel(m);
+            return;
+        }
+        const saved = await handleSaveModel(m, { keepOpen: true });
+        if (saved) setTestingModel(saved);
+    };
+
+    const handleProbeModelParams = async (m: LlmModelConfig) => {
+        if (!m.base_url?.trim() || !m.api_key?.trim() || !m.model?.trim()) {
+            setQueryError("请先填写 Base URL、API Key 和模型名称，再查询功能参数。");
+            setQueryResult(null);
+            setQueryingModel(m);
+            return;
+        }
+        setQueryingModel(m);
+        setQueryError(null);
+        setQueryResult(null);
+        setQueryLoading(true);
+        try {
+            const { data } = await apiFetch("/api/v1/LlmModelProbeRoute", {
+                method: "POST",
+                body: JSON.stringify({
+                    provider_type: m.provider_type ?? "OPENAI_COMPATIBLE",
+                    base_url: m.base_url,
+                    api_key: m.api_key,
+                    model: m.model,
+                }),
+            }, { silent: true });
+            const probe = data as LlmModelProbeResponse;
+            if (probe?.error) {
+                setQueryError(probe.error);
+                return;
+            }
+            const connection = {
+                schema: appConfig.webserver_schema,
+                domain: appConfig.webserver_domain,
+                port: appConfig.webserver_port,
+                appAuthToken: appConfig.webserver_auth_token,
+            };
+            const supplementPrompt = [
+                "请根据下面的 provider 探测结果，只补全未知的模型功能参数，并输出 JSON。",
+                "不要覆盖 provider 已确认的值。",
+                "字段仅允许：capabilities, context_window, max_output_tokens, temperature。",
+                "capabilities 仅允许：VISION, JSON_SCHEMA, FUNCTION_CALLING, LONG_CONTEXT, MCP。",
+                "若无法确认字段，请省略该字段。",
+                `provider_probe=${JSON.stringify(probe)}`,
+            ].join("\n");
+            let supplementJson: JsonValue = null;
+            try {
+                console.debug("[queryModelParams] supplement llm start appModelId=%s", m.app_model_id);
+                let text = "";
+                for await (const chunk of llmProxyChat({ appModelId: m.app_model_id!, message: supplementPrompt, connection })) {
+                    text += chunk;
+                }
+                console.debug("[queryModelParams] supplement llm raw response=%s", text);
+                supplementJson = parseJsonFromText(text);
+                console.debug("[queryModelParams] supplement parsed=%s", JSON.stringify(supplementJson));
+            } catch (supplementErr) {
+                console.warn("[queryModelParams] supplement llm failed (non-fatal)", supplementErr);
+                supplementJson = null;
+            }
+            if (!isJsonObject(supplementJson)) {
+                throw new Error(`返回值不为 jsonObject : ${supplementJson}`)
+            }
+            const merged = mergeQueryResult(probe, supplementJson);
+            console.debug("[queryModelParams] merged result=%s", JSON.stringify(merged));
+            setQueryResult(merged);
+        } catch (err: any) {
+            print_error({ reason: "查询功能参数失败", err });
+            setQueryError(err?.message ?? String(err));
+        } finally {
+            setQueryLoading(false);
+        }
+    };
+
+    const handleApplyQueryResult = () => {
+        if (!editingModel || !queryResult) return;
+        const next: LlmModelConfig = {
+            ...editingModel,
+            capabilities: queryResult.capabilities.map(item => item.value),
+            context_window: queryResult.context_window?.value ?? editingModel.context_window,
+            max_output_tokens: queryResult.max_output_tokens?.value ?? editingModel.max_output_tokens,
+            temperature: queryResult.temperature?.value ?? editingModel.temperature,
+        };
+        setEditingModel(next);
+        setQueryingModel(null);
     };
 
     const handleDeleteModel = async (id: string) => {
@@ -156,7 +276,7 @@ export default function Component({ }: Route.ComponentProps) {
 
     const handleImport = (jsonStr: string) => {
         try {
-            const parsed = JSON.parse(jsonStr);
+            const parsed = json_parse<any>(jsonStr);
             if (!Array.isArray(parsed)) { print_error({ reason: "导入失败：JSON 必须是数组", err: null }); return; }
             // 逐个保存，最后一个完成后刷新列表
             (async () => {
@@ -227,14 +347,28 @@ export default function Component({ }: Route.ComponentProps) {
                     <ModelEditModal
                         model={editingModel}
                         isNew={isNew}
+                        hasAvailableModel={models.some(m => !!m.app_model_id)}
+                        canQueryParams={models.some(m => !!m.app_model_id) || lastSuccessfulTestModelId === editingModel.id}
+                        queryLoading={queryLoading && queryingModel?.id === editingModel.id}
                         onChange={setEditingModel}
                         onSave={handleSaveModel}
                         onClose={() => setEditingModel(null)}
-                        onTest={(m) => setTestingModel(m)}
+                        onTest={handleRunTest}
+                        onQueryParams={handleProbeModelParams}
                     />
                 )}
                 {showDiscover && <DiscoverModelsModal onClose={() => setShowDiscover(false)} />}
-                {testingModel && <ConfigCheckDrawer model={testingModel} onClose={() => setTestingModel(null)} />}
+                {testingModel && <ConfigCheckDrawer model={testingModel} onSuccess={() => setLastSuccessfulTestModelId(testingModel.id)} onClose={() => setTestingModel(null)} />}
+                {queryingModel && (
+                    <ModelParamQueryModal
+                        model={queryingModel}
+                        loading={queryLoading}
+                        error={queryError}
+                        result={queryResult}
+                        onApply={handleApplyQueryResult}
+                        onClose={() => setQueryingModel(null)}
+                    />
+                )}
             </div>
             {exportJson !== null && <JsonPreviewModal json={exportJson} onClose={() => setExportJson(null)} />}
         </>
@@ -490,13 +624,17 @@ function ModelListSection({ models, onAdd, onEdit, onDelete, onDiscover, onTest,
 
 // ─── 编辑弹窗 ─────────────────────────────────────────────────────────────────
 
-function ModelEditModal({ model, isNew, onChange, onSave, onClose, onTest }: {
+function ModelEditModal({ model, isNew, hasAvailableModel, canQueryParams, queryLoading, onChange, onSave, onClose, onTest, onQueryParams }: {
     model: LlmModelConfig;
     isNew: boolean;
+    hasAvailableModel: boolean;
+    canQueryParams: boolean;
+    queryLoading: boolean;
     onChange: (m: LlmModelConfig) => void;
-    onSave: (m: LlmModelConfig) => void;
+    onSave: (m: LlmModelConfig, options?: { keepOpen?: boolean }) => Promise<LlmModelConfig | null>;
     onClose: () => void;
-    onTest: (m: LlmModelConfig) => void;
+    onTest: (m: LlmModelConfig) => Promise<void>;
+    onQueryParams: (m: LlmModelConfig) => Promise<void>;
 }) {
     const toggleCap = (cap: LlmCapability) => {
         const caps = (model.capabilities ?? []).includes(cap)
@@ -506,39 +644,69 @@ function ModelEditModal({ model, isNew, onChange, onSave, onClose, onTest }: {
     };
 
     const [showApiKey, setShowApiKey] = useState(false);
+    const [closeButtonHighlighted, setCloseButtonHighlighted] = useState(false);
+    const headerRef = useRef<HTMLDivElement | null>(null);
+    const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+    const validationErrors = useMemo(() => getModelValidationErrors(model), [model]);
+
+    const handleBackdropClick = () => {
+        headerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        closeButtonRef.current?.focus();
+        setCloseButtonHighlighted(true);
+        window.setTimeout(() => setCloseButtonHighlighted(false), 1600);
+    };
+
+    const renderError = (key: keyof LlmModelConfig) => validationErrors[key]
+        ? <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626" }}>{validationErrors[key]}</div>
+        : null;
 
     return (
         <div style={{
             position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100,
-        }} onClick={onClose}>
+        }} onClick={handleBackdropClick}>
             <div style={{
                 backgroundColor: "#fff", borderRadius: "12px", width: "520px", maxWidth: "95vw",
                 maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
             }} onClick={e => e.stopPropagation()}>
-                <div style={{
+                <div ref={headerRef} style={{
                     padding: "16px 20px", borderBottom: "1px solid #e5e7eb",
                     display: "flex", alignItems: "center", justifyContent: "space-between",
+                    position: "sticky", top: 0, backgroundColor: "#fff", zIndex: 1,
                 }}>
-                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#111827" }}>
-                        {isNew ? "添加模型" : "编辑模型"}
-                    </h3>
-                    <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280" }}>
+                    <div>
+                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#111827" }}>
+                            {isNew ? "添加模型" : "编辑模型"}
+                        </h3>
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#9ca3af" }}>误触遮罩不会关闭弹窗，请使用右上角关闭按钮。</div>
+                    </div>
+                    <button ref={closeButtonRef} onClick={onClose} aria-label="关闭编辑弹窗" style={{
+                        background: closeButtonHighlighted ? "#fee2e2" : "#fff",
+                        border: `1px solid ${closeButtonHighlighted ? "#f87171" : "#d1d5db"}`,
+                        boxShadow: closeButtonHighlighted ? "0 0 0 4px rgba(248,113,113,0.16)" : "none",
+                        cursor: "pointer", color: closeButtonHighlighted ? "#b91c1c" : "#374151",
+                        width: "38px", height: "38px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0,
+                    }}>
                         <X size={18} />
                     </button>
                 </div>
                 <div style={{ padding: "20px" }}>
                     {([
-                        { key: "name", label: "名称", placeholder: "GPT-4o Mini（工作用）", type: "text" },
-                        { key: "base_url", label: "Base URL", placeholder: "https://api.openai.com/v1", type: "text" },
-                        { key: "model", label: "模型名称", placeholder: "gpt-4o-mini", type: "text" },
-                    ] as const).map(({ key, label, placeholder, type }) => (
+                        { key: "name", label: "显示名称", placeholder: "GPT-4o Mini（工作用）", type: "text", required: true, hint: "用于向租户/业务侧展示和选择该模型，不影响真实 provider model 名称。" },
+                        { key: "base_url", label: "Base URL", placeholder: "https://api.openai.com/v1", type: "text", required: false, hint: undefined },
+                        { key: "model", label: "模型名称", placeholder: "gpt-4o-mini", type: "text", required: false, hint: undefined },
+                    ] as const).map(({ key, label, placeholder, type, required, hint }) => (
                         <div key={key} style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>{label}</label>
+                            <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>
+                                {label}{required ? <span style={{ color: "#dc2626", marginLeft: "4px" }}>*</span> : null}
+                            </label>
                             <input type={type} value={model[key] ?? ""} placeholder={placeholder}
                                 onChange={e => onChange({ ...model, [key]: e.target.value })}
                                 className="llm-input"
-                                style={{ width: "100%", padding: "7px 10px", fontSize: "13px", border: "1px solid #d1d5db", borderRadius: "6px", boxSizing: "border-box" as const }} />
+                                style={{ width: "100%", padding: "7px 10px", fontSize: "13px", border: `1px solid ${validationErrors[key] ? "#fca5a5" : "#d1d5db"}`, borderRadius: "6px", boxSizing: "border-box" as const }} />
+                            {hint ? <div style={{ marginTop: "4px", fontSize: "12px", color: "#6b7280" }}>{hint}</div> : null}
+                            {renderError(key)}
                         </div>
                     ))}
                     <div style={{ marginBottom: "12px" }}>
@@ -552,12 +720,12 @@ function ModelEditModal({ model, isNew, onChange, onSave, onClose, onTest }: {
                             style={{ width: "100%", padding: "7px 10px", fontSize: "13px", border: "1px solid #d1d5db", borderRadius: "6px", boxSizing: "border-box" as const }} />
                     </div>
                     <div style={{ marginBottom: "12px" }}>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>API Key</label>
+                        <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>API Key<span style={{ color: "#dc2626", marginLeft: "4px" }}>*</span></label>
                         <div style={{ position: "relative" }}>
                             <input type={showApiKey ? "text" : "password"} value={model.api_key ?? ""} placeholder="sk-..."
                                 onChange={e => onChange({ ...model, api_key: e.target.value })}
                                 className="llm-input"
-                                style={{ width: "100%", padding: "7px 36px 7px 10px", fontSize: "13px", border: "1px solid #d1d5db", borderRadius: "6px", boxSizing: "border-box" as const }} />
+                                style={{ width: "100%", padding: "7px 36px 7px 10px", fontSize: "13px", border: `1px solid ${validationErrors.api_key ? "#fca5a5" : "#d1d5db"}`, borderRadius: "6px", boxSizing: "border-box" as const }} />
                             <button type="button" onClick={() => setShowApiKey(v => !v)} style={{
                                 position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)",
                                 background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: "2px",
@@ -566,10 +734,31 @@ function ModelEditModal({ model, isNew, onChange, onSave, onClose, onTest }: {
                                 {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
                             </button>
                         </div>
+                        {renderError("api_key")}
                     </div>
 
                     <div style={{ marginBottom: "12px" }}>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "8px" }}>能力标签</label>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px", gap: "8px" }}>
+                            <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151" }}>能力标签</label>
+                            <button type="button" onClick={() => onQueryParams(model)} disabled={!canQueryParams || queryLoading}
+                                style={{
+                                    padding: "6px 10px", fontSize: "12px", fontWeight: 600,
+                                    color: !canQueryParams || queryLoading ? "#9ca3af" : "#7c3aed",
+                                    backgroundColor: !canQueryParams || queryLoading ? "#f3f4f6" : "#f5f3ff",
+                                    border: `1px solid ${!canQueryParams || queryLoading ? "#e5e7eb" : "#ddd6fe"}`,
+                                    borderRadius: "8px", cursor: !canQueryParams || queryLoading ? "not-allowed" : "pointer",
+                                    display: "flex", alignItems: "center", gap: "6px",
+                                }}>
+                                {queryLoading ? <Loader2 size={13} /> : <Sparkles size={13} />}
+                                {queryLoading ? "查询中..." : "查询功能参数"}
+                            </button>
+                        </div>
+                        <div style={{ marginBottom: "8px", fontSize: "12px", color: "#6b7280" }}>
+                            普通用户不清楚这些参数时，可在已有可用模型或当前模型测试成功后自动查询建议值。
+                        </div>
+                        {!hasAvailableModel && !canQueryParams ? (
+                            <div style={{ marginBottom: "8px", fontSize: "12px", color: "#9ca3af" }}>当前尚无可用模型，请先测试成功一次后再查询。</div>
+                        ) : null}
                         <div style={{ display: "flex", flexDirection: "column" as const, gap: "6px" }}>
                             {ALL_CAPABILITIES.map(cap => {
                                 const meta = CAPABILITY_META[cap];
@@ -628,7 +817,7 @@ function ModelEditModal({ model, isNew, onChange, onSave, onClose, onTest }: {
                             backgroundColor: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: "8px", cursor: "pointer",
                             display: "flex", alignItems: "center", gap: "6px",
                         }}><FlaskConical size={14} /> 测试</button>
-                        <button onClick={() => onSave(model)} style={{
+                        <button onClick={() => void onSave(model)} style={{
                             padding: "8px 20px", fontSize: "14px", fontWeight: 600, color: "#fff",
                             backgroundColor: "#2563eb", border: "none", borderRadius: "8px", cursor: "pointer",
                         }}>保存</button>
@@ -743,7 +932,7 @@ const TEST_MODES: { value: LlmChatParams["mode"]; label: string; desc: string }[
     { value: "bridge", label: "JsBridge", desc: "Kotlin JsBridge 调用，非流式，仅 WebView 可用" },
 ];
 
-function ConfigCheckDrawer({ model, onClose }: { model: LlmModelConfig; onClose: () => void }) {
+function ConfigCheckDrawer({ model, onSuccess, onClose }: { model: LlmModelConfig; onSuccess: () => void; onClose: () => void }) {
     const { appConfig } = useAppConfig();
     const [output, setOutput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -786,7 +975,12 @@ function ConfigCheckDrawer({ model, onClose }: { model: LlmModelConfig; onClose:
                     ? { mode: "router", app_model_id: model.app_model_id!, message, connection }
                     : { mode: "bridge", app_model_id: model.app_model_id!, message };
             try {
-                for await (const chunk of llmChat(params)) setOutput(prev => prev + chunk);
+                let receivedChunk = false;
+                for await (const chunk of llmChat(params)) {
+                    receivedChunk = true;
+                    setOutput(prev => prev + chunk);
+                }
+                if (receivedChunk || mode === "bridge") onSuccess();
             } catch (e: any) {
                 setOutput(`请求失败: ${e?.message ?? String(e)}`);
             }
@@ -859,6 +1053,74 @@ function ConfigCheckDrawer({ model, onClose }: { model: LlmModelConfig; onClose:
                     <FlaskConical size={13} /> {loading ? "请求中..." : "重新测试"}
                 </button>
             </div>
+        </div>
+    );
+}
+
+function ModelParamQueryModal({ model, loading, error, result, onApply, onClose }: {
+    model: LlmModelConfig;
+    loading: boolean;
+    error: string | null;
+    result: ModelParamQueryResult | null;
+    onApply: () => void;
+    onClose: () => void;
+}) {
+    return (
+        <div style={{
+            position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210,
+        }}>
+            <div style={{
+                backgroundColor: "#fff", borderRadius: "14px", width: "min(720px, 95vw)",
+                maxHeight: "85vh", display: "flex", flexDirection: "column",
+                boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}>
+                <div style={{ padding: "18px 24px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <Sparkles size={18} color="#7c3aed" />
+                            <span style={{ fontSize: "16px", fontWeight: 700, color: "#111827" }}>查询功能参数</span>
+                        </div>
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#6b7280" }}>{model.name || model.model}</div>
+                    </div>
+                    <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: "2px" }}>
+                        <X size={18} />
+                    </button>
+                </div>
+                <div style={{ padding: "16px 24px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {loading ? <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#6b7280", fontSize: "14px" }}><Loader2 size={16} /> 正在先探测接口，再让模型补全未知字段...</div> : null}
+                    {error ? <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 12px" }}><AlertCircle size={15} />{error}</div> : null}
+                    {result ? (
+                        <>
+                            {result.provider_notes ? <div style={{ fontSize: "12px", color: "#6b7280", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "10px 12px" }}>{result.provider_notes}</div> : null}
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                                <ResultCard label="能力标签" value={result.capabilities.length ? result.capabilities.map(item => `${CAPABILITY_META[item.value].label}（${item.source}）`).join("、") : "未识别"} />
+                                <ResultCard label="上下文窗口" value={result.context_window ? `${result.context_window.value}（${result.context_window.source}）` : "未识别"} />
+                                <ResultCard label="最大输出 Token" value={result.max_output_tokens ? `${result.max_output_tokens.value}（${result.max_output_tokens.source}）` : "未识别"} />
+                                <ResultCard label="Temperature" value={result.temperature ? `${result.temperature.value}（${result.temperature.source}）` : "未识别"} />
+                            </div>
+                            {result.warnings.length ? (
+                                <div style={{ fontSize: "12px", color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", padding: "10px 12px" }}>
+                                    {result.warnings.map((warning, idx) => <div key={idx}>- {warning}</div>)}
+                                </div>
+                            ) : null}
+                        </>
+                    ) : null}
+                </div>
+                <div style={{ padding: "14px 24px", borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                    <button onClick={onClose} style={{ padding: "8px 16px", fontSize: "14px", color: "#374151", backgroundColor: "#f9fafb", border: "1px solid #d1d5db", borderRadius: "8px", cursor: "pointer" }}>关闭</button>
+                    <button onClick={onApply} disabled={!result} style={{ padding: "8px 16px", fontSize: "14px", fontWeight: 600, color: result ? "#fff" : "#9ca3af", backgroundColor: result ? "#2563eb" : "#e5e7eb", border: "none", borderRadius: "8px", cursor: result ? "pointer" : "not-allowed" }}>应用到表单</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ResultCard({ label, value }: { label: string; value: string }) {
+    return (
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
+            <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>{label}</div>
+            <div style={{ fontSize: "13px", color: "#111827", lineHeight: 1.5 }}>{value}</div>
         </div>
     );
 }

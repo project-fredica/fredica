@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppConfig } from "~/context/appConfig";
 import { buildAuthHeaders } from "~/util/app_fetch";
+import { json_parse } from "~/util/json";
 import { MATERIAL_WORKFLOW_API_PATH, fetchActiveWorkflows, findActiveEncodeWorkflowRunId } from "~/util/materialWorkflowApi";
 
 // ── 状态定义 ──────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function loadProgressFromStorage(materialId: string): number | null {
     try {
         const raw = localStorage.getItem(progressKey(materialId));
         if (!raw) return null;
-        const { currentTime, savedAt } = JSON.parse(raw) as { currentTime: number; savedAt: number };
+        const { currentTime, savedAt } = json_parse<{ currentTime: number; savedAt: number }>(raw)!;
         if (Date.now() - savedAt > PROGRESS_TTL_MS) return null;
         return currentTime;
     } catch {

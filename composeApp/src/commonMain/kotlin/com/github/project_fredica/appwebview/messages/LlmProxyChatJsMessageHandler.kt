@@ -7,6 +7,7 @@ import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toJsonArray
 import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.llm.LlmCapability
 import com.github.project_fredica.llm.LlmModelConfig
 import com.github.project_fredica.llm.LlmSseClient
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -65,7 +66,7 @@ class LlmProxyChatJsMessageHandler : MyJsMessageHandler() {
                 kv("messages", listOf(
                     createJson { obj { kv("role", "user"); kv("content", param.message) } }
                 ).toJsonArray())
-                kv("stream", true)
+                kv("stream", LlmCapability.STREAMING in modelConfig.capabilities)
             }
         }.toString()
 

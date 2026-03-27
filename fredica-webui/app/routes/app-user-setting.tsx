@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Save } from "lucide-react";
+import { json_parse } from "~/util/json";
 
 export function meta() {
     return [
@@ -28,7 +29,7 @@ const defaultPrefs: UserPrefs = {
 function loadPrefs(): UserPrefs {
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) return { ...defaultPrefs, ...JSON.parse(stored) };
+        if (stored) return { ...defaultPrefs, ...(json_parse<any>(stored) ?? {}) };
     } catch { }
     return defaultPrefs;
 }

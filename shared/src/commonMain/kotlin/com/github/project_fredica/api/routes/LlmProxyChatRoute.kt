@@ -1,13 +1,17 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.apputil.asT
 import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
+import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toJsonArray
+import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
+import com.github.project_fredica.llm.LlmSseClient
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
@@ -24,6 +28,7 @@ import io.ktor.utils.io.readUTF8Line
 import io.ktor.utils.io.writeStringUtf8
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * LLM 代理聊天路由（SSE 流式转发）。
@@ -77,6 +82,7 @@ object LlmProxyChatRoute {
         }.toString()
 
         logger.debug("LlmProxyChatRoute: 转发请求到 $upstreamUrl model=${modelConfig.model}")
+        val contents = mutableListOf<String>()
 
         try {
             AppUtil.GlobalVars.ktorClientProxied.preparePost(upstreamUrl) {
@@ -98,6 +104,15 @@ object LlmProxyChatRoute {
                 call.respondBytesWriter(ContentType.Text.EventStream) {
                     while (!channel.isClosedForRead) {
                         val line = channel.readUTF8Line() ?: break
+                        try {
+                            contents += LlmSseClient.extractResponseContent(line)
+                        } catch (err: Exception) {
+                            logger.warn(
+                                "ignore unexpected error in sse response , raw line is $line",
+                                isHappensFrequently = true,
+                                err
+                            )
+                        }
                         lineCount++
                         writeStringUtf8(line)
                         writeStringUtf8("\n")
@@ -108,7 +123,9 @@ object LlmProxyChatRoute {
             }
         } catch (e: Exception) {
             logger.error("LlmProxyChatRoute: 转发异常", e)
-            runCatching { call.response.status(HttpStatusCode.Companion.BadGateway) }
+            runCatching { call.response.status(HttpStatusCode.BadGateway) }
+        } finally {
+            logger.debug("LlmProxyChatRoute: contents ->\n ${contents.joinToString("")}")
         }
     }
 }

@@ -3,14 +3,19 @@ package com.github.project_fredica.llm
 import com.github.project_fredica.db.AppConfigDb
 import com.github.project_fredica.db.AppConfigService
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.ktorm.database.Database
 import java.io.File
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -107,5 +112,69 @@ class LlmSseClientTest {
         }
 
         assertNull(result, "Expected null when cancelled")
+    }
+
+    @Test
+    fun `normalizeRequestBodyForStreamingCapability forces stream false`() {
+        val requestBody = buildJsonObject {
+            put("model", "test-model")
+            put("stream", true)
+            put("messages", buildJsonArray {
+                addJsonObject {
+                    put("role", "user")
+                    put("content", "hello")
+                }
+            })
+        }.toString()
+
+        val normalized = LlmSseClient.normalizeRequestBodyForStreamingCapability(
+            requestBody = requestBody,
+            supportsStreaming = false,
+        )
+        val json = Json.parseToJsonElement(normalized).jsonObject
+
+        assertEquals("test-model", json.getValue("model").jsonPrimitive.content)
+        assertEquals("false", json.getValue("stream").toString())
+        assertEquals(
+            "hello",
+            json.getValue("messages").jsonArray[0].jsonObject
+                .getValue("content").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `extractResponseContent parses plain json response`() {
+        val body = """
+            {"choices":[{"message":{"content":"plain response"}}]}
+        """.trimIndent()
+
+        val content = LlmSseClient.extractResponseContent(body)
+
+        assertEquals("plain response", content)
+    }
+
+    @Test
+    fun `extractResponseContent parses sse delta response`() {
+        val body = """
+            data: {"choices":[{"delta":{"content":"hello "}}]}
+            data: {"choices":[{"delta":{"content":"world"}}]}
+            data: [DONE]
+        """.trimIndent()
+
+        val content = LlmSseClient.extractResponseContent(body)
+
+        assertEquals("hello world", content)
+    }
+
+    @Test
+    fun `extractResponseContent falls back to first sse message payload`() {
+        val body = """
+            data: {"choices":[{"message":{"content":"non-stream response"}}]}
+            data: [DONE]
+        """.trimIndent()
+
+        val content = LlmSseClient.extractResponseContent(body)
+
+        assertEquals("non-stream response", content)
     }
 }

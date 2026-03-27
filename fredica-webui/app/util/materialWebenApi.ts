@@ -1,11 +1,13 @@
 import {
     normalizeImportResponse,
+    normalizeLlmModelAvailability,
     normalizeLlmModels,
     normalizeSubtitleContent,
     normalizeSubtitleItems,
 } from "./materialWebenGuards";
 import type { VariableMeta } from "./prompt-builder/types";
 import { buildAuthHeaders, DEFAULT_SERVER_PORT } from "~/util/app_fetch";
+import { json_parse } from "~/util/json";
 
 export interface ApiFetchFn {
     (
@@ -48,6 +50,13 @@ export interface LlmModelMeta {
     app_model_id: string;
     label: string;
     notes?: string | null;
+}
+
+export interface LlmModelAvailability {
+    available_count: number;
+    has_any_available_model: boolean;
+    selected_model_id: string | null;
+    selected_model_available: boolean;
 }
 
 export async function fetchMaterialSubtitles(
@@ -101,6 +110,21 @@ export async function fetchLlmModels(
         { silent: true },
     );
     return normalizeLlmModels(data);
+}
+
+export async function fetchLlmModelAvailability(
+    apiFetch: ApiFetchFn,
+    selectedModelId?: string | null,
+): Promise<LlmModelAvailability> {
+    const query = selectedModelId?.trim()
+        ? `?selected_model_id=${encodeURIComponent(selectedModelId)}`
+        : "";
+    const { data } = await apiFetch(
+        `/api/v1/LlmModelAvailabilityRoute${query}`,
+        { method: "GET" },
+        { silent: true },
+    );
+    return normalizeLlmModelAvailability(data);
 }
 
 export interface WebenBatchImportResponse {
@@ -187,7 +211,7 @@ export interface PromptSandboxResult {
  */
 export async function runPromptScript(
     apiFetch: ApiFetchFn,
-    params: { script_code: string; material_id: string },
+    params: { script_code: string },
 ): Promise<PromptSandboxResult> {
     const { resp, data } = await apiFetch(
         "/api/v1/PromptTemplateRunRoute",
@@ -201,10 +225,11 @@ export async function runPromptScript(
 /**
  * 调用后端 PromptTemplatePreviewRoute（SSE），执行脚本并流式返回日志与最终 Prompt 文本。
  * 使用原始 fetch 直连 Ktor 服务，与 streamLlmRouterText 模式一致。
+ *
+ * [params.scriptCode] 应为完整脚本（含前端编辑器注入的头部 `var __materialId = "..."`）。
  */
 export async function previewPromptScript(params: {
     scriptCode: string;
-    materialId: string;
     connection: {
         domain?: string | null;
         port?: string | null;
@@ -217,15 +242,18 @@ export async function previewPromptScript(params: {
     const schema = connection.schema ?? "http";
     const domain = connection.domain ?? "localhost";
     const port = connection.port ?? DEFAULT_SERVER_PORT;
+    const url = `${schema}://${domain}:${port}/api/v1/PromptTemplatePreviewRoute`;
+    console.debug("[previewPromptScript] fetch url=", url, "scriptLength=", params.scriptCode.length);
 
-    const resp = await fetch(`${schema}://${domain}:${port}/api/v1/PromptTemplatePreviewRoute`, {
+    const resp = await fetch(url, {
         method: "POST",
         headers: {
             ...buildAuthHeaders(connection.appAuthToken),
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ script_code: params.scriptCode, material_id: params.materialId }),
+        body: JSON.stringify({ script_code: params.scriptCode }),
     });
+    console.debug("[previewPromptScript] response status=", resp.status, "ok=", resp.ok);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
 
     const reader = resp.body?.getReader();
@@ -249,7 +277,8 @@ export async function previewPromptScript(params: {
                 if (!trimmed.startsWith("data:")) continue;
                 const dataStr = trimmed.slice(5).trim();
                 try {
-                    const event = JSON.parse(dataStr) as Record<string, unknown>;
+                    const event = json_parse<Record<string, unknown>>(dataStr);
+                    if (!event) continue;
                     if (event.type === "log") {
                         const log: PromptSandboxLog = { level: String(event.level ?? "log"), args: String(event.args ?? ""), ts: Number(event.ts ?? 0) };
                         logs.push(log);
@@ -260,8 +289,8 @@ export async function previewPromptScript(params: {
                         error = String(event.error ?? "");
                         errorType = String(event.error_type ?? "unknown");
                     }
-                } catch {
-                    // ignore malformed events
+                } catch (error) {
+                    console.debug("[previewPromptScript] ignore malformed SSE event", error, { dataStr });
                 }
             }
             if (done) break;

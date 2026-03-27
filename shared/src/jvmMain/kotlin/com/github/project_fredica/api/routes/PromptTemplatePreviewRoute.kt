@@ -9,7 +9,7 @@ package com.github.project_fredica.api.routes
 // 在 GraalJS 沙箱中执行 Prompt 脚本，以 SSE 流式返回日志与结果。
 // 需鉴权，单独注册于 FredicaApi.jvm.kt。
 //
-// 请求体：PromptScriptExecuteRequest { script_code, material_id }
+// 请求体：PromptScriptExecuteRequest { script_code }
 // 响应：text/event-stream，每行格式：data: <JSON>\n\n
 //   事件类型：
 //     { "type": "log", "level": "log|warn|error", "args": "...", "ts": 123 }
@@ -21,6 +21,7 @@ import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.apputil.warn
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveText
@@ -35,7 +36,8 @@ object PromptTemplatePreviewRoute {
     suspend fun handle(ctx: RoutingContext) {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<PromptScriptExecuteRequest>().getOrElse { e ->
-            logger.error("[PromptTemplatePreviewRoute] 请求体解析失败", e)
+            // 请求体解析失败属于调用方问题（客户端错误），用 warn 而非 error
+            logger.warn("[PromptTemplatePreviewRoute] 请求体解析失败", isHappensFrequently = false, err = e)
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "请求体解析失败"))
             return
         }
@@ -43,6 +45,7 @@ object PromptTemplatePreviewRoute {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "script_code 不能为空"))
             return
         }
+        logger.debug("[PromptTemplatePreviewRoute] 执行请求: scriptLength=${req.scriptCode.length}")
 
         val acquired = PromptScriptRuntime.previewSemaphore.tryAcquire()
         if (!acquired) {
@@ -50,8 +53,7 @@ object PromptTemplatePreviewRoute {
             return
         }
         try {
-            val provider = PromptRuntimeContextProvider(req.materialId)
-            val result = PromptScriptRuntime.execute(req.scriptCode, provider, PromptScriptRuntime.Mode.PREVIEW)
+            val result = PromptScriptRuntime.execute(req.scriptCode, PromptScriptRuntime.Mode.PREVIEW)
 
             call.respondBytesWriter(ContentType.Text.EventStream) {
                 // 先发所有日志条目

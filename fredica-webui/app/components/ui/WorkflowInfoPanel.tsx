@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircle, XCircle, Clock, Loader, AlertTriangle, Settings, Pause, Play, X, SkipForward, Library, ChevronDown } from "lucide-react";
 import { Link } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
+import { json_parse } from "~/util/json";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ function getStatus(task: WorkerTask) {
     if (task.error_type === 'AWAITING_ASR_CONFIG') return AWAITING_ASR;
     if (task.is_paused && task.status === 'running') return PAUSED_STATUS;
     if (task.status === 'completed') {
-        try { if ((JSON.parse(task.result ?? '{}') as Record<string, unknown>).skipped === true) return SKIPPED_STATUS; } catch { /* ignore */ }
+        if ((json_parse<Record<string, unknown>>(task.result ?? '{}') as Record<string, unknown>)?.skipped === true) return SKIPPED_STATUS;
     }
     return TASK_STATUS_CONFIG[task.status] ?? TASK_STATUS_CONFIG.pending;
 }

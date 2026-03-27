@@ -1,4 +1,5 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router";
 import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, Loader2, Save, Sparkles, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "react-toastify";
 import { PromptBuilder } from "~/components/prompt-builder/PromptBuilder";
@@ -23,22 +24,16 @@ import { VariableResolverCache } from "~/util/prompt-builder/VariableResolverCac
 import type { BuildPromptResult } from "~/util/prompt-builder/types";
 import type { PromptTemplateListItem } from "~/util/prompt-builder/promptTemplateApi";
 import { CONCEPT_TYPES, PREDICATES } from "~/util/weben";
+import { json_parse } from "~/util/json";
 import {
     fetchMaterialSubtitles,
     fetchSubtitleContent,
-    fetchLlmModels,
     getWebenPromptVariables,
     importWebenResult,
     previewPromptScript,
-    type LlmModelMeta,
     type MaterialSubtitleItem,
     type MaterialWebenLlmResult,
 } from "~/util/materialWebenApi";
-
-const FALLBACK_MODELS: LlmModelMeta[] = [
-    { app_model_id: "chat_model_id", label: "默认聊天模型", notes: "使用应用默认 chat 角色" },
-    { app_model_id: "coding_model_id", label: "默认编码模型", notes: "使用应用默认 coding 角色" },
-];
 
 type Stage = "editing" | "previewed" | "generating" | "parsed" | "parse_error";
 
@@ -61,7 +56,7 @@ function parseWebenResult(raw: string): MaterialWebenLlmResult {
     const trimmed = raw.trim();
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const jsonText = fenced?.[1] ?? trimmed;
-    return normalizeWebenResult(JSON.parse(jsonText));
+    return normalizeWebenResult(json_parse<any>(jsonText));
 }
 
 async function streamLlmRouterText(params: {
@@ -74,6 +69,7 @@ async function streamLlmRouterText(params: {
         appAuthToken?: string | null;
     };
     onChunk: (chunk: string) => void;
+    signal?: AbortSignal;
 }): Promise<string> {
     const schema = params.connection.schema ?? "http";
     const domain = params.connection.domain ?? "localhost";
@@ -88,6 +84,7 @@ async function streamLlmRouterText(params: {
             app_model_id: params.appModelId,
             message: params.message,
         }),
+        signal: params.signal,
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
 
@@ -99,6 +96,7 @@ async function streamLlmRouterText(params: {
     let buffer = "";
     try {
         while (true) {
+            if (params.signal?.aborted) break;
             const { done, value } = await reader.read();
             if (value) buffer += decoder.decode(value, { stream: !done });
             const lines = buffer.split("\n");
@@ -109,12 +107,12 @@ async function streamLlmRouterText(params: {
                 const data = trimmed.slice(5).trim();
                 if (data === "[DONE]") return fullText;
                 try {
-                    const chunk = JSON.parse(data)?.choices?.[0]?.delta?.content;
+                    const chunk = (json_parse<any>(data))?.choices?.[0]?.delta?.content;
                     if (!chunk) continue;
                     fullText += chunk;
                     params.onChunk(chunk);
-                } catch {
-                    // ignore malformed chunks
+                } catch (error) {
+                    console.debug("[SummaryWebenPage] ignore malformed LLM SSE chunk", error, { data });
                 }
             }
             if (done) break;
@@ -279,6 +277,7 @@ function RenderResultPane({
 }
 
 export default function SummaryWebenPage() {
+    const { materialId: routeMaterialId = "" } = useParams<{ materialId: string }>();
     const workspaceContext = useWorkspaceContext();
     const material = useMemo(() => getSafeWorkspaceMaterial(workspaceContext?.material), [workspaceContext]);
     const appFetchContext = useAppFetch();
@@ -288,8 +287,7 @@ export default function SummaryWebenPage() {
     const [template, setTemplate] = useState("");
     const [previewResult, setPreviewResult] = useState<BuildPromptResult | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
-    const [selectedModelId, setSelectedModelId] = useState<string>(FALLBACK_MODELS[0].app_model_id);
-    const [availableModels, setAvailableModels] = useState<LlmModelMeta[]>(FALLBACK_MODELS);
+    const [resolvedModelId, setResolvedModelId] = useState<string | null>(null);
     const [subtitles, setSubtitles] = useState<MaterialSubtitleItem[]>([]);
     const [streamText, setStreamText] = useState("");
     const [streamError, setStreamError] = useState<string | null>(null);
@@ -311,11 +309,22 @@ export default function SummaryWebenPage() {
     const schemaHint = useMemo(() => buildWebenSchemaHint(), []);
     const selectedSubtitle = subtitles[0] ?? null;
     const variables = useMemo(() => getWebenPromptVariables(), []);
+
+    // 头部代码：由编辑器自动注入，不属于模板内容，不可编辑。
+    // 使用路由参数 routeMaterialId（直接来自 URL），确保始终非空。
+    // 提交时前置于模板代码之前，后端从 GraalJS bindings 读取 __materialId。
+    const scriptHeader = useMemo(() => [
+        "// 执行上下文 - 由编辑器自动注入",
+        `var __materialId = ${JSON.stringify(routeMaterialId)};`,
+    ].join("\n"), [routeMaterialId]);
+
     const reviewValidation = useMemo(() => {
         return reviewedResult
             ? validateWebenResult(reviewedResult)
             : { sanitizedResult: null, blockingErrors: [], warnings: [] };
     }, [reviewedResult]);
+
+    const hasUsableModel = Boolean(resolvedModelId?.trim());
 
     // 有加载的模板且当前脚本内容与加载快照不同，则视为有未保存修改
     const hasUnsavedChanges =
@@ -376,15 +385,6 @@ export default function SummaryWebenPage() {
                 if (!cancelled) print_error({ reason: "加载字幕列表失败", err: error });
             });
 
-        fetchLlmModels(apiFetch)
-            .then(items => {
-                if (!cancelled && items.length > 0) {
-                    setAvailableModels(items);
-                    setSelectedModelId(prev => prev || items[0].app_model_id);
-                }
-            })
-            .catch(() => { /* ignore until backend route exists */ });
-
         return () => { cancelled = true; };
     }, [apiFetch, material.id]);
 
@@ -393,12 +393,18 @@ export default function SummaryWebenPage() {
     }, []);
 
     const handlePreview = async () => {
+        console.debug("[SummaryWebenPage] handlePreview: routeMaterialId=", routeMaterialId, "template.length=", template.length, "scriptHeader.length=", scriptHeader.length);
+        if (!routeMaterialId.trim()) {
+            const msg = "素材 ID 无效，无法执行脚本";
+            print_error({ reason: msg });
+            setPreviewResult({ text: msg, charCount: 0, blocked: true, warnings: [] });
+            return;
+        }
         setPreviewLoading(true);
         try {
             // 调用后端 GraalJS 沙箱执行脚本，返回解析后的 Prompt 文本
             const { promptText, error } = await previewPromptScript({
-                scriptCode: template,
-                materialId: material.id,
+                scriptCode: `${scriptHeader}\n\n${template}`,
                 connection: {
                     domain: appConfig.webserver_domain,
                     port: appConfig.webserver_port,
@@ -406,7 +412,9 @@ export default function SummaryWebenPage() {
                     appAuthToken: appConfig.webserver_auth_token,
                 },
             });
+            console.debug("[SummaryWebenPage] handlePreview: result error=", error, "promptText.length=", promptText?.length ?? 0);
             if (error) {
+                print_error({ reason: `脚本执行失败: ${error}` });
                 setPreviewResult({ text: `脚本执行失败：${error}`, charCount: 0, blocked: true, warnings: [] });
             } else {
                 const text = promptText ?? "";
@@ -414,19 +422,34 @@ export default function SummaryWebenPage() {
             }
             setStage("previewed");
         } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.debug("[SummaryWebenPage] handlePreview: caught exception:", error);
             print_error({ reason: "构建 Prompt 预览失败", err: error });
+            setPreviewResult({ text: `预览失败：${message}`, charCount: 0, blocked: true, warnings: [] });
         } finally {
             setPreviewLoading(false);
         }
     };
 
-    const handleGenerate = async () => {
+    const handleGenerate = async (signal: AbortSignal) => {
+        console.debug("[SummaryWebenPage] handleGenerate: routeMaterialId=", routeMaterialId, "template.length=", template.length);
+        if (!routeMaterialId.trim()) {
+            const msg = "素材 ID 无效，无法执行脚本";
+            print_error({ reason: msg });
+            setStreamError(msg);
+            return;
+        }
+        if (!resolvedModelId?.trim()) {
+            const msg = "当前没有可用模型，请先在编辑器设置中处理模型配置";
+            print_error({ reason: msg });
+            setStreamError(msg);
+            return;
+        }
         setPreviewLoading(true);
         try {
             // Step 1: 调用后端 GraalJS 沙箱执行脚本，获取解析后的 Prompt 文本
             const { promptText, error: scriptError } = await previewPromptScript({
-                scriptCode: template,
-                materialId: material.id,
+                scriptCode: `${scriptHeader}\n\n${template}`,
                 connection: {
                     domain: appConfig.webserver_domain,
                     port: appConfig.webserver_port,
@@ -435,8 +458,12 @@ export default function SummaryWebenPage() {
                 },
             });
 
+            if (signal.aborted) return;
+
             if (scriptError || !promptText?.trim()) {
-                setStreamError(scriptError ?? "脚本未返回 Prompt 文本");
+                const message = scriptError ?? "脚本未返回 Prompt 文本";
+                print_error({ reason: `脚本执行失败: ${message}` });
+                setStreamError(message);
                 setStage("parse_error");
                 return;
             }
@@ -452,7 +479,7 @@ export default function SummaryWebenPage() {
 
             // Step 2: 将 Prompt 文本发送给 LLM，流式接收输出
             const fullText = await streamLlmRouterText({
-                appModelId: selectedModelId,
+                appModelId: resolvedModelId,
                 message: resolvedText,
                 connection: {
                     domain: appConfig.webserver_domain,
@@ -463,7 +490,10 @@ export default function SummaryWebenPage() {
                 onChunk: chunk => {
                     setStreamText(prev => prev + chunk);
                 },
+                signal,
             });
+
+            if (signal.aborted) return;
 
             try {
                 const parsed = parseWebenResult(fullText);
@@ -476,6 +506,7 @@ export default function SummaryWebenPage() {
                 setStage("parse_error");
             }
         } catch (error) {
+            if (signal.aborted) return;
             const message = error instanceof Error ? error.message : String(error);
             setStreamError(message);
             print_error({ reason: "生成失败", err: error });
@@ -563,7 +594,7 @@ export default function SummaryWebenPage() {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
                         <div className="text-xs font-medium text-gray-500">信息来源</div>
                         <div className="mt-2 text-sm text-gray-800">字幕文本</div>
@@ -571,22 +602,6 @@ export default function SummaryWebenPage() {
                             {selectedSubtitle
                                 ? `${selectedSubtitle.lan_doc || selectedSubtitle.lan} · ${selectedSubtitle.source}`
                                 : "暂无可用字幕，请先去“字幕提取”标签获取字幕"}
-                        </div>
-                    </div>
-
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-                        <div className="text-xs font-medium text-gray-500">模型选择</div>
-                        <select
-                            value={selectedModelId}
-                            onChange={event => setSelectedModelId(event.target.value)}
-                            className="mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white outline-none focus:ring-1 focus:ring-violet-400"
-                        >
-                            {availableModels.map(model => (
-                                <option key={model.app_model_id} value={model.app_model_id}>{model.label}</option>
-                            ))}
-                        </select>
-                        <div className="mt-1 text-xs text-gray-500">
-                            {availableModels.find(model => model.app_model_id === selectedModelId)?.notes ?? ""}
                         </div>
                     </div>
 
@@ -628,12 +643,15 @@ export default function SummaryWebenPage() {
                 previewLoading={previewLoading}
                 onPreview={handlePreview}
                 onGenerate={handleGenerate}
-                generateDisabled={!selectedModelId}
+                generateDisabled={!hasUsableModel}
                 renderDisabled={!reviewedResult && !parseError}
                 currentTemplateName={loadedTemplate?.name}
+                settingsStorageKey={`material.summary.weben:${material.id}`}
+                onResolvedModelChange={setResolvedModelId}
                 defaultTemplateId="sys_weben_extract_v1"
                 apiFetch={apiFetch}
                 onDefaultTemplateLoaded={handleLoadTemplate}
+                readonlyHeader={scriptHeader}
                 editorHeaderExtra={(
                     <>
                         <button
@@ -659,7 +677,7 @@ export default function SummaryWebenPage() {
                         </button>
                     </>
                 )}
-                streamPane={<PromptStreamPane text={streamText} error={streamError} />}
+                streamPane={<PromptStreamPane text={streamText} error={streamError} actions={null} />}
                 renderPane={(
                     <RenderResultPane
                         result={reviewedResult}

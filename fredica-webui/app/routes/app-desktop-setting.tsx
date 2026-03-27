@@ -5,6 +5,7 @@ import { ArrowLeft, RefreshCw, Save, CheckCircle, XCircle, Loader } from "lucide
 import type { Route } from "./+types/app-desktop-setting";
 import { print_error } from "~/util/error_handler";
 import { callBridge, BridgeUnavailableError, openExternalUrl } from "../util/bridge";
+import { json_parse } from "~/util/json";
 import { PasswordInput } from "~/components/ui/PasswordInput";
 
 export function meta({ }: Route.MetaArgs) {
@@ -226,7 +227,7 @@ export default function Component({ }: Route.ComponentProps) {
             console.debug("[app-desktop-setting] handleCheckCredential: 调用 check_bilibili_credential");
             const raw = await callBridge("check_bilibili_credential", credParams);
             console.debug("[app-desktop-setting] check_bilibili_credential raw:", raw);
-            const r = JSON.parse(raw) as { configured: boolean; valid: boolean; message: string };
+            const r = json_parse<{ configured: boolean; valid: boolean; message: string }>(raw);
             console.debug("[app-desktop-setting] check_bilibili_credential 解析结果:", r);
             if (!r.configured) {
                 setCredStatus("unconfigured");
@@ -298,7 +299,7 @@ export default function Component({ }: Route.ComponentProps) {
             // 若 raw 中含有未转义的单引号（如异常描述），会导致 JSON.parse 失败。
             // MyJsMessageHandler.kt 中已统一转义，此处应可正常解析。
             console.debug("[app-desktop-setting] try_refresh_bilibili_credential raw:", raw);
-            const r = JSON.parse(raw) as {
+            const r = json_parse<{
                 success: boolean;
                 refreshed: boolean;
                 message: string;
@@ -309,7 +310,7 @@ export default function Component({ }: Route.ComponentProps) {
                 dedeuserid?: string;
                 ac_time_value?: string;
                 error?: string;
-            };
+            }>(raw);
             console.debug("[app-desktop-setting] try_refresh_bilibili_credential 解析结果:", r);
 
             if (r.success && r.refreshed) {
@@ -349,7 +350,7 @@ export default function Component({ }: Route.ComponentProps) {
         (async () => {
             try {
                 const result = await callBridge("get_app_config");
-                const config = JSON.parse(result) as Record<string, string | number | boolean>;
+                const config = json_parse<Record<string, string | number | boolean>>(result);
                 setValues(prev => ({ ...prev, ...config }));
                 setLoadError(null);
             } catch (e) {
@@ -359,14 +360,14 @@ export default function Component({ }: Route.ComponentProps) {
             }
             try {
                 const result = await callBridge("get_device_info");
-                const info = JSON.parse(result);
-                if (info.device_info_json) {
+                const info = json_parse<any>(result);
+                if (info?.device_info_json) {
                     setDeviceInfo(typeof info.device_info_json === "string"
-                        ? JSON.parse(info.device_info_json) : info.device_info_json);
+                        ? json_parse<any>(info.device_info_json) : info.device_info_json);
                 }
-                if (info.ffmpeg_probe_json) {
+                if (info?.ffmpeg_probe_json) {
                     setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
-                        ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+                        ? json_parse<any>(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
                 }
             } catch (_) { /* device info optional */ }
         })();
@@ -381,7 +382,7 @@ export default function Component({ }: Route.ComponentProps) {
     const handleSave = async () => {
         try {
             const result = await callBridge("save_app_config", JSON.stringify(values));
-            const updated = JSON.parse(result) as Record<string, string | number | boolean>;
+            const updated = json_parse<Record<string, string | number | boolean>>(result);
             setValues(prev => ({ ...prev, ...updated }));
             setSaved(true);
             setIsDirty(false);
@@ -395,15 +396,15 @@ export default function Component({ }: Route.ComponentProps) {
         setDetecting(true);
         try {
             const result = await callBridge("run_ffmpeg_detect");
-            const info = JSON.parse(result);
-            if (info.error) { print_error({ reason: `设备检测失败: ${info.error}` }); return; }
-            if (info.device_info_json) {
+            const info = json_parse<any>(result);
+            if (info?.error) { print_error({ reason: `设备检测失败: ${info.error}` }); return; }
+            if (info?.device_info_json) {
                 setDeviceInfo(typeof info.device_info_json === "string"
-                    ? JSON.parse(info.device_info_json) : info.device_info_json);
+                    ? json_parse<any>(info.device_info_json) : info.device_info_json);
             }
-            if (info.ffmpeg_probe_json) {
+            if (info?.ffmpeg_probe_json) {
                 setFfmpegProbe(typeof info.ffmpeg_probe_json === "string"
-                    ? JSON.parse(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
+                    ? json_parse<any>(info.ffmpeg_probe_json) : info.ffmpeg_probe_json);
             }
         } catch (e) {
             print_error({ reason: "设备检测失败", err: e });

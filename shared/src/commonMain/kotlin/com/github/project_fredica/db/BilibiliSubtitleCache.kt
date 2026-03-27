@@ -5,6 +5,7 @@ import com.github.project_fredica.api.post
 import com.github.project_fredica.api.routes.BilibiliVideoSubtitleBodyRoute
 import com.github.project_fredica.api.routes.BilibiliVideoSubtitleRoute
 import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
+import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.PyCallGuard
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
@@ -197,7 +198,8 @@ object BilibiliSubtitleBodyCacheService {
     ): String {
         // Level 1：锁外快速命中
         if (!isUpdate) {
-            repo.queryBest(urlKey)?.let {
+            val l1 = repo.queryBest(urlKey)
+            l1?.let {
                 logger.debug("L1缓存命中 urlKey=$urlKey queried_at=${it.queriedAt}")
                 return it.rawResult
             }
@@ -230,7 +232,7 @@ object BilibiliSubtitleBodyCacheService {
         subtitleUrlFieldValue: String,
         isUpdate: Boolean,
     ): String {
-        val urlKey = extractUrlKey(subtitleUrlFieldValue)
+        val urlKey = BilibiliSubtitleUtil.extractSubtitleUrlKey(subtitleUrlFieldValue)
         logger.debug("请求 urlKey=$urlKey is_update=${isUpdate} original_url=${subtitleUrlFieldValue}")
         val res = fetchOrLoad(urlKey, isUpdate) {
             val pyBody = buildValidJson { kv("subtitle_url", subtitleUrlFieldValue) }
@@ -248,22 +250,4 @@ object BilibiliSubtitleBodyCacheService {
             val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
             code == 0
         }.getOrDefault(false)
-
-    /** 去掉 auth_key / wts 等会过期的 query 参数，保留稳定的路径+其余参数作为缓存 key */
-    private fun extractUrlKey(url: String): String {
-        val normalized = if (url.startsWith("//")) "https:$url" else url
-        return try {
-            val uri = java.net.URI(normalized)
-            val stableParams = (uri.query ?: "")
-                .split("&")
-                .filter { part ->
-                    val key = part.substringBefore("=")
-                    key !in setOf("auth_key", "wts", "w_rid", "e")
-                }
-                .joinToString("&")
-            "${uri.host}${uri.path}${if (stableParams.isNotEmpty()) "?$stableParams" else ""}"
-        } catch (_: Exception) {
-            normalized
-        }
-    }
 }

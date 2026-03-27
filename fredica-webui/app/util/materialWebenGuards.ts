@@ -2,6 +2,7 @@ import type { MaterialVideo } from "~/components/material-library/materialTypes"
 import type {
     ApiFetchFn,
     LlmModelMeta,
+    LlmModelAvailability,
     MaterialSubtitleContentResponse,
     MaterialSubtitleItem,
     MaterialWebenLlmResult,
@@ -98,6 +99,16 @@ export function normalizeLlmModels(data: unknown): LlmModelMeta[] {
             notes: typeof record?.notes === "string" ? record.notes : null,
         };
     }).filter(item => item.app_model_id.trim().length > 0);
+}
+
+export function normalizeLlmModelAvailability(data: unknown): LlmModelAvailability {
+    const record = asRecord(data);
+    return {
+        available_count: asNumber(record?.available_count),
+        has_any_available_model: asBoolean(record?.has_any_available_model),
+        selected_model_id: typeof record?.selected_model_id === "string" ? record.selected_model_id : null,
+        selected_model_available: asBoolean(record?.selected_model_available),
+    };
 }
 
 export function normalizeSubtitleContent(data: unknown, fallback: Pick<MaterialSubtitleContentResponse, "source" | "subtitle_url">): MaterialSubtitleContentResponse {

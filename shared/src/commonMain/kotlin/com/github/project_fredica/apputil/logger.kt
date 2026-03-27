@@ -87,7 +87,29 @@ inline fun Logger.error(msg: String, err: Throwable?) = if (err == null) {
 inline fun Logger.warn(msg: String, isHappensFrequently: Boolean, err: Throwable?) = if (err == null) {
     this.warn(msg)
 } else if (isHappensFrequently) {
-    this.warn("$msg > ${err::class.simpleName} : ${err.message}")
+    var e: Throwable? = err
+    val errMsg = StringBuilder(1024)
+    val duplicate = mutableSetOf<Throwable>()
+    while (e != null) {
+        if (duplicate.contains(e)) {
+            break
+        }
+        try {
+            errMsg.append(" > ${err::class.simpleName} : ${err.message}")
+            val suppressed = err.suppressed
+            if (!suppressed.isNullOrEmpty()) {
+                errMsg.append(" [suppressed ->")
+                for (s in suppressed) {
+                    errMsg.append("  ${s::class.simpleName} : ${s.message}  ;")
+                }
+                errMsg.append("] ")
+            }
+        } finally {
+            duplicate.add(e)
+            e = err.cause
+        }
+    }
+    this.warn("$msg$errMsg")
 } else {
     this.warn("$msg\n${err.stackTraceToString()}")
 }

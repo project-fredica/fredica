@@ -3,12 +3,37 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SummaryWebenPage from "~/routes/material.$materialId.summary.weben";
 
+// ────────────────────────────────────────────────────────────────────────────
+// SummaryWebenPage テスト概要
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Phase 7 以降、"生成"/"预览" の fetch フローは 2 段階:
+//   1. PromptTemplatePreviewRoute (SSE) → resolved prompt text
+//   2. LlmProxyChatRoute (SSE)         → LLM delta chunks
+//
+// generateReviewedResult() ヘルパーは URL で判別して両方をモックする。
+//
+// 追加テスト (W1-W4):
+//   W1 preview calls PromptTemplatePreviewRoute
+//   W2 generate calls preview script first, then LLM (sequential order)
+//   W3 script error on generate stops before LLM call
+//   W4 previewPromptScript HTTP failure calls print_error
+// ────────────────────────────────────────────────────────────────────────────
+
 const mockApiFetch = vi.fn();
 const mockWorkspaceContext = vi.fn();
 const mockAppConfig = vi.fn();
 const toastSuccess = vi.fn();
 const printError = vi.fn();
 const reportHttpError = vi.fn();
+
+vi.mock("react-router", async () => {
+    const actual = await vi.importActual<typeof import("react-router")>("react-router");
+    return {
+        ...actual,
+        useParams: () => ({ materialId: "bilibili_bvid__BV1sNA1ztEvY__P1" }),
+    };
+});
 
 vi.mock("~/routes/material.$materialId", () => ({
     useWorkspaceContext: () => mockWorkspaceContext(),
@@ -60,15 +85,26 @@ function createDeltaChunk(content: string) {
 }
 
 async function generateReviewedResult(user: ReturnType<typeof userEvent.setup>, payload: string) {
-    vi.stubGlobal("fetch", vi.fn(async () => createSseResponse([
-        createDeltaChunk(payload),
-        "data: [DONE]\n",
-    ])));
+    // Phase 7: 生成按钮触发两次 fetch:
+    //   1. PromptTemplatePreviewRoute → SSE {"type":"result","prompt_text":"..."}
+    //   2. LlmProxyChatRoute         → SSE delta chunks
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (typeof url === "string" && url.includes("PromptTemplatePreviewRoute")) {
+            return createSseResponse([
+                `data: ${JSON.stringify({ type: "result", prompt_text: "resolved prompt text" })}\n\n`,
+            ]);
+        }
+        // LlmProxyChatRoute: 返回 LLM delta 格式
+        return createSseResponse([
+            createDeltaChunk(payload),
+            "data: [DONE]\n",
+        ]);
+    }));
 
     render(<SummaryWebenPage />);
 
     await waitFor(() => {
-        expect(screen.getByText("默认聊天模型")).toBeTruthy();
+        expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy();
     });
 
     await user.click(screen.getByRole("button", { name: "生成" }));
@@ -117,6 +153,17 @@ describe("SummaryWebenPage", () => {
                     data: [{ app_model_id: "chat_model_id", label: "默认聊天模型", notes: "note" }],
                 };
             }
+            if (path.startsWith("/api/v1/LlmModelAvailabilityRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: {
+                        available_count: 1,
+                        has_any_available_model: true,
+                        selected_model_id: "chat_model_id",
+                        selected_model_available: true,
+                    },
+                };
+            }
             if (path === "/api/v1/MaterialSubtitleContentRoute") {
                 return {
                     resp: new Response("{}", { status: 200 }),
@@ -160,7 +207,13 @@ describe("SummaryWebenPage", () => {
                 { method: "GET" },
                 { silent: true },
             );
+            expect(mockApiFetch).toHaveBeenCalledWith(
+                "/api/v1/LlmModelAvailabilityRoute?selected_model_id=chat_model_id",
+                { method: "GET" },
+                { silent: true },
+            );
         });
+        expect(screen.queryByText("模型选择")).toBeNull();
     });
 
     it("keeps rendering when workspace material or API payload shape is malformed", async () => {
@@ -187,7 +240,7 @@ describe("SummaryWebenPage", () => {
         expect(screen.getByText("Weben 知识提取工作台")).toBeTruthy();
         await waitFor(() => {
             expect(screen.getByText("暂无可用字幕，请先去“字幕提取”标签获取字幕")).toBeTruthy();
-            expect(screen.getByText("默认聊天模型")).toBeTruthy();
+            expect(screen.getByRole("tab", { name: "⚠ 设置" })).toBeTruthy();
         });
     });
 
@@ -293,6 +346,17 @@ describe("SummaryWebenPage", () => {
                     data: [{ app_model_id: "chat_model_id", label: "默认聊天模型", notes: "note" }],
                 };
             }
+            if (path.startsWith("/api/v1/LlmModelAvailabilityRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: {
+                        available_count: 1,
+                        has_any_available_model: true,
+                        selected_model_id: "chat_model_id",
+                        selected_model_available: true,
+                    },
+                };
+            }
             if (path === "/api/v1/MaterialSubtitleContentRoute") {
                 return {
                     resp: new Response("{}", { status: 200 }),
@@ -335,6 +399,17 @@ describe("SummaryWebenPage", () => {
                     data: [{ app_model_id: "chat_model_id", label: "默认聊天模型", notes: "note" }],
                 };
             }
+            if (path.startsWith("/api/v1/LlmModelAvailabilityRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: {
+                        available_count: 1,
+                        has_any_available_model: true,
+                        selected_model_id: "chat_model_id",
+                        selected_model_available: true,
+                    },
+                };
+            }
             if (path === "/api/v1/MaterialSubtitleContentRoute") {
                 return {
                     resp: new Response("{}", { status: 200 }),
@@ -360,6 +435,204 @@ describe("SummaryWebenPage", () => {
 
         await waitFor(() => {
             expect(printError).toHaveBeenCalledWith({ reason: "保存到 Weben 失败: duplicate source" });
+        });
+    });
+
+    it("shows host-invalid message and disables generate when no models are available", async () => {
+        mockApiFetch.mockImplementation(async (path: string) => {
+            if (path.startsWith("/api/v1/MaterialSubtitleListRoute")) {
+                return {
+                    resp: new Response("[]", { status: 200 }),
+                    data: [],
+                };
+            }
+            if (path === "/api/v1/LlmModelListRoute") {
+                return {
+                    resp: new Response("[]", { status: 200 }),
+                    data: [],
+                };
+            }
+            if (path.startsWith("/api/v1/LlmModelAvailabilityRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: {
+                        available_count: 0,
+                        has_any_available_model: false,
+                        selected_model_id: "chat_model_id",
+                        selected_model_available: false,
+                    },
+                };
+            }
+            throw new Error(`unexpected path: ${path}`);
+        });
+
+        render(<SummaryWebenPage />);
+
+        await waitFor(() => {
+            expect(screen.getByRole("tab", { name: "⚠ 设置" })).toBeTruthy();
+            expect(screen.getByText("服主配置无效")).toBeTruthy();
+        });
+        expect(screen.getAllByRole("button", { name: "生成" })[0].hasAttribute("disabled")).toBe(true);
+    });
+
+    it("shows selected-invalid message and disables generate", async () => {
+        mockApiFetch.mockImplementation(async (path: string) => {
+            if (path.startsWith("/api/v1/MaterialSubtitleListRoute")) {
+                return {
+                    resp: new Response("[]", { status: 200 }),
+                    data: [],
+                };
+            }
+            if (path === "/api/v1/LlmModelListRoute") {
+                return {
+                    resp: new Response("[]", { status: 200 }),
+                    data: [{ app_model_id: "chat_model_id", label: "默认聊天模型", notes: "note" }],
+                };
+            }
+            if (path.startsWith("/api/v1/LlmModelAvailabilityRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: {
+                        available_count: 1,
+                        has_any_available_model: true,
+                        selected_model_id: "chat_model_id",
+                        selected_model_available: false,
+                    },
+                };
+            }
+            throw new Error(`unexpected path: ${path}`);
+        });
+
+        render(<SummaryWebenPage />);
+
+        await waitFor(() => {
+            expect(screen.getByRole("tab", { name: "⚠ 设置" })).toBeTruthy();
+            expect(screen.getByText("你配置的模型失效")).toBeTruthy();
+        });
+        expect(screen.getAllByRole("button", { name: "生成" })[0].hasAttribute("disabled")).toBe(true);
+    });
+
+    it("enables generate when PromptBuilder resolves a valid model", async () => {
+        render(<SummaryWebenPage />);
+
+        await waitFor(() => {
+            expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy();
+        });
+        expect(screen.getAllByRole("button", { name: "生成" })[0].hasAttribute("disabled")).toBe(false);
+    });
+
+    // ── W1-W4: Phase 7 backend script execution ─────────────────────────────
+
+    it("W1: 预览 calls PromptTemplatePreviewRoute (backend script execution)", async () => {
+        const fetchMock = vi.fn(async (_url: string) =>
+            createSseResponse([
+                `data: ${JSON.stringify({ type: "result", prompt_text: "my resolved prompt" })}\n\n`,
+            ])
+        );
+        vi.stubGlobal("fetch", fetchMock);
+
+        const user = userEvent.setup();
+        render(<SummaryWebenPage />);
+        await waitFor(() => { expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "预览" }));
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining("PromptTemplatePreviewRoute"),
+                expect.any(Object),
+            );
+        });
+    });
+
+    it("W2: 生成 calls preview script first then LLM (sequential)", async () => {
+        const callOrder: string[] = [];
+        vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+            callOrder.push(String(url));
+            if (url.includes("PromptTemplatePreviewRoute")) {
+                return createSseResponse([
+                    `data: ${JSON.stringify({ type: "result", prompt_text: "resolved" })}\n\n`,
+                ]);
+            }
+            return createSseResponse(["data: [DONE]\n"]);
+        }));
+
+        const user = userEvent.setup();
+        render(<SummaryWebenPage />);
+        await waitFor(() => { expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "生成" }));
+
+        await waitFor(() => {
+            const previewIdx = callOrder.findIndex(u => u.includes("PromptTemplatePreviewRoute"));
+            const llmIdx = callOrder.findIndex(u => u.includes("LlmProxyChatRoute"));
+            expect(previewIdx).toBeGreaterThanOrEqual(0);
+            expect(llmIdx).toBeGreaterThanOrEqual(0);
+            // preview script 必须先于 LLM 调用
+            expect(previewIdx).toBeLessThan(llmIdx);
+        });
+    });
+
+    it("W3: script error on 生成 stops before LLM call", async () => {
+        const calledUrls: string[] = [];
+        vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+            calledUrls.push(String(url));
+            if (url.includes("PromptTemplatePreviewRoute")) {
+                return createSseResponse([
+                    `data: ${JSON.stringify({ type: "error", error: "字幕不可用", error_type: "script_error" })}\n\n`,
+                ]);
+            }
+            return createSseResponse(["data: [DONE]\n"]);
+        }));
+
+        const user = userEvent.setup();
+        render(<SummaryWebenPage />);
+        await waitFor(() => { expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "生成" }));
+
+        await waitFor(() => {
+            expect(calledUrls.some(u => u.includes("PromptTemplatePreviewRoute"))).toBe(true);
+            expect(printError).toHaveBeenCalledWith({ reason: "脚本执行失败: 字幕不可用" });
+        });
+        // 确认 LLM 路由未被调用
+        expect(calledUrls.every(u => !u.includes("LlmProxyChatRoute"))).toBe(true);
+    });
+
+    it("reports script error on 预览", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () =>
+            createSseResponse([
+                `data: ${JSON.stringify({ type: "error", error: "脚本异常", error_type: "script_error" })}\n\n`,
+            ])
+        ));
+
+        const user = userEvent.setup();
+        render(<SummaryWebenPage />);
+        await waitFor(() => { expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "预览" }));
+
+        await waitFor(() => {
+            expect(printError).toHaveBeenCalledWith({ reason: "脚本执行失败: 脚本异常" });
+            expect(screen.getByText("脚本执行失败：脚本异常")).toBeTruthy();
+        });
+    });
+
+    it("W4: previewPromptScript HTTP failure calls print_error on 预览", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () =>
+            new Response("Internal Error", { status: 500 })
+        ));
+
+        const user = userEvent.setup();
+        render(<SummaryWebenPage />);
+        await waitFor(() => { expect(screen.getByText("当前使用的模型为 默认聊天模型")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "预览" }));
+
+        await waitFor(() => {
+            expect(printError).toHaveBeenCalledWith(
+                expect.objectContaining({ reason: "构建 Prompt 预览失败" }),
+            );
         });
     });
 });

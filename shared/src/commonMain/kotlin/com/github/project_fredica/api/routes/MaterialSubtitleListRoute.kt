@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.apputil.BilibiliMaterialExtra
 import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.createLogger
@@ -56,8 +57,8 @@ object MaterialSubtitleListRoute : FredicaApi.Route {
 
         val meta = BilibiliSubtitleUtil.parseMateRaw(cached.rawResult).getOrNull()
         val items: List<MaterialSubtitleItem> = meta?.subtitles?.mapNotNull { item ->
-            // 优先使用 subtitle_url_v2（更稳定），回退到 subtitle_url
-            val url = item.subtitleUrlV2 ?: item.subtitleUrl ?: return@mapNotNull null
+            // 与 BilibiliSubtitlePanel 保持一致：优先使用 subtitle_url，回退到 subtitle_url_v2
+            val url = item.subtitleUrl ?: item.subtitleUrlV2 ?: return@mapNotNull null
             val lan = item.lan ?: return@mapNotNull null
             MaterialSubtitleItem(
                 lan = lan,
@@ -86,10 +87,4 @@ data class MaterialSubtitleItem(
     @SerialName("subtitle_url") val subtitleUrl: String,
     /** 0=人工字幕，1=AI 字幕 */
     val type: Int = 0,
-)
-
-/** 仅用于从 Material.extra JSON 中提取 bvid 字段，忽略其他字段 */
-@Serializable
-internal data class BilibiliMaterialExtra(
-    val bvid: String? = null,
 )

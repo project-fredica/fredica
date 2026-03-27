@@ -4,16 +4,15 @@ import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { BilibiliSubtitlePanel } from "~/components/bilibili/BilibiliSubtitlePanel";
 import { type BilibiliExtra } from "~/components/material-library/materialTypes";
 import { useFloatingPlayerCtx } from "~/context/floatingPlayer";
+import { json_parse } from "~/util/json";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getBilibiliInfo(material: { source_type: string; source_id: string; id: string; extra: string }) {
     if (material.source_type !== "bilibili") return null;
     let bvid = material.source_id;
-    try {
-        const ext = JSON.parse(material.extra) as BilibiliExtra;
-        if (ext.bvid) bvid = ext.bvid;
-    } catch { /* ignore */ }
+    const ext = json_parse<BilibiliExtra>(material.extra);
+    if (ext?.bvid) bvid = ext.bvid;
     // 分 P 素材 ID 格式：<bvid>__P<n>
     const pageMatch = material.id.match(/__P(\d+)$/);
     const pageIndex = pageMatch ? parseInt(pageMatch[1], 10) - 1 : 0;

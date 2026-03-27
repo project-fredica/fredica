@@ -22,12 +22,14 @@ function WarningList({ warnings }: { warnings: BuildPromptResult["warnings"] }) 
 export function PromptPreviewPane({
     result,
     loading = false,
+    actions,
 }: {
     result: BuildPromptResult | null;
     loading?: boolean;
+    actions?: React.ReactNode;
 }) {
     return (
-        <PromptPaneShell title="Prompt 预览">
+        <PromptPaneShell title="Prompt 预览" actions={actions}>
             <div className="h-full flex flex-col min-h-[360px]">
                 {loading && (
                     <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500">正在构建预览…</div>

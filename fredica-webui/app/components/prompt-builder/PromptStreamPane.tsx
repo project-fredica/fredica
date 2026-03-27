@@ -3,12 +3,14 @@ import { PromptPaneShell } from "./PromptPaneShell";
 export function PromptStreamPane({
     text,
     error,
+    actions,
 }: {
     text: string;
     error?: string | null;
+    actions?: React.ReactNode;
 }) {
     return (
-        <PromptPaneShell title="LLM 输出">
+        <PromptPaneShell title="LLM 输出" actions={actions}>
             <div className="h-full min-h-[360px] overflow-auto p-4 space-y-3">
                 {error ? (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>

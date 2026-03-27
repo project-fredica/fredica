@@ -19,10 +19,12 @@ import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * OpenAI 兼容 SSE 流式客户端。
@@ -42,7 +44,7 @@ object LlmSseClient {
      * 流式调用 OpenAI 兼容 Chat Completions API（SSE）。
      *
      * @param modelConfig  模型配置（含 baseUrl、apiKey、capabilities）
-     * @param requestBody  完整请求 JSON 字符串，调用方负责构造（含 messages、stream:true 等字段）
+     * @param requestBody  完整请求 JSON 字符串，调用方负责构造（含 messages 等字段；若模型不支持流式则内部会改写 stream=false）
      * @param onChunk      每收到一个 delta.content 片段时的回调，可用于实时更新 UI 或进度
      * @param cancelSignal 取消信号；调用方完成此 Deferred 后，客户端在下一行读取前检测并中断
      * @return 所有 delta 拼接后的完整 content 字符串；若被取消则返回 null
@@ -53,10 +55,13 @@ object LlmSseClient {
         onChunk: ((String) -> Unit)? = null,
         cancelSignal: CompletableDeferred<Unit>? = null,
     ): String? = withContext(Dispatchers.IO) {
-        // 模型不支持流式输出时降级为普通 POST，避免 SSE 解析错误
+        // 模型不支持流式输出时降级为普通 POST，并强制请求体 stream=false，避免上游仍返回 SSE
         if (LlmCapability.STREAMING !in modelConfig.capabilities) {
             logger.info("streamChat: model=${modelConfig.model} 不含 STREAMING 能力，降级为非流式请求")
-            return@withContext fetchNonStreaming(modelConfig, requestBody)
+            return@withContext fetchNonStreaming(
+                modelConfig = modelConfig,
+                requestBody = normalizeRequestBodyForStreamingCapability(requestBody, supportsStreaming = false),
+            )
         }
 
         val fullContent = StringBuilder()
@@ -116,6 +121,9 @@ object LlmSseClient {
 
                 logger.debug("streamChat stream end: model=${modelConfig.model} lines=$lineCount chunks=$chunkCount totalLen=${fullContent.length}")
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            logger.debug("streamChat cancelled: model=${modelConfig.model}")
+            throw e
         } catch (e: Exception) {
             logger.error("streamChat exception: model=${modelConfig.model}", e)
             throw e
@@ -127,8 +135,9 @@ object LlmSseClient {
             return@withContext null
         }
 
-        logger.debug("streamChat done: model=${modelConfig.model} totalLen=${fullContent.length}")
-        fullContent.toString()
+        val result = fullContent.toString()
+        logger.info("streamChat done: model=${modelConfig.model} totalLen=${result.length} content=$result")
+        result
     }
 
     /**
@@ -150,19 +159,66 @@ object LlmSseClient {
             logger.debug("fetchNonStreaming response: status=${response.status} model=${modelConfig.model}")
 
             val body = response.bodyAsText()
-            // 按 OpenAI 响应格式解析：choices[0].message.content
-            val content = AppUtil.GlobalVars.json.parseToJsonElement(body).jsonObject
-                .getValue("choices").jsonArray[0].jsonObject
-                .getValue("message").jsonObject
-                .getValue("content").jsonPrimitive.content
-
-            logger.debug("fetchNonStreaming done: model=${modelConfig.model} contentLen=${content.length}")
+            val content = extractResponseContent(body)
+            logger.info("fetchNonStreaming done: model=${modelConfig.model} status=${response.status} contentLen=${content.length} content=$content")
             content
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            logger.debug("fetchNonStreaming cancelled: model=${modelConfig.model}")
+            throw e
         } catch (e: Exception) {
             logger.error("fetchNonStreaming exception: model=${modelConfig.model}", e)
             throw e
         }
     }
+
+    internal fun normalizeRequestBodyForStreamingCapability(
+        requestBody: String,
+        supportsStreaming: Boolean,
+    ): String {
+        val requestJson = AppUtil.GlobalVars.json.parseToJsonElement(requestBody).jsonObject
+        return buildJsonObject {
+            requestJson.forEach { (key, value) -> put(key, value) }
+            put("stream", supportsStreaming)
+        }.toString()
+    }
+
+    internal fun extractResponseContent(body: String): String {
+        val trimmedBody = body.trim()
+        if (trimmedBody.isBlank()) {
+            return ""
+        }
+        if (!trimmedBody.startsWith("data:")) {
+            return extractMessageContent(trimmedBody)
+        }
+
+        val sseContent = buildString {
+            trimmedBody.lineSequence().forEach { line ->
+                val data = SseLineParser.parseLine(line) ?: return@forEach
+                if (data == "[DONE]") return@forEach
+                val chunk = extractDeltaContent(data) ?: return@forEach
+                append(chunk)
+            }
+        }
+//        if (sseContent.isNotEmpty())
+        return sseContent
+
+//        val firstDataJson = trimmedBody.lineSequence()
+//            .mapNotNull(SseLineParser::parseLine)
+//            .firstOrNull { it != "[DONE]" }
+//            ?: error("SSE 响应中缺少 data 内容")
+//        return extractMessageContent(firstDataJson)
+    }
+
+    private fun extractMessageContent(bodyJson: String): String {
+        val choices = AppUtil.GlobalVars.json.parseToJsonElement(bodyJson).jsonObject
+            .getValue("choices").jsonArray[0].jsonObject
+//            .getValue("message").jsonObject
+//            .getValue("content").jsonPrimitive.content
+        val message = choices["message"]
+        val content = message?.jsonObject?.getValue("content") ?: choices.getValue("content")
+        return content.jsonPrimitive.content
+    }
+
 
     /**
      * 从单条 SSE `data:` 行的 JSON 内容中提取 `choices[0].delta.content`。

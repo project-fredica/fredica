@@ -6,6 +6,7 @@ import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, callBridgeOrNull, BridgeUnavailableError } from "~/util/bridge";
 import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
 import { print_error } from "~/util/error_handler";
+import { json_parse } from "~/util/json";
 
 export function meta({}: Route.MetaArgs) {
     return [{ title: "PyTorch 环境配置 - Fredica" }];
@@ -157,13 +158,11 @@ export default function TorchConfigPage() {
         // 恢复活跃下载任务（页面刷新后 state 丢失场景）
         callBridgeOrNull("get_active_torch_download").then(raw => {
             if (!raw) return;
-            try {
-                const res = JSON.parse(raw);
-                if (res.workflow_run_id) {
-                    setDownloadWorkflowRunId(res.workflow_run_id);
-                    setDownloading(true);
-                }
-            } catch { /* ignore */ }
+            const res = json_parse<any>(raw);
+            if (res?.workflow_run_id) {
+                setDownloadWorkflowRunId(res.workflow_run_id);
+                setDownloading(true);
+            }
         }).catch(() => {});
     }, []);
 
@@ -213,13 +212,13 @@ export default function TorchConfigPage() {
             .then(raw => {
                 if (!raw) { setMirrorSupportedVariants(null); return; }
                 try {
-                    const res = JSON.parse(raw) as { variants?: string[]; error?: string };
-                    if (res.error) {
+                    const res = json_parse<{ variants?: string[]; error?: string }>(raw);
+                    if (res?.error) {
                         print_error({ reason: `获取镜像版本列表失败: ${res.error}`, variables: { mirror_key: selectedMirrorKey } });
                         setMirrorSupportedVariants(null);
                         return;
                     }
-                    const variants = res.variants ?? null;
+                    const variants = res?.variants ?? null;
                     setMirrorSupportedVariants(variants);
                     if (variants && variants.length > 0 && selectedVariant && !variants.includes(selectedVariant)) {
                         const fallback = (recommendedVariant && variants.includes(recommendedVariant))
@@ -264,7 +263,7 @@ export default function TorchConfigPage() {
         }
         callBridge("get_torch_pip_command", JSON.stringify(params))
             .then(raw => {
-                try { setPipCommand(JSON.parse(raw).command ?? ""); } catch { setPipCommand(""); }
+                setPipCommand(json_parse<any>(raw)?.command ?? "");
             })
             .catch(() => setPipCommand(""));
     }, [selectedVariant, useProxy, proxyUrl, selectedMirrorKey, customMirrorUrl, selectedTorchVersions, perMirrorTorchVersions]);
@@ -289,11 +288,12 @@ export default function TorchConfigPage() {
         try {
             const raw = await callBridgeOrNull("get_torch_info");
             if (!raw) return;
-            const d = JSON.parse(raw) as TorchInfo & { error?: string };
-            if (d.error) {
+            const d = json_parse<TorchInfo & { error?: string }>(raw);
+            if (d?.error) {
                 print_error({ reason: `加载 torch 配置失败: ${d.error}`, variables: { raw } });
                 return;
             }
+            if (!d) return;
             setInfo(d);
             setUseProxy(d.torch_download_use_proxy);
             setProxyUrl(d.torch_download_proxy_url);
@@ -314,12 +314,9 @@ export default function TorchConfigPage() {
             } else {
                 setSelectedMirrorKey("official");
             }
-            try {
-                if (d.torch_recommendation_json) {
-                    setRecommendation(JSON.parse(d.torch_recommendation_json) as TorchRecommendation);
-                }
-            } catch (e) {
-                print_error({ reason: "解析 torch 推荐信息失败", err: e });
+            if (d.torch_recommendation_json) {
+                const rec = json_parse<TorchRecommendation>(d.torch_recommendation_json);
+                if (rec) setRecommendation(rec);
             }
         } catch (e) {
             print_error({ reason: "加载 torch 配置异常", err: e });
@@ -330,12 +327,12 @@ export default function TorchConfigPage() {
         try {
             const raw = await callBridgeOrNull("get_torch_check", JSON.stringify({}));
             if (!raw) return;
-            const d = JSON.parse(raw) as { already_ok?: boolean; installed_version?: string | null; error?: string };
-            if (d.error) {
+            const d = json_parse<{ already_ok?: boolean; installed_version?: string | null; error?: string }>(raw);
+            if (d?.error) {
                 print_error({ reason: `检查 torch 下载状态失败: ${d.error}` });
                 return;
             }
-            setCheckItems([{ variant: "", downloaded: d.already_ok ?? false, version: d.installed_version ?? null }]);
+            setCheckItems([{ variant: "", downloaded: d?.already_ok ?? false, version: d?.installed_version ?? null }]);
         } catch (e) {
             print_error({ reason: "检查 torch 下载状态异常", err: e });
         }
@@ -346,14 +343,14 @@ export default function TorchConfigPage() {
         try {
             const raw = await callBridgeOrNull("get_torch_all_mirror_variants", JSON.stringify({ use_proxy: useProxy, proxy: proxyUrl.trim() }));
             if (!raw) { setAllVariantsLoading(false); return; }
-            const res = JSON.parse(raw) as { variants?: string[]; per_mirror?: Record<string, string[]>; per_mirror_torch_versions?: Record<string, Record<string, string[]>>; error?: string };
-            if (res.error) {
+            const res = json_parse<{ variants?: string[]; per_mirror?: Record<string, string[]>; per_mirror_torch_versions?: Record<string, Record<string, string[]>>; error?: string }>(raw);
+            if (res?.error) {
                 print_error({ reason: `查询镜像版本列表失败: ${res.error}` });
                 return;
             }
-            if (res.variants && res.variants.length > 0) setAllVariants(res.variants);
-            if (res.per_mirror) setPerMirrorVariants(res.per_mirror);
-            if (res.per_mirror_torch_versions) setPerMirrorTorchVersions(res.per_mirror_torch_versions);
+            if (res?.variants && res.variants.length > 0) setAllVariants(res.variants);
+            if (res?.per_mirror) setPerMirrorVariants(res.per_mirror);
+            if (res?.per_mirror_torch_versions) setPerMirrorTorchVersions(res.per_mirror_torch_versions);
         } catch (e) {
             print_error({ reason: "查询镜像版本列表异常", err: e });
         } finally {
@@ -368,14 +365,14 @@ export default function TorchConfigPage() {
         try {
             const raw = await callBridgeOrNull("refresh_torch_mirror_cache", JSON.stringify({ use_proxy: useProxy, proxy: proxyUrl.trim() }));
             if (!raw) { setAllVariantsLoading(false); return; }
-            const res = JSON.parse(raw) as { variants?: string[]; per_mirror?: Record<string, string[]>; per_mirror_torch_versions?: Record<string, Record<string, string[]>>; error?: string };
-            if (res.error) {
+            const res = json_parse<{ variants?: string[]; per_mirror?: Record<string, string[]>; per_mirror_torch_versions?: Record<string, Record<string, string[]>>; error?: string }>(raw);
+            if (res?.error) {
                 print_error({ reason: `刷新镜像缓存失败: ${res.error}` });
                 return;
             }
-            if (res.variants && res.variants.length > 0) setAllVariants(res.variants);
-            if (res.per_mirror) setPerMirrorVariants(res.per_mirror);
-            if (res.per_mirror_torch_versions) setPerMirrorTorchVersions(res.per_mirror_torch_versions);
+            if (res?.variants && res.variants.length > 0) setAllVariants(res.variants);
+            if (res?.per_mirror) setPerMirrorVariants(res.per_mirror);
+            if (res?.per_mirror_torch_versions) setPerMirrorTorchVersions(res.per_mirror_torch_versions);
         } catch (e) {
             print_error({ reason: "刷新镜像缓存异常", err: e });
         } finally {
@@ -414,14 +411,14 @@ export default function TorchConfigPage() {
         setDetecting(true);
         try {
             const raw = await callBridge("run_torch_detect");
-            const res = JSON.parse(raw);
-            if (res.error) {
+            const res = json_parse<any>(raw);
+            if (res?.error) {
                 print_error({ reason: `GPU 检测失败: ${res.error}` });
                 return;
             }
-            if (res.torch_recommendation_json) {
-                try { setRecommendation(JSON.parse(res.torch_recommendation_json)); }
-                catch (e) { print_error({ reason: "解析 GPU 检测结果失败", err: e }); }
+            if (res?.torch_recommendation_json) {
+                const rec = json_parse<TorchRecommendation>(res.torch_recommendation_json);
+                if (rec) setRecommendation(rec);
             }
             await loadCheckItems();
         } catch (e) {
@@ -437,13 +434,13 @@ export default function TorchConfigPage() {
             const params: Record<string, unknown> = { variant: selectedVariant };
             if (useProxy && proxyUrl.trim()) { params.use_proxy = true; params.proxy = proxyUrl.trim(); }
             const raw = await callBridge("get_torch_mirror_check", JSON.stringify(params));
-            const res = JSON.parse(raw) as { results: MirrorCheckResult[]; error?: string };
-            if (res.error) {
+            const res = json_parse<{ results: MirrorCheckResult[]; error?: string }>(raw);
+            if (res?.error) {
                 print_error({ reason: `探测镜像可用性失败: ${res.error}`, variables: { variant: selectedVariant } });
                 return;
             }
             const map: Record<string, MirrorCheckResult> = {};
-            for (const r of res.results ?? []) map[r.key] = r;
+            for (const r of res?.results ?? []) map[r.key] = r;
             setMirrorCheckResults(map);
         } catch (e) {
             if (e instanceof BridgeUnavailableError) { setCheckingMirrors(false); return; }
@@ -478,8 +475,8 @@ export default function TorchConfigPage() {
                 custom_index_url: selectedVariant === "custom" ? customIndexUrl : "",
                 custom_variant_id: selectedVariant === "custom" ? customVariantId.trim() : "",
             }));
-            const res = JSON.parse(raw);
-            if (res.error) {
+            const res = json_parse<any>(raw);
+            if (res?.error) {
                 if (res.error === "TASK_ALREADY_ACTIVE" && res.workflow_run_id) {
                     setDownloadWorkflowRunId(res.workflow_run_id);
                 } else {
@@ -867,8 +864,8 @@ export default function TorchConfigPage() {
                                             try {
                                                 const raw = await callBridgeOrNull("get_system_proxy", "{}");
                                                 if (!raw) return;
-                                                const res = JSON.parse(raw) as { proxy_url?: string };
-                                                const detected = res.proxy_url ?? "";
+                                                const res = json_parse<{ proxy_url?: string }>(raw);
+                                                const detected = res?.proxy_url ?? "";
                                                 if (detected) {
                                                     setProxyUrl(detected);
                                                     setUseProxy(true);

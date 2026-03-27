@@ -19,7 +19,7 @@ object BilibiliVideoSubtitleBodyRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoSubtitleBodyParam>().getOrThrow()
-        val raw = BilibiliSubtitleBodyCacheService.fetchBilibiliSubtitleBody(p.subtitleUrl, isUpdate = false)
+        val raw = BilibiliSubtitleBodyCacheService.fetchBilibiliSubtitleBody(p.subtitleUrl, isUpdate = p.isUpdate)
         return ValidJsonString(raw)
     }
 }

@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
@@ -74,9 +75,8 @@ object MaterialSubtitleContentRoute : FredicaApi.Route {
             subtitleUrlFieldValue = param.subtitleUrl,
             isUpdate = param.isUpdate,
         )
-        val payload = raw.loadJsonModel<BilibiliSubtitleBodyPayload>().getOrNull()
-        val lines = payload?.body.orEmpty().mapNotNull { it.content?.trim() }.filter { it.isNotEmpty() }
-        val text = lines.joinToString("\n")
+        val text = BilibiliSubtitleUtil.parseSubtitleBodyText(raw) ?: ""
+        val lines = text.lines().filter { it.isNotEmpty() }
         return MaterialSubtitleContentResponse(
             text = text,
             wordCount = text.length,
@@ -101,14 +101,4 @@ data class MaterialSubtitleContentResponse(
     @SerialName("segment_count") val segmentCount: Int,
     val source: String,
     @SerialName("subtitle_url") val subtitleUrl: String,
-)
-
-@Serializable
-private data class BilibiliSubtitleBodyPayload(
-    val body: List<BilibiliSubtitleBodyItem> = emptyList(),
-)
-
-@Serializable
-private data class BilibiliSubtitleBodyItem(
-    val content: String? = null,
 )

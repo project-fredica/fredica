@@ -202,29 +202,67 @@ return JSONResponse(content=recommendation.to_dict())
 
 ## 3. 前端层（TypeScript / React）
 
-### 3.1 Bridge 返回值解析
+前端 JSON 工具分两个文件：
 
-`callBridge` 返回 `string`，用 `JSON.parse` 解析后立即做类型断言：
+- **`app/util/json.ts`**：类型定义（`JsonValue` / `JsonObject` / `JsonArray` / `JsonPrimitive`）、运行时类型守卫、`json_parse`
+- **`app/util/llm.ts`**：`parseJsonFromText`（从 LLM 自由文本提取 JSON）
+
+### 3.1 `json_parse` — 安全的 `JSON.parse` 封装
+
+`json_parse` 是 `JSON.parse` 的直接替代，额外处理 U+2028/U+2029 行分隔符，失败时抛出异常。
+
+> **禁止**在前端直接调用裸 `JSON.parse`。
+
+需要容错时包一层 `try/catch`（例如 `_tryParseCandidate` 中降级到 JSON5 的模式）。
+
+### 3.2 类型守卫
+
+`json.ts` 导出四个运行时守卫，递归验证整棵 JSON 树，并检测循环引用：
+
+- `isJsonObject(x)` — 纯朴素对象（拒绝 `Date`、`RegExp`、`Map` 等内置对象及包装对象）
+- `isJsonArray(x)` — JSON 数组
+- `isJsonPrimitive(x)` — `string | number`（有限值，拒绝 `NaN`/`Infinity`）`| boolean | null`
+- `isJsonValue(x)` — 以上三者之一
+
+### 3.3 Bridge 返回值解析
+
+`callBridge` 返回 `string`，用 `json_parse` 解析后做类型断言：
 
 ```ts
+import { json_parse } from "~/util/json";
+
 const raw = await callBridge("get_torch_info", "{}");
-const res = JSON.parse(raw) as { variant: string; error?: string };
+const res = json_parse<{ variant: string; error?: string }>(raw);
 if (res.error) { print_error({ reason: res.error }); return; }
 ```
 
-### 3.2 API 响应解析
+### 3.4 API 响应解析
 
-`apiFetch` 返回 `Response`，用 `parseJsonBody` 解析：
+`apiFetch` 返回 `Response`，用 `parseJsonBody` 解析（内部调用 `json_parse`）：
 
 ```ts
 import { parseJsonBody } from "~/util/app_fetch";
 
-const { resp } = await apiFetch("/api/v1/SomeRoute", { method: "POST", body: JSON.stringify(body) });
+const { resp } = await apiFetch("/api/v1/SomeRoute", {
+    method: "POST",
+    body: JSON.stringify({ key: value }),   // 请求体用 JSON.stringify 序列化
+});
 if (!resp.ok) { reportHttpError("操作失败", resp); return; }
 const data = await parseJsonBody<{ id: string }>(resp);
 ```
 
-### 3.3 序列化请求体
+### 3.5 从 LLM 输出提取 JSON — `parseJsonFromText`
+
+LLM 输出格式不固定，`parseJsonFromText` 按优先级依次尝试：
+
+1. **Markdown 代码块**（` ```json ` 或 ` ``` `）
+2. **整体解析**：直接对整个字符串调用 `json_parse`
+3. **JSONL**：按行解析，≥2 行成功时返回数组
+4. **裸 JSON**：扫描第一个 `{` / `[`，用括号计数法提取子串
+
+每个阶段先用标准 `json_parse`，失败后自动降级到 **JSON5**（支持注释、尾逗号、裸键名、单引号）。无法解析时返回 `null`。
+
+### 3.6 序列化请求体
 
 直接用 `JSON.stringify`：
 
@@ -241,8 +279,10 @@ body: JSON.stringify({ variant, download_dir: downloadDir })
 | 构建 JSON 对象 | `buildValidJson { kv(...) }` | `TypedDict` 实例 / `dataclass.to_dict()` | `JSON.stringify({...})` |
 | 序列化对象 | `AppUtil.dumpJsonStr(obj)` | `JSONResponse(content=obj)` | `JSON.stringify(obj)` |
 | 序列化 JsonElement | `elem.dumpJsonStr()` | — | — |
-| 反序列化为树 | `str.loadJson()` | `await request.json()` | `JSON.parse(raw)` |
-| 反序列化为模型 | `str.loadJsonModel<T>()` | `TypedDict` / `dataclass` | `JSON.parse(raw) as T` |
+| 安全反序列化 | `str.loadJson()` | `await request.json()` | `json_parse<T>(raw)` |
+| 反序列化为模型 | `str.loadJsonModel<T>()` | `TypedDict` / `dataclass` | `json_parse<T>(raw)` |
+| 从 LLM 文本提取 JSON | — | — | `parseJsonFromText(raw)` |
+| 类型守卫 | — | — | `isJsonObject(x)` / `isJsonValue(x)` |
 | 提取字段 | `jsonObj["key"].asT<String>()` | `data.get("key", "")` | `res.key ?? ""` |
 | 局部修改对象 | `obj.mapOneKey("k") { ... }` | dict spread / copy | `{ ...obj, key: newVal }` |
 | 直接操作 Json 实例 | `AppUtil.GlobalVars.json`（需显式 import） | — | — |

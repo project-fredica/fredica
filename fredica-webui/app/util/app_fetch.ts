@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppConfig } from "~/context/appConfig";
 import { print_error, reportHttpError } from "./error_handler";
+import { json_parse, type JsonValue } from "~/util/json";
 
 export const DEFAULT_SERVER_PORT = "7631";
 
@@ -17,29 +18,12 @@ function getAppHost(
     return `${s}://${d}:${p}`;
 }
 
-export function buildAuthHeaders(token?: string | null): Record<string, string> {
+export function buildAuthHeaders(
+    token?: string | null,
+): Record<string, string> {
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
 }
-
-/**
- * 解析响应体为 JSON。
- *
- * 供需要直接调用 `fetch` 的场景使用（如不便使用 `useAppFetch` Hook 的工具函数）。
- * 在组件内部优先使用 `useAppFetch`，它已内部调用此函数。
- */
-export async function parseJsonBody(resp: Response): Promise<unknown> {
-    let res = await resp.json();
-    if (typeof res === "string") {
-        try {
-            res = JSON.parse(res);
-        } catch {
-            // ignore
-        }
-    }
-    return res;
-}
-
 /**
  * 创建一个带超时的 AbortController。
  *
@@ -106,7 +90,7 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
 }
 
 /**
- * 统一的应用 API 请求 Hook，自动注入 auth header、管理超时、处理双重 JSON stringify。
+ * 统一的应用 API 请求 Hook，自动注入 auth header、管理超时。
  *
  * ## 两种使用模式
  *
@@ -128,6 +112,8 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * 不传 `appPath`，只使用返回的 `apiFetch` 函数。调用方自行管理 loading / error 状态。
  * `apiFetch` 返回 `{ resp, data }`，**不会**因 HTTP 非 2xx 抛错，调用方需检查 `resp.ok`。
  * 仅在网络故障、超时、请求被中止时 throw，建议在调用处用 try/catch 处理。
+ *
+ * 请求体用 `JSON.stringify` 序列化；响应体已通过 `parseJsonBody`（内部调用 `json_parse`）解析。
  *
  * ```tsx
  * const { apiFetch } = useAppFetch();
@@ -201,7 +187,7 @@ export function useImageProxyUrl(): (imageUrl: string) => string {
  * - 声明式模式中，`init` / `parseJson` / `timeout` 不在 deps 内，更改这些参数
  *   不会自动重新请求；若需动态变化，请改用命令式 `apiFetch`。
  */
-export function useAppFetch<J = unknown>(param?: {
+export function useAppFetch<J extends JsonValue = JsonValue>(param?: {
     /** 声明式自动请求的路径（相对于 API host）。不传则仅使用命令式 apiFetch。 */
     appPath?: string;
     /** 声明式请求的 fetch init（signal 由内部管理，勿传）。 */
@@ -234,7 +220,9 @@ export function useAppFetch<J = unknown>(param?: {
         appConfig.webserver_schema,
     );
     // storage 未加载完或 url 为 null 时跳过声明式请求
-    const url = param?.appPath != null && isStorageLoaded ? `${host}${param.appPath}` : null;
+    const url = param?.appPath != null && isStorageLoaded
+        ? `${host}${param.appPath}`
+        : null;
 
     // ── 声明式自动请求 ────────────────────────────────────────────────────────
     // deps 只跟踪 url 和 authToken：这两者是"应该重新获取数据"的信号。
@@ -278,13 +266,15 @@ export function useAppFetch<J = unknown>(param?: {
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    setData((await parseJsonBody(resp)) as J);
+                    setData(json_parse<J>(await resp.text()));
                 }
                 setError(null);
             } catch (err) {
                 // 组件卸载或外部取消触发的 AbortError 属于正常 cleanup，不写入错误状态
                 if (cancelled) return;
-                if (err instanceof DOMException && err.name === "AbortError") return;
+                if (err instanceof DOMException && err.name === "AbortError") {
+                    return;
+                }
                 print_error({
                     reason: `HTTP 请求失败 : ${appPath}  ---  ${err}`,
                     err,
@@ -307,16 +297,34 @@ export function useAppFetch<J = unknown>(param?: {
     // useCallback 保证引用稳定，host / authToken 变化时才重建，
     // 可安全放入其他 hook 的 deps 数组。
     const apiFetch = useCallback(
-        async (
+        async <J2 extends JsonValue = JsonValue>(
             path: string,
             init?: RequestInit,
-            options?: { parseJson?: boolean; timeout?: number; silent?: boolean; signal?: AbortSignal },
-        ): Promise<{ resp: Response; data: unknown }> => {
-            const { parseJson = true, timeout = 900_000, silent = false, signal: externalSignal } = options ?? {};
+            options?: {
+                parseJson?: boolean;
+                timeout?: number;
+                silent?: boolean;
+                signal?: AbortSignal;
+            },
+        ): Promise<{ resp: Response; data: J2 | null }> => {
+            const {
+                parseJson = true,
+                timeout = 900_000,
+                silent = false,
+                signal: externalSignal,
+            } = options ?? {};
             // 等待 storage 加载完成，确保 authToken 已从 localStorage 恢复
-            await new Promise<void>(resolve => {
-                if (isStorageLoadedRef.current) { resolve(); return; }
-                const id = setInterval(() => { if (isStorageLoadedRef.current) { clearInterval(id); resolve(); } }, 10);
+            await new Promise<void>((resolve) => {
+                if (isStorageLoadedRef.current) {
+                    resolve();
+                    return;
+                }
+                const id = setInterval(() => {
+                    if (isStorageLoadedRef.current) {
+                        clearInterval(id);
+                        resolve();
+                    }
+                }, 10);
             });
             const { abort, clearTimer } = makeAbortWithTimeout(timeout);
             const signal = externalSignal
@@ -331,20 +339,27 @@ export function useAppFetch<J = unknown>(param?: {
                 );
                 clearTimer();
                 if (!resp.ok && !allowNot2XX) {
-                    if (!silent) reportHttpError(`HTTP 请求失败 : ${path}`, resp);
+                    if (!silent) {
+                        reportHttpError(`HTTP 请求失败 : ${path}`, resp);
+                    }
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    return { resp, data: await parseJsonBody(resp) };
+                    return { resp, data: json_parse<J2>(await resp.text()) };
                 }
                 return { resp, data: null };
             } catch (err) {
                 clearTimer();
-                if (!(err instanceof DOMException && err.name === "AbortError") && !silent) print_error({
-                    reason: `HTTP 请求失败 : ${path}  ---  ${err}`,
-                    err,
-                    variables: { param, host, path },
-                });
+                if (
+                    !(err instanceof DOMException &&
+                        err.name === "AbortError") && !silent
+                ) {
+                    print_error({
+                        reason: `HTTP 请求失败 : ${path}  ---  ${err}`,
+                        err,
+                        variables: { param, host, path },
+                    });
+                }
                 throw err;
             }
         },

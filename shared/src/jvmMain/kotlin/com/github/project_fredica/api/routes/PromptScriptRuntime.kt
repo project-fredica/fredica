@@ -23,6 +23,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.warn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -59,21 +60,25 @@ object PromptScriptRuntime {
     /**
      * 在 GraalJS 沙箱中执行脚本，返回执行结果。
      *
-     * @param scriptCode 用户脚本（必须含 main() 函数）。
-     * @param provider   上下文数据提供者（按素材 ID 绑定）。
+     * [PromptRuntimeContextProvider] 由内部创建，通过读取 GraalJS bindings 中的 `__materialId` 获取素材 ID。
+     * 该变量由前端编辑器在脚本头部自动注入（不属于模板内容）。
+     *
+     * @param scriptCode 完整脚本（含前端注入的头部，必须含 main() 函数）。
      * @param mode       执行模式，影响超时阈值。
      */
     suspend fun execute(
         scriptCode: String,
-        provider: PromptRuntimeContextProvider,
         mode: Mode,
     ): PromptSandboxResult {
-        // Preview: 5s; Run: 8s
-        val timeoutMs = if (mode == Mode.PREVIEW) 5_000L else 8_000L
+        // 5 分钟超时（字幕加载等 IO 操作耗时较长）
+        val timeoutMs = 300_000L
         val logs = mutableListOf<PromptSandboxLog>()
 
+        logger.debug("[PromptScriptRuntime] 开始执行: mode=$mode scriptLength=${scriptCode.length}")
         return withContext(Dispatchers.IO) {
             val context = buildGraalContext()
+            // materialId 由前端编辑器在脚本头部注入，脚本通过路径字符串显式传递给 getVar。
+            val provider = PromptRuntimeContextProvider()
             // 硬超时 watchdog：关闭 Context 会使 eval() 抛出 PolyglotException(isCancelled=true)
             val watchdog = launch {
                 delay(timeoutMs)
@@ -84,8 +89,17 @@ object PromptScriptRuntime {
                 runCatching { context.close(true) }
             }
             try {
-                executeInContext(context, scriptCode, provider, logs)
+                val result = executeInContext(context, scriptCode, provider, logs)
+                logger.debug(
+                    "[PromptScriptRuntime] 执行完毕: errorType=${result.errorType} logs=${result.logs.size}",
+                )
+                result
+            } catch (e: CancellationException) {
+                // 协程取消信号必须透传，不能吞掉；否则 withContext 无法正常取消
+                logger.debug("[PromptScriptRuntime] execute 协程已取消")
+                throw e
             } catch (e: Throwable) {
+                // executeInContext 内部已处理 PolyglotException；到这里属于意外异常
                 logger.error("[PromptScriptRuntime] execute 意外异常", e)
                 PromptSandboxResult(
                     promptText = null,
@@ -110,7 +124,8 @@ object PromptScriptRuntime {
         .allowIO(IOAccess.NONE)
         .allowCreateProcess(false)
         .allowNativeAccess(false)
-        .option("engine.WarnInterpreterOnly", "false")
+        // 注意：engine.WarnInterpreterOnly 是 Engine 级选项，已在 engine 单例中配置，
+        // 不能在共享了 engine 的 Context 上重复设置（会抛 IllegalArgumentException）。
         .option("js.strict", "true")
         .build()
 
@@ -132,9 +147,11 @@ object PromptScriptRuntime {
             }
             extractResult(bindings, logs)
         } catch (e: PolyglotException) {
+            // isCancelled=true 是看门狗超时触发的预期行为，不记录 stacktrace；
+            // 其他 GraalJS 脚本错误属于预期失败（用户脚本问题），记录完整堆栈以助调试。
             logger.warn(
                 "[PromptScriptRuntime] GraalJS 异常: ${e.message} isCancelled=${e.isCancelled}",
-                isHappensFrequently = false, err = null,
+                isHappensFrequently = false, err = if (e.isCancelled) null else e,
             )
             PromptSandboxResult(
                 promptText = null,

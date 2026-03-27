@@ -28,7 +28,7 @@ object BilibiliVideoSubtitleRoute : FredicaApi.Route {
 
         val cfg = AppConfigService.repo.getConfig()
 
-        val raw = BilibiliSubtitleMetaCacheService.fetchBilibiliSubtitleMeta(p.bvid, p.pageIndex, isUpdate = false, cfg)
+        val raw = BilibiliSubtitleMetaCacheService.fetchBilibiliSubtitleMeta(p.bvid, p.pageIndex, isUpdate = p.isUpdate, cfg)
         logger.debug("返回结果 bvid=${p.bvid} page=${p.pageIndex}")
         return ValidJsonString(raw)
     }
