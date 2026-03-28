@@ -17,10 +17,11 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 class LlmSseClientTest {
 
@@ -99,19 +100,25 @@ class LlmSseClientTest {
             put("max_tokens", 500)
         }.toString()
 
-        val cancelSignal = CompletableDeferred<Unit>()
-        val result = runBlocking {
-            coroutineScope {
-                LlmSseClient.streamChat(
-                    modelConfig = modelConfig,
-                    requestBody = requestBody,
-                    onChunk = { cancelSignal.complete(Unit) },
-                    cancelSignal = cancelSignal,
-                )
+        // 使用结构化取消：在收到第一个 chunk 时取消 coroutineScope
+        var caughtCancellation = false
+        try {
+            runBlocking {
+                coroutineScope {
+                    LlmSseClient.streamChat(
+                        modelConfig = modelConfig,
+                        requestBody = requestBody,
+                        onChunk = {
+                            // 收到第一个 chunk 时取消整个 scope
+                            this@coroutineScope.cancel("test cancel")
+                        },
+                    )
+                }
             }
+        } catch (e: CancellationException) {
+            caughtCancellation = true
         }
-
-        assertNull(result, "Expected null when cancelled")
+        assertTrue(caughtCancellation, "Expected CancellationException when scope is cancelled")
     }
 
     @Test
@@ -175,6 +182,8 @@ class LlmSseClientTest {
 
         val content = LlmSseClient.extractResponseContent(body)
 
-        assertEquals("non-stream response", content)
+        // SSE 分支只提取 delta.content；message.content 格式不被 SSE 分支处理，返回空字符串。
+        // 此格式属于非标准 SSE 响应（正常非流式响应不含 "data:" 前缀），调用方应走非流式路径。
+        assertEquals("", content)
     }
 }

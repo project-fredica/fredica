@@ -5,6 +5,8 @@ import com.github.project_fredica.api.routes.*
 import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
+import com.github.project_fredica.llm.LlmRequestServiceHolder
+import com.github.project_fredica.llm.LlmRequestServiceImpl
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
@@ -136,6 +138,8 @@ object FredicaApiJvmService {
             BilibiliAiConclusionCacheDb(database).also  { it.initialize(); BilibiliAiConclusionCacheService.initialize(it) }
             BilibiliSubtitleMetaCacheDb(database).also  { it.initialize(); BilibiliSubtitleMetaCacheService.initialize(it) }
             BilibiliSubtitleBodyCacheDb(database).also  { it.initialize(); BilibiliSubtitleBodyCacheService.initialize(it) }
+            // LLM 响应缓存
+            LlmResponseCacheDb(database).also { it.initialize(); LlmResponseCacheService.initialize(it) }
             // Weben 知识图谱（flashcard 依赖 concept 表存在）
             WebenSourceDb(database).also    { it.initialize(); WebenSourceService.initialize(it) }
             WebenConceptDb(database).also   { it.initialize(); WebenConceptService.initialize(it) }
@@ -148,6 +152,9 @@ object FredicaApiJvmService {
 
             logger.debug("All DB services initialized")
         }
+
+        // LlmRequestService（依赖 LlmResponseCacheService，必须在 DB 初始化后）
+        LlmRequestServiceHolder.instance = LlmRequestServiceImpl()
 
         CurrentInstanceHandler.server = embeddedServer(
             Netty, port = option.ktorServerPort.toInt(), host = option.ktorServerHost, module = {

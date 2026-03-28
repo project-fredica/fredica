@@ -1,131 +1,110 @@
 package com.github.project_fredica.api.routes
 
-import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.asT
-import com.github.project_fredica.apputil.createJson
+import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
-import com.github.project_fredica.apputil.loadJson
+import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.apputil.toJsonArray
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
-import com.github.project_fredica.llm.LlmSseClient
-import io.ktor.client.request.header
-import io.ktor.client.request.preparePost
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
+import com.github.project_fredica.llm.LlmMessagesJson
+import com.github.project_fredica.llm.LlmProviderException
+import com.github.project_fredica.llm.LlmRequest
+import com.github.project_fredica.llm.LlmRequestServiceHolder
+import com.github.project_fredica.apputil.AppUtil
 import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.contentType
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.routing.RoutingContext
-import io.ktor.utils.io.readUTF8Line
 import io.ktor.utils.io.writeStringUtf8
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 
 /**
  * LLM 代理聊天路由（SSE 流式转发）。
  *
- * 前端只需传 app_model_id + message，后端查找对应模型的 api_key / base_url，
+ * 前端只需传 app_model_id + messages_json，后端查找对应模型的 api_key / base_url，
  * 避免敏感信息暴露给前端或网络中间人。
  *
  * 路由：POST /api/v1/LlmProxyChatRoute（需鉴权）
  * 请求体：[LlmProxyChatRequest]
- * 响应：text/event-stream，原样转发上游 SSE 行
+ * 响应：text/event-stream，含 data: 流式内容 + event: llm_source 元数据
  */
 object LlmProxyChatRoute {
     private val logger = createLogger()
 
     @Serializable
     data class LlmProxyChatRequest(
-        @SerialName("app_model_id") val appModelId: String,
-        val message: String,
+        @SerialName("app_model_id")          val appModelId: String,
+        /** 原始 messages JSON 字符串（支持任意 OpenAI-compatible 格式） */
+        @SerialName("messages_json")         val messagesJson: String,
+        @SerialName("disable_cache")         val disableCache: Boolean = false,
+        /** disableCache=true 时是否覆盖旧缓存，默认 true */
+        @SerialName("overwrite_on_disable")  val overwriteOnDisable: Boolean = true,
+        /** 其他请求字段（temperature、max_tokens、response_format 等）JSON 字符串，可选 */
+        @SerialName("extra_fields_json")     val extraFieldsJson: String? = null,
     )
 
     suspend fun handle(ctx: RoutingContext) {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<LlmProxyChatRequest>().getOrElse { e ->
             logger.error("LlmProxyChatRoute: 请求体解析失败", e)
-            call.response.status(HttpStatusCode.Companion.BadRequest)
+            call.response.status(HttpStatusCode.BadRequest)
             return
         }
 
-        // 从 AppConfig 中按 appModelId 查找模型配置，避免前端传入敏感字段
-        val config = AppConfigService.repo.getConfig()
-        val models = config.llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrElse { emptyList() }
-        val modelConfig = models.find { it.appModelId == req.appModelId }
-        if (modelConfig == null) {
+        val modelConfig = run {
+            val config = AppConfigService.repo.getConfig()
+            val models = config.llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrElse { emptyList() }
+            models.find { it.appModelId == req.appModelId }
+        } ?: run {
             logger.error("LlmProxyChatRoute: 未找到模型 appModelId=${req.appModelId}")
-            call.response.status(HttpStatusCode.Companion.NotFound)
+            call.response.status(HttpStatusCode.NotFound)
             return
         }
 
-        val upstreamUrl = "${modelConfig.baseUrl.trimEnd('/')}/chat/completions"
-
-        // 用 createJson DSL 构建请求体，避免字符串拼接导致的 JSON 注入风险
-        val requestBody = createJson {
-            obj {
-                kv("model", modelConfig.model)
-                kv(
-                    "messages", listOf(
-                        createJson { obj { kv("role", "user"); kv("content", req.message) } }
-                    ).toJsonArray())
-                kv("stream", true)
-            }
-        }.toString()
-
-        logger.debug("LlmProxyChatRoute: 转发请求到 $upstreamUrl model=${modelConfig.model}")
-        val contents = mutableListOf<String>()
+        val llmReq = LlmRequest(
+            modelConfig = modelConfig,
+            messages = LlmMessagesJson(req.messagesJson),
+            extraFields = req.extraFieldsJson?.let {
+                AppUtil.GlobalVars.json.parseToJsonElement(it).jsonObject
+            },
+            disableCache = req.disableCache,
+            overwriteOnDisable = req.overwriteOnDisable,
+        )
 
         try {
-            AppUtil.GlobalVars.ktorClientProxied.preparePost(upstreamUrl) {
-                contentType(ContentType.Application.Json)
-                header(HttpHeaders.Authorization, "Bearer ${modelConfig.apiKey}")
-                header(HttpHeaders.Accept, "text/event-stream")
-                setBody(requestBody)
-            }.execute { upstreamResp ->
-                if (upstreamResp.status.value !in 200..299) {
-                    val errBody = upstreamResp.bodyAsText()
-                    logger.error("LlmProxyChatRoute: 上游错误 status=${upstreamResp.status} body=$errBody")
-                    call.response.status(upstreamResp.status)
-                    call.respondBytesWriter(ContentType.Text.Plain) { writeStringUtf8(errBody) }
-                    return@execute
-                }
-
-                val channel = upstreamResp.bodyAsChannel()
-                var lineCount = 0
-                call.respondBytesWriter(ContentType.Text.EventStream) {
-                    while (!channel.isClosedForRead) {
-                        val line = channel.readUTF8Line() ?: break
-                        try {
-                            contents += LlmSseClient.extractResponseContent(line)
-                        } catch (err: Exception) {
-                            logger.warn(
-                                "ignore unexpected error in sse response , raw line is $line",
-                                isHappensFrequently = true,
-                                err
-                            )
-                        }
-                        lineCount++
-                        writeStringUtf8(line)
-                        writeStringUtf8("\n")
-                        flush()
-                    }
-                    logger.debug("LlmProxyChatRoute: 转发完成，共 $lineCount 行")
+            call.respondBytesWriter(ContentType.Text.EventStream) {
+                try {
+                    val resp = LlmRequestServiceHolder.instance.streamRequest(
+                        req = llmReq,
+                        onChunk = { chunk ->
+                            writeStringUtf8("data: $chunk\n\n")
+                            flush()
+                        },
+                    )
+                    // 尾部 source 元数据事件，供前端展示缓存状态
+                    writeStringUtf8(
+                        "event: llm_source\n" +
+                        "data: ${buildValidJson { kv("source", resp.source.name); kv("key_hash", resp.keyHash) }.str}\n\n"
+                    )
+                    writeStringUtf8("data: [DONE]\n\n")
+                    flush()
+                } catch (e: LlmProviderException) {
+                    logger.warn("LlmProxyChatRoute: provider error type=${e.type} status=${e.httpStatus}", isHappensFrequently = false, err = e)
+                    writeStringUtf8(
+                        "event: llm_error\n" +
+                        "data: ${buildValidJson { kv("error_type", e.type.name); kv("message", e.providerMessage) }.str}\n\n"
+                    )
+                    flush()
                 }
             }
         } catch (e: Exception) {
-            logger.error("LlmProxyChatRoute: 转发异常", e)
+            logger.error("LlmProxyChatRoute: 异常", e)
             runCatching { call.response.status(HttpStatusCode.BadGateway) }
-        } finally {
-            logger.debug("LlmProxyChatRoute: contents ->\n ${contents.joinToString("")}")
         }
     }
 }

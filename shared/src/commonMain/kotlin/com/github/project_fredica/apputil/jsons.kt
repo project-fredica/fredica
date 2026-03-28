@@ -282,3 +282,22 @@ inline fun <R> createJson(scope: CreateJsonUtil.() -> R): R {
 inline fun buildValidJson(scope: CreateJsonUtil.ObjContext.() -> Unit): ValidJsonString =
     ValidJsonString(CreateJsonUtil.obj(scope).toString())
 
+/**
+ * 对任意 JSON 字符串做 key 字母序规范化（递归排序所有层级的 object key）。
+ * 用于消除相同结构因序列化 key 顺序不同产生的字符串差异。
+ * 返回紧凑格式（无多余空格）的 JSON 字符串。
+ */
+fun jsonCanonical(json: String): String = jsonElementCanonical(
+    AppUtil.GlobalVars.json.parseToJsonElement(json)
+).toString()
+
+private fun jsonElementCanonical(elem: JsonElement): JsonElement = when (elem) {
+    is JsonObject -> JsonObject(
+        elem.entries
+            .sortedBy { it.key }
+            .associate { (k, v) -> k to jsonElementCanonical(v) }
+    )
+    is JsonArray -> JsonArray(elem.map { jsonElementCanonical(it) })
+    else -> elem   // JsonPrimitive / JsonNull，原样返回
+}
+
