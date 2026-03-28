@@ -2,6 +2,7 @@ import JSON5 from "json5";
 import { callBridge } from "./bridge";
 import { buildAuthHeaders, DEFAULT_SERVER_PORT } from "./app_fetch";
 import { json_parse, type JsonValue } from "./json";
+import { print_error } from "./error_handler";
 
 /** direct 模式：前端直接持有凭证，SSE 流式 */
 export interface LlmChatDirectParams {
@@ -9,14 +10,17 @@ export interface LlmChatDirectParams {
     base_url: string;
     api_key: string;
     model: string;
-    message: string;
+    messages_json: string;
 }
 
 /** router 模式：后端 Ktor 代理转发，SSE 流式，走系统代理 */
 export interface LlmChatRouterParams {
     mode: "router";
     app_model_id: string;
-    message: string;
+    messages_json: string;
+    disable_cache?: boolean;
+    overwrite_on_disable?: boolean;
+    extra_fields_json?: string;
     connection: LlmChatConnectionConfig;
 }
 
@@ -24,7 +28,10 @@ export interface LlmChatRouterParams {
 export interface LlmChatBridgeParams {
     mode: "bridge";
     app_model_id: string;
-    message: string;
+    messages_json: string;
+    disable_cache?: boolean;
+    overwrite_on_disable?: boolean;
+    extra_fields_json?: string;
 }
 
 export type LlmChatParams =
@@ -40,12 +47,37 @@ export interface LlmChatConnectionConfig {
     appAuthToken?: string | null;
 }
 
-async function* sseChunks(resp: Response): AsyncGenerator<string> {
+/** LLM 响应元数据 */
+export interface LlmResponseMeta {
+    source: 'CACHE' | 'LLM_FRESH' | 'REVISION';
+    keyHash: string;
+}
+
+/** LLM 提供商错误 */
+export class LlmProviderError extends Error {
+    constructor(
+        public errorType: string,
+        message: string,
+    ) {
+        super(message);
+        this.name = 'LlmProviderError';
+    }
+}
+
+/** 构造单条 user 消息的 messages_json（兼容旧调用方） */
+export function singleUserMessage(content: string): string {
+    return JSON.stringify([{ role: "user", content }]);
+}
+
+async function* sseChunks(
+    resp: Response,
+    onMeta?: (meta: LlmResponseMeta) => void
+): AsyncGenerator<string> {
     const reader = resp.body?.getReader();
     if (!reader) throw new Error("无法读取响应流");
     const decoder = new TextDecoder();
     let buf = "";
-    let content_list = [];
+    let currentEvent = "";
     try {
         while (true) {
             const { done, value } = await reader.read();
@@ -54,37 +86,65 @@ async function* sseChunks(resp: Response): AsyncGenerator<string> {
             buf = done ? "" : (lines.pop() ?? "");
             for (const line of lines) {
                 const trimmed = line.replace(/\r$/, "").trim();
-                let data: string;
-                if (trimmed.startsWith("data:")) {
-                    // continue
-                    data = trimmed.slice(5).trim();
-                } else if (trimmed === "[DONE]") {
-                    return;
-                } else {
+
+                if (trimmed.startsWith("event:")) {
+                    currentEvent = trimmed.slice(6).trim();
                     continue;
                 }
-                const dataObj = json_parse(data) as unknown as { choices?: { delta?: { content?: string } }[] };
-                if (dataObj === null) continue;
-                try {
-                    const content = dataObj?.choices?.[0]?.delta?.content;
-                    if (content) {
-                        content_list.push(content);
-                        yield content;
+
+                if (trimmed.startsWith("data:")) {
+                    const data = trimmed.slice(5).trim();
+
+                    if (data === "[DONE]") return;
+
+                    if (currentEvent === "llm_source") {
+                        const meta = json_parse<LlmResponseMeta>(data);
+                        if (meta && onMeta) onMeta(meta);
+                        currentEvent = "";
+                        continue;
                     }
-                } catch (err) {
+
+                    if (currentEvent === "llm_error") {
+                        const errData = json_parse<{ error_type?: string; message?: string }>(data);
+                        throw new LlmProviderError(
+                            errData?.error_type ?? "UNKNOWN",
+                            errData?.message ?? "LLM provider error"
+                        );
+                    }
+
+                    const dataObj = json_parse(data);
+                    if (dataObj === null || typeof dataObj !== "object" || Array.isArray(dataObj)) {
+                        print_error({ reason: "SSE data 格式错误：期望对象", err: new Error(`data=${data}`) });
+                        continue;
+                    }
+                    const choices = (dataObj as Record<string, unknown>).choices;
+                    if (!Array.isArray(choices) || choices.length === 0) continue;
+                    const firstChoice = choices[0];
+                    if (typeof firstChoice !== "object" || firstChoice === null) {
+                        print_error({ reason: "SSE choices[0] 格式错误", err: new Error(`choices[0]=${JSON.stringify(firstChoice)}`) });
+                        continue;
+                    }
+                    const delta = (firstChoice as Record<string, unknown>).delta;
+                    if (typeof delta !== "object" || delta === null) continue;
+                    const content = (delta as Record<string, unknown>).content;
+                    if (typeof content === "string" && content) yield content;
+                    currentEvent = "";
                 }
             }
             if (done) break;
-            console.info("content ->", content_list.join(""));
         }
     } finally {
         reader.releaseLock();
     }
 }
 
-export async function* llmChat(params: LlmChatParams): AsyncGenerator<string> {
+export async function* llmChat(
+    params: LlmChatParams,
+    onMeta?: (meta: LlmResponseMeta) => void
+): AsyncGenerator<string> {
     if (params.mode === "direct") {
         const baseUrl = params.base_url.replace(/\/+$/, "");
+        const messagesArray = json_parse(params.messages_json);
         const resp = await fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
             headers: {
@@ -94,45 +154,69 @@ export async function* llmChat(params: LlmChatParams): AsyncGenerator<string> {
             },
             body: JSON.stringify({
                 model: params.model,
-                messages: [{ role: "user", content: params.message }],
+                messages: messagesArray,
                 stream: true,
             }),
         });
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
         }
-        yield* sseChunks(resp);
+        yield* sseChunks(resp, onMeta);
     } else if (params.mode === "router") {
         const { connection } = params;
         const s = connection?.schema ?? "http";
         const d = connection?.domain ?? "localhost";
         const p = connection?.port ?? DEFAULT_SERVER_PORT;
+        const body: Record<string, unknown> = {
+            app_model_id: params.app_model_id,
+            messages_json: params.messages_json,
+        };
+        if (params.disable_cache !== undefined) body.disable_cache = params.disable_cache;
+        if (params.overwrite_on_disable !== undefined) body.overwrite_on_disable = params.overwrite_on_disable;
+        if (params.extra_fields_json) body.extra_fields_json = params.extra_fields_json;
+
         const resp = await fetch(`${s}://${d}:${p}/api/v1/LlmProxyChatRoute`, {
             method: "POST",
             headers: {
                 ...buildAuthHeaders(connection?.appAuthToken),
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-                app_model_id: params.app_model_id,
-                message: params.message,
-            }),
+            body: JSON.stringify(body),
         });
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
         }
-        yield* sseChunks(resp);
+        yield* sseChunks(resp, onMeta);
     } else {
-        const raw = await callBridge(
-            "llm_proxy_chat",
-            JSON.stringify({
-                app_model_id: params.app_model_id,
-                message: params.message,
-            }),
-        );
-        const parsed = json_parse(raw) as unknown as { error?: string; content?: string };
-        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && parsed.error) {
-            throw new Error(String(parsed.error));
+        const body: Record<string, unknown> = {
+            app_model_id: params.app_model_id,
+            messages_json: params.messages_json,
+        };
+        if (params.disable_cache !== undefined) body.disable_cache = params.disable_cache;
+        if (params.overwrite_on_disable !== undefined) body.overwrite_on_disable = params.overwrite_on_disable;
+        if (params.extra_fields_json) body.extra_fields_json = params.extra_fields_json;
+
+        const raw = await callBridge("llm_proxy_chat", JSON.stringify(body));
+        const parsed = json_parse(raw) as unknown as {
+            error?: string;
+            error_type?: string;
+            content?: string;
+            source?: string;
+            key_hash?: string;
+        };
+        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            if (parsed.error) {
+                if (parsed.error_type) {
+                    throw new LlmProviderError(parsed.error_type, parsed.error);
+                }
+                throw new Error(String(parsed.error));
+            }
+            if (parsed.source && parsed.key_hash && onMeta) {
+                onMeta({
+                    source: parsed.source as LlmResponseMeta['source'],
+                    keyHash: parsed.key_hash,
+                });
+            }
         }
         const content = parsed?.content ?? "";
         if (content) yield content;
@@ -144,15 +228,22 @@ export async function* llmChat(params: LlmChatParams): AsyncGenerator<string> {
  */
 export async function* llmProxyChat(params: {
     appModelId: string;
-    message: string;
+    messagesJson: string;
+    disableCache?: boolean;
+    overwriteOnDisable?: boolean;
+    extraFieldsJson?: string;
     connection: LlmChatConnectionConfig;
+    onMeta?: (meta: LlmResponseMeta) => void;
 }): AsyncGenerator<string> {
     yield* llmChat({
         mode: "router",
         app_model_id: params.appModelId,
-        message: params.message,
+        messages_json: params.messagesJson,
+        disable_cache: params.disableCache,
+        overwrite_on_disable: params.overwriteOnDisable,
+        extra_fields_json: params.extraFieldsJson,
         connection: params.connection,
-    });
+    }, params.onMeta);
 }
 
 /**

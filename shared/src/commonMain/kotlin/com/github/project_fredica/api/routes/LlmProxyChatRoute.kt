@@ -1,6 +1,7 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.json
@@ -21,6 +22,9 @@ import io.ktor.server.routing.RoutingContext
 import io.ktor.utils.io.writeStringUtf8
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -56,13 +60,21 @@ object LlmProxyChatRoute {
             return
         }
 
+        logger.debug("[LlmProxyChatRoute] appModelId=${req.appModelId} disableCache=${req.disableCache}")
+
         val modelConfig = run {
             val config = AppConfigService.repo.getConfig()
             val models = config.llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrElse { emptyList() }
             models.find { it.appModelId == req.appModelId }
         } ?: run {
-            logger.error("LlmProxyChatRoute: 未找到模型 appModelId=${req.appModelId}")
-            call.response.status(HttpStatusCode.NotFound)
+            logger.warn("[LlmProxyChatRoute] 未找到模型 appModelId=${req.appModelId}")
+            call.respondBytesWriter(ContentType.Text.EventStream) {
+                writeStringUtf8(
+                    "event: llm_error\n" +
+                    "data: ${buildValidJson { kv("error_type", "MODEL_NOT_FOUND"); kv("message", "未找到模型配置") }.str}\n\n"
+                )
+                flush()
+            }
             return
         }
 
@@ -82,7 +94,18 @@ object LlmProxyChatRoute {
                     val resp = LlmRequestServiceHolder.instance.streamRequest(
                         req = llmReq,
                         onChunk = { chunk ->
-                            writeStringUtf8("data: $chunk\n\n")
+                            val chunkJson = createJson {
+                                obj {
+                                    kv("choices", buildJsonArray {
+                                        add(buildJsonObject {
+                                            put("delta", buildJsonObject {
+                                                put("content", JsonPrimitive(chunk))
+                                            })
+                                        })
+                                    })
+                                }
+                            }
+                            writeStringUtf8("data: ${AppUtil.GlobalVars.json.encodeToString(chunkJson)}\n\n")
                             flush()
                         },
                     )
@@ -103,7 +126,13 @@ object LlmProxyChatRoute {
                 }
             }
         } catch (e: Exception) {
-            logger.error("LlmProxyChatRoute: 异常", e)
+            val isClientDisconnect = e.message?.contains("Cannot write to channel") == true ||
+                e.message?.contains("ClosedWriteChannelException") == true
+            if (isClientDisconnect) {
+                logger.debug("LlmProxyChatRoute: client disconnected")
+            } else {
+                logger.error("LlmProxyChatRoute: 异常", e)
+            }
             runCatching { call.response.status(HttpStatusCode.BadGateway) }
         }
     }

@@ -61,7 +61,7 @@ function parseWebenResult(raw: string): MaterialWebenLlmResult {
 
 async function streamLlmRouterText(params: {
     appModelId: string;
-    message: string;
+    messagesJson: string;
     connection: {
         domain?: string | null;
         port?: string | null;
@@ -70,6 +70,7 @@ async function streamLlmRouterText(params: {
     };
     onChunk: (chunk: string) => void;
     signal?: AbortSignal;
+    disableCache?: boolean;
 }): Promise<string> {
     const schema = params.connection.schema ?? "http";
     const domain = params.connection.domain ?? "localhost";
@@ -82,7 +83,8 @@ async function streamLlmRouterText(params: {
         },
         body: JSON.stringify({
             app_model_id: params.appModelId,
-            message: params.message,
+            messages_json: params.messagesJson,
+            disable_cache: params.disableCache ?? false,
         }),
         signal: params.signal,
     });
@@ -288,6 +290,7 @@ export default function SummaryWebenPage() {
     const [previewResult, setPreviewResult] = useState<BuildPromptResult | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [resolvedModelId, setResolvedModelId] = useState<string | null>(null);
+    const [disableCache, setDisableCache] = useState(false);
     const [subtitles, setSubtitles] = useState<MaterialSubtitleItem[]>([]);
     const [streamText, setStreamText] = useState("");
     const [streamError, setStreamError] = useState<string | null>(null);
@@ -480,7 +483,7 @@ export default function SummaryWebenPage() {
             // Step 2: 将 Prompt 文本发送给 LLM，流式接收输出
             const fullText = await streamLlmRouterText({
                 appModelId: resolvedModelId,
-                message: resolvedText,
+                messagesJson: JSON.stringify([{ role: "user", content: resolvedText }]),
                 connection: {
                     domain: appConfig.webserver_domain,
                     port: appConfig.webserver_port,
@@ -491,6 +494,7 @@ export default function SummaryWebenPage() {
                     setStreamText(prev => prev + chunk);
                 },
                 signal,
+                disableCache,
             });
 
             if (signal.aborted) return;
@@ -652,6 +656,8 @@ export default function SummaryWebenPage() {
                 apiFetch={apiFetch}
                 onDefaultTemplateLoaded={handleLoadTemplate}
                 readonlyHeader={scriptHeader}
+                disableCache={disableCache}
+                onDisableCacheChange={setDisableCache}
                 editorHeaderExtra={(
                     <>
                         <button

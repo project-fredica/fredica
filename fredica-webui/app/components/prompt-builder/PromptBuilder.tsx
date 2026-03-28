@@ -1,5 +1,5 @@
 import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Eye, Play, Settings2, Sparkles } from "lucide-react";
+import { AlertTriangle, Eye, Play, Settings2, Sparkles, Cloud, CloudOff } from "lucide-react";
 import { buildPrompt } from "~/util/prompt-builder/buildPrompt";
 import { print_error } from "~/util/error_handler";
 import {
@@ -122,6 +122,8 @@ export function PromptBuilder(props: PromptBuilderProps) {
         apiFetch,
         onDefaultTemplateLoaded,
         readonlyHeader,
+        disableCache = false,
+        onDisableCacheChange,
     } = props;
     const [activeTab, setActiveTab] = useState<PromptWorkbenchTab>("editor");
     const [availableModels, setAvailableModels] = useState<LlmModelMeta[]>([]);
@@ -264,16 +266,29 @@ export function PromptBuilder(props: PromptBuilderProps) {
                     预览
                 </button>
                 {onGenerate ? (
-                    <button
-                        type="button"
-                        onClick={handleGenerateClick}
-                        disabled={internalGenerateDisabled}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed ${
-                            generating ? "bg-red-500 hover:bg-red-600" : "bg-violet-600 hover:bg-violet-700"
-                        }`}
-                    >
-                        {generating ? <><Sparkles className="w-4 h-4 animate-spin" />中断</> : <><Play className="w-4 h-4" />生成</>}
-                    </button>
+                    <div className="inline-flex rounded-lg overflow-hidden border border-gray-200">
+                        <button
+                            type="button"
+                            onClick={handleGenerateClick}
+                            disabled={internalGenerateDisabled}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed ${
+                                generating ? "bg-red-500 hover:bg-red-600" : "bg-violet-600 hover:bg-violet-700"
+                            }`}
+                        >
+                            {generating ? <><Sparkles className="w-4 h-4 animate-spin" />中断</> : <><Play className="w-4 h-4" />生成</>}
+                        </button>
+                        {onDisableCacheChange ? (
+                            <button
+                                type="button"
+                                onClick={() => onDisableCacheChange(!disableCache)}
+                                disabled={generating}
+                                title={disableCache ? "缓存已关闭（点击启用）" : "缓存已启用（点击关闭）"}
+                                className="px-2 border-l bg-violet-600 hover:bg-violet-700 text-white border-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {disableCache ? <CloudOff className="w-4 h-4" /> : <Cloud className="w-4 h-4" />}
+                            </button>
+                        ) : null}
+                    </div>
                 ) : null}
             </>
         );

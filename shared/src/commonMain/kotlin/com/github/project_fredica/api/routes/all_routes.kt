@@ -14,6 +14,8 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     BilibiliVideoSubtitleRoute,
     FasterWhisperConfigInfoRoute,
     ImageProxyRoute,
+    LlmCacheInvalidateRoute,
+    LlmCacheQueryRoute,
     LlmModelAvailabilityRoute,
     LlmModelListRoute,
     LlmModelProbeRoute,

@@ -69,6 +69,7 @@ kotlin {
             implementation(libs.ktor.server.cors)
             implementation(libs.ktor.server.partial.content)
             implementation(libs.ktor.serialization.kotlinx.json)
+            implementation("io.ktor:ktor-client-mock-jvm:3.3.3")
         }
         androidMain.dependencies {
             //noinspection UseTomlInstead

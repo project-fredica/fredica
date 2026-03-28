@@ -4,7 +4,7 @@ import { ArrowLeft, Plus, Pencil, Trash2, Save, X, ExternalLink, Compass, FlaskC
 import type { Route } from "./+types/app-common-setting-llm-model-config";
 import { print_error } from "../util/error_handler";
 import { openExternalUrl, callBridge, BridgeUnavailableError } from "../util/bridge";
-import { llmProxyChat, llmChat, type LlmChatParams, type LlmChatConnectionConfig, parseJsonFromText } from "../util/llm";
+import { llmProxyChat, llmChat, singleUserMessage, type LlmChatParams, type LlmChatConnectionConfig, parseJsonFromText } from "../util/llm";
 import { DEFAULT_SERVER_PORT, useAppFetch } from "../util/app_fetch";
 import { useAppConfig } from "~/context/appConfig";
 import {
@@ -194,7 +194,7 @@ export default function Component({ }: Route.ComponentProps) {
             try {
                 console.debug("[queryModelParams] supplement llm start appModelId=%s", m.app_model_id);
                 let text = "";
-                for await (const chunk of llmProxyChat({ appModelId: m.app_model_id!, message: supplementPrompt, connection })) {
+                for await (const chunk of llmProxyChat({ appModelId: m.app_model_id!, messagesJson: singleUserMessage(supplementPrompt), connection })) {
                     text += chunk;
                 }
                 console.debug("[queryModelParams] supplement llm raw response=%s", text);
@@ -943,6 +943,7 @@ function ConfigCheckDrawer({ model, onSuccess, onClose }: { model: LlmModelConfi
     const hasBridge = typeof window !== "undefined" && !!window.kmpJsBridge;
     const defaultMode: LlmChatParams["mode"] = hasBridge ? "router" : "direct";
     const [mode, setMode] = useState<LlmChatParams["mode"]>(defaultMode);
+    const [disableCache, setDisableCache] = useState(false);
     const hasRun = useRef(false);
 
     useEffect(() => {
@@ -974,10 +975,10 @@ function ConfigCheckDrawer({ model, onSuccess, onClose }: { model: LlmModelConfi
                 appAuthToken: appConfig.webserver_auth_token,
             };
             const params: LlmChatParams = mode === "direct"
-                ? { mode: "direct", base_url: model.base_url, api_key: model.api_key, model: model.model, message }
+                ? { mode: "direct", base_url: model.base_url, api_key: model.api_key, model: model.model, messages_json: singleUserMessage(message) }
                 : mode === "router"
-                    ? { mode: "router", app_model_id: model.app_model_id!, message, connection }
-                    : { mode: "bridge", app_model_id: model.app_model_id!, message };
+                    ? { mode: "router", app_model_id: model.app_model_id!, messages_json: singleUserMessage(message), connection, disable_cache: disableCache }
+                    : { mode: "bridge", app_model_id: model.app_model_id!, messages_json: singleUserMessage(message), disable_cache: disableCache };
             try {
                 let receivedChunk = false;
                 for await (const chunk of llmChat(params)) {
@@ -1036,6 +1037,13 @@ function ConfigCheckDrawer({ model, onSuccess, onClose }: { model: LlmModelConfi
                 <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "4px" }}>
                     {TEST_MODES.find(m => m.value === mode)?.desc}
                 </div>
+                {(mode === "router" || mode === "bridge") && (
+                    <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "8px", cursor: "pointer" }}>
+                        <input type="checkbox" checked={disableCache} onChange={e => setDisableCache(e.target.checked)}
+                            style={{ width: "14px", height: "14px", cursor: "pointer" }} />
+                        <span style={{ fontSize: "12px", color: "#374151" }}>禁用缓存</span>
+                    </label>
+                )}
             </div>
             <div style={{ flex: 1, padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", overflow: "hidden" }}>
                 <div style={{ fontSize: "12px", color: "#6b7280" }}>

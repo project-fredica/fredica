@@ -53,4 +53,8 @@ export interface PromptBuilderProps {
      * 由页面根据当前上下文（如 materialId）生成，提交时前置于模板代码之前。
      */
     readonlyHeader?: string;
+    /** 禁用缓存状态 */
+    disableCache?: boolean;
+    /** 禁用缓存状态变更回调 */
+    onDisableCacheChange?: (disabled: boolean) => void;
 }

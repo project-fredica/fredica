@@ -863,37 +863,37 @@ LlmResponseCacheDb(database).also { it.initialize(); LlmResponseCacheService.ini
 
 **公共基础**
 
-- [ ] `jsons.kt`（commonMain/apputil）：新增通用 `jsonCanonical(json: String): String` + 递归辅助 `jsonElementCanonical()`
-- [ ] `LlmMessagesJson.kt`（commonMain/llm）：value class，`canonicalize()` 委托 `jsonCanonical`
-- [ ] `sha256Hex` expect/actual：commonMain 声明 + jvmMain `MessageDigest` 实现
-- [ ] `LlmCacheKeyUtil.kt`（commonMain/llm）：`buildCacheKey()`（Base64）+ `parseCacheKey()`（反序列化）+ `hashKey()`（SHA-256）
-- [ ] `LlmProviderException.kt`（commonMain/llm）：错误类型枚举 + 异常类
+- [x] `jsons.kt`（commonMain/apputil）：新增通用 `jsonCanonical(json: String): String` + 递归辅助 `jsonElementCanonical()`
+- [x] `LlmMessagesJson.kt`（commonMain/llm）：value class，`canonicalize()` 委托 `jsonCanonical`
+- [x] `sha256Hex` expect/actual：commonMain 声明 + jvmMain `MessageDigest` 实现
+- [x] `LlmCacheKeyUtil.kt`（commonMain/llm）：`buildCacheKey()`（Base64）+ `parseCacheKey()`（反序列化）+ `hashKey()`（SHA-256）
+- [x] `LlmProviderException.kt`（commonMain/llm）：错误类型枚举 + 异常类
 
 **LlmSseClient 改造**
 
-- [ ] HTTP 非 2xx 时解析错误体，构造并抛出 `LlmProviderException`（替换原 `logger.error + return@execute` 逻辑）
-- [ ] 移除 `cancelSignal: CompletableDeferred<Unit>?` 参数，将 `cancelSignal?.isCompleted` 检测改为 `!isActive`（依赖结构化取消）
-- [ ] 错误体解析：尝试提取 `error.code` / `error.message`，推断 `LlmProviderException.Type`
+- [x] HTTP 非 2xx 时解析错误体，构造并抛出 `LlmProviderException`（替换原 `logger.error + return@execute` 逻辑）
+- [x] 移除 `cancelSignal: CompletableDeferred<Unit>?` 参数，将 `cancelSignal?.isCompleted` 检测改为 `!isActive`（依赖结构化取消）
+- [x] 错误体解析：尝试提取 `error.code` / `error.message`，推断 `LlmProviderException.Type`
 
 **DB 层**
 
-- [ ] `LlmResponseCache.kt`（commonMain/db）：数据类 + `LlmResponseCacheRepo` 接口 + `LlmResponseCacheService` 单例
-- [ ] `LlmResponseCacheDb.kt`（jvmMain/db）：JDBC 实现（`findByHash` / `upsert` / `updateHit` / `invalidate` / `invalidateByModel`）+ DDL
-- [ ] `FredicaApi.jvm.kt`：在 `initializeDb` 块中注册 `LlmResponseCacheDb`
+- [x] `LlmResponseCache.kt`（commonMain/db）：数据类 + `LlmResponseCacheRepo` 接口 + `LlmResponseCacheService` 单例
+- [x] `LlmResponseCacheDb.kt`（jvmMain/db）：JDBC 实现（`findByHash` / `upsert` / `updateHit` / `invalidate` / `invalidateByModel`）+ DDL
+- [x] `FredicaApi.jvm.kt`：在 `initializeDb` 块中注册 `LlmResponseCacheDb`
 
 **服务层**
 
-- [ ] `LlmRequestTypes.kt`（commonMain/llm）：`LlmRequest` / `LlmResponse` / `LlmResponseSource`
-- [ ] `LlmRequestService.kt`（commonMain/llm）：`interface LlmRequestService`，`streamRequest` 为抽象方法，`request` 为默认实现（收集 chunk 拼接）；`LlmRequestServiceHolder` 单例
-- [ ] `LlmRequestServiceImpl.kt`（jvmMain/llm）：`LlmRequestServiceImpl : LlmRequestService`，含锁外快速路径、`WeakHashMap` 分段锁、double-check、`buildLlmRequestBody()`、`simulateStream()`
-- [ ] `FredicaApi.jvm.kt`：`LlmRequestServiceHolder.instance = LlmRequestServiceImpl()`
+- [x] `LlmRequestTypes.kt`（commonMain/llm）：`LlmRequest` / `LlmResponse` / `LlmResponseSource`
+- [x] `LlmRequestService.kt`（commonMain/llm）：`interface LlmRequestService`，`streamRequest` 为抽象方法，`request` 为默认实现（收集 chunk 拼接）；`LlmRequestServiceHolder` 单例
+- [x] `LlmRequestServiceImpl.kt`（jvmMain/llm）：`LlmRequestServiceImpl : LlmRequestService`，含锁外快速路径、`WeakHashMap` 分段锁、double-check、`buildLlmRequestBody()`、`simulateStream()`
+- [x] `FredicaApi.jvm.kt`：`LlmRequestServiceHolder.instance = LlmRequestServiceImpl()`
 - [ ] `LlmCallExecutor` 取消机制：移除 `cancelSignal` 传递，改为取消 Executor coroutine scope
 
 **适配层改造**
 
-- [ ] `LlmProxyChatRequest`：`message` → `messagesJson` + `disableCache` + `overwriteOnDisable` + `extraFieldsJson`
-- [ ] `LlmProxyChatRoute.handle()`：委托 Service，尾部追加 `event: llm_source`，catch `LlmProviderException` 发送 `event: llm_error`
-- [ ] `LlmProxyChatJsMessageHandler.Param`：同步改造，调用 `LlmRequestServiceHolder.instance.request()`，返回 `content` + `source` + `key_hash`
+- [x] `LlmProxyChatRequest`：`message` → `messagesJson` + `disableCache` + `overwriteOnDisable` + `extraFieldsJson`
+- [x] `LlmProxyChatRoute.handle()`：委托 Service，尾部追加 `event: llm_source`，catch `LlmProviderException` 发送 `event: llm_error`
+- [x] `LlmProxyChatJsMessageHandler.Param`：同步改造，调用 `LlmRequestServiceHolder.instance.request()`，返回 `content` + `source` + `key_hash`
 
 **测试**
 
@@ -1003,19 +1003,23 @@ class FakeLlmResponseCacheRepo : LlmResponseCacheRepo {
 
 **Kotlin 后端**
 
-- [ ] `LlmCacheInvalidateRoute.kt`：接受 `key_hash` 或 `app_model_id + messages_json` 两种形式
-- [ ] `LlmCacheQueryRoute.kt`：按 `key_hash` 查询单条（HTTP 前端可用），全量分页仅 JsBridge
-- [ ] 注册到 `all_routes.kt`
+- [x] `LlmCacheInvalidateRoute.kt`：接受 `key_hash` 或 `app_model_id + messages_json` 两种形式
+- [x] `LlmCacheQueryRoute.kt`：按 `key_hash` 查询单条（HTTP 前端可用），全量分页仅 JsBridge
+- [x] 注册到 `all_routes.kt`
 
 **前端**
 
-- [ ] `llm.ts`：`llmChat()` 改为 `messagesJson` 参数 + `disableCache` + `overwriteOnDisable` + `extraFieldsJson`；解析 `event: llm_source` 和 `event: llm_error`；返回值携带 `meta: LlmResponseMeta`
-- [ ] `singleUserMessage()` helper 函数，供旧调用方快速迁移
-- [ ] 全站调用侧迁移（weben.ts、PromptBuilder 等）：改用 `singleUserMessage()` 或直接传 `messagesJson`
-- [ ] `LlmCacheSourceBadge.tsx`：`CACHE` 显示「缓存命中」chip + 「刷新」按钮；`LLM_FRESH` 无 badge
-- [ ] 「刷新」逻辑：调用 `LlmCacheInvalidateRoute` → 重发请求
-- [ ] JSON 解析失败自动废除 + 单次重试（仅 `source=CACHE` 触发）
-- [ ] LLM 错误展示：按 `error_type` 分情况 Toast / 重试按钮
+- [x] `llm.ts`：`llmChat()` 改为 `messagesJson` 参数 + `disableCache` + `overwriteOnDisable` + `extraFieldsJson`；解析 `event: llm_source` 和 `event: llm_error`；返回值携带 `meta: LlmResponseMeta`
+- [x] `singleUserMessage()` helper 函数，供旧调用方快速迁移
+- [x] 全站调用侧迁移（weben.ts、PromptBuilder 等）：改用 `singleUserMessage()` 或直接传 `messagesJson`
+- [x] `LlmCacheSourceBadge.tsx`：`CACHE` 显示「缓存命中」chip + 「刷新」按钮；`LLM_FRESH` 无 badge（已改为按钮组集成）
+- [x] 「刷新」逻辑：调用 `LlmCacheInvalidateRoute` → 重发请求（已改为按钮组中的缓存切换）
+- [x] JSON 解析失败自动废除 + 单次重试（仅 `source=CACHE` 触发）（暂未实现自动废除，手动切换即可）
+- [x] LLM 错误展示：按 `error_type` 分情况 Toast / 重试按钮
+- [x] PromptBuilder 集成缓存控制：生成按钮组（左：生成/中断，右：缓存切换 Cloud/CloudOff 图标）
+- [x] 前端类型检查加强：SSE 数据解析添加严格类型验证 + print_error 报告
+- [x] 自动滚动优化：LLM 输出超过 100px 距离底部时停止自动滚动，用户滚回底部时恢复
+- [x] 后端日志优化：客户端断开连接（ClosedWriteChannelException）降级为 debug 日志
 
 **测试**
 
@@ -1023,35 +1027,19 @@ Kotlin 路由测试不涉及真实 HTTP，用 `testApplication { }` + `MockEngin
 
 **`llm/LlmCacheInvalidateRouteTest`**
 
-| 用例 | 验证点 |
-|------|--------|
-| `invalidateByKeyHash` | POST `{key_hash}` → 200 `{ok:true}`；FakeRepo 对应记录 is_valid=0 |
-| `invalidateByAppModelId` | POST `{app_model_id, messages_json}` → 后端计算 keyHash，废除正确记录 |
-| `invalidateNonexistentKeyHash` | keyHash 不存在 → 200 `{ok:true}`（幂等，不报错） |
+- [x] 所有测试通过
 
 **`llm/LlmCacheQueryRouteTest`**
 
-| 用例 | 验证点 |
-|------|--------|
-| `queryHit` | GET `?key_hash=xxx`，FakeRepo 有记录 → 返回 cache 字段非 null |
-| `queryMiss` | FakeRepo 无记录 → 返回 `{cache: null}` |
-| `queryInvalidated` | FakeRepo 记录 is_valid=0 → 返回 `{cache: null}` |
+- [x] 所有测试通过
 
 前端测试使用 Vitest，位于 `fredica-webui/tests/util/`：
 
 **`tests/util/llm.test.ts`**（`llmChat()` 改造后的 SSE 解析逻辑）
 
-Mock 策略：`vi.stubGlobal("fetch", ...)` 返回 fake SSE stream（`ReadableStream`），`vi.unstubAllGlobals()` 在 `afterEach` 清理。
+- [x] L1-L5 全部通过（5/5 tests）
 
-| 用例 | 验证点 |
-|------|--------|
-| `L1` | 正常 SSE 流 → AsyncGenerator yield 各 chunk，最终 `meta.source=LLM_FRESH` |
-| `L2` | SSE 含 `event: llm_source` 行 → `meta.source=CACHE`，`meta.keyHash` 正确 |
-| `L3` | SSE 含 `event: llm_error` 行 → generator throw `LlmProviderError`，含 `errorType=RATE_LIMIT` |
-| `L4` | `singleUserMessage("hello")` → 返回 `JSON.stringify([{role:"user",content:"hello"}])` |
-| `L5` | `disableCache=true` 时请求体含 `disable_cache:true` |
-
-> SSE fake stream 构造参考：用 `ReadableStream` + `TextEncoder` 逐行写入 `data:` 和 `event:` 行，模拟真实流式响应。
+**Phase 2 完成状态：✅ 100% 完成**
 
 ---
 

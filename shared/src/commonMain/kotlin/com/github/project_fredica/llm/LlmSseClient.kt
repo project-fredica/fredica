@@ -39,13 +39,13 @@ import kotlinx.serialization.json.put
  * 使用 [AppUtil.GlobalVars.ktorClientLocal]（直连，不走代理）。
  */
 object LlmSseClient {
-    private val logger = createLogger()
+    private val logger = createLogger { "LlmSseClient" }
 
     /**
      * 流式调用 OpenAI 兼容 Chat Completions API（SSE）。
      *
-     * @param modelConfig  模型配置（含 baseUrl、apiKey、capabilities）
-     * @param requestBody  完整请求 JSON 字符串，调用方负责构造（含 messages 等字段；若模型不支持流式则内部会改写 stream=false）
+     * @param modelConfig  模型配置（含 baseUrl、apiKey）
+     * @param requestBody  完整请求 JSON 字符串，调用方负责构造（含 messages、stream=true 等字段）
      * @param onChunk      每收到一个 delta.content 片段时的回调，可用于实时更新 UI 或进度
      * @return 所有 delta 拼接后的完整 content 字符串
      * @throws LlmProviderException 上游 HTTP 非 2xx 时
@@ -56,17 +56,9 @@ object LlmSseClient {
         requestBody: String,
         onChunk: (suspend (String) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
-        // 模型不支持流式输出时降级为普通 POST，并强制请求体 stream=false，避免上游仍返回 SSE
-        if (LlmCapability.STREAMING !in modelConfig.capabilities) {
-            logger.info("streamChat: model=${modelConfig.model} 不含 STREAMING 能力，降级为非流式请求")
-            return@withContext fetchNonStreaming(
-                modelConfig = modelConfig,
-                requestBody = normalizeRequestBodyForStreamingCapability(requestBody, supportsStreaming = false),
-            )
-        }
+        logger.debug("[LlmSseClient] streamChat start: model=${modelConfig.model} baseUrl=${modelConfig.baseUrl}")
 
         val fullContent = StringBuilder()
-        logger.debug("streamChat start: model=${modelConfig.model} url=${modelConfig.baseUrl}")
 
         try {
             AppUtil.GlobalVars.ktorClientProxied.preparePost("${modelConfig.baseUrl}/chat/completions") {
@@ -76,12 +68,12 @@ object LlmSseClient {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }.execute { response ->
-                logger.debug("streamChat response: status=${response.status} model=${modelConfig.model}")
+                logger.debug("[LlmSseClient] HTTP response: status=${response.status.value} model=${modelConfig.model}")
 
                 if (!response.status.value.toString().startsWith("2")) {
                     // HTTP 非 2xx：解析错误体，抛出 LlmProviderException，不写缓存
                     val errBody = response.bodyAsText()
-                    logger.error("streamChat HTTP error: status=${response.status} body=$errBody")
+                    logger.error("[LlmSseClient] HTTP error: status=${response.status.value} model=${modelConfig.model} body=${errBody.take(200)}")
                     throw resolveProviderException(response.status.value, errBody)
                 }
 
@@ -104,7 +96,7 @@ object LlmSseClient {
 
                     // "[DONE]" 是 OpenAI SSE 协议的流结束标志
                     if (data == "[DONE]") {
-                        logger.debug("streamChat [DONE] received: model=${modelConfig.model} chunks=$chunkCount")
+                        logger.debug("[LlmSseClient] [DONE] received: model=${modelConfig.model} chunks=$chunkCount")
                         break
                     }
 
@@ -120,20 +112,26 @@ object LlmSseClient {
                     onChunk?.invoke(chunk)
                 }
 
-                logger.debug("streamChat stream end: model=${modelConfig.model} lines=$lineCount chunks=$chunkCount totalLen=${fullContent.length}")
+                logger.debug("[LlmSseClient] stream end: model=${modelConfig.model} lines=$lineCount chunks=$chunkCount totalLen=${fullContent.length}")
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
-            logger.debug("streamChat cancelled: model=${modelConfig.model}")
+            logger.debug("[LlmSseClient] cancelled: model=${modelConfig.model}")
             throw e  // 必须 re-throw，不可吞掉
         } catch (e: LlmProviderException) {
             throw e  // 直接向上传播，不包装
         } catch (e: Exception) {
-            logger.error("streamChat exception: model=${modelConfig.model}", e)
+            val isClientDisconnect = e.message?.contains("Cannot write to channel") == true ||
+                e.message?.contains("ClosedWriteChannelException") == true
+            if (isClientDisconnect) {
+                logger.debug("[LlmSseClient] client disconnected: model=${modelConfig.model}")
+            } else {
+                logger.error("[LlmSseClient] exception: model=${modelConfig.model}", e)
+            }
             throw e
         }
 
         val result = fullContent.toString()
-        logger.info("streamChat done: model=${modelConfig.model} totalLen=${result.length} content=$result")
+        logger.debug("[LlmSseClient] done: model=${modelConfig.model} totalLen=${result.length}")
         result
     }
 
