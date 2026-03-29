@@ -5,7 +5,6 @@ import {
     normalizeSubtitleContent,
     normalizeSubtitleItems,
 } from "./materialWebenGuards";
-import type { VariableMeta } from "./prompt-builder/types";
 import { buildAuthHeaders, DEFAULT_SERVER_PORT } from "~/util/app_fetch";
 import { json_parse } from "~/util/json";
 
@@ -156,38 +155,6 @@ export async function importWebenResult(
         { silent: true },
     );
     return { resp, data: normalizeImportResponse(data) };
-}
-
-export function getWebenPromptVariables(): VariableMeta[] {
-    return [
-        {
-            key: "material.title",
-            label: "素材标题",
-            description: "当前素材标题",
-            kind: "text",
-            required: true,
-        },
-        {
-            key: "material.duration",
-            label: "素材时长",
-            description: "当前素材时长（分钟）",
-            kind: "text",
-        },
-        {
-            key: "subtitle",
-            label: "字幕全文",
-            description: "当前素材可用字幕拼接后的文本",
-            kind: "text",
-            required: true,
-        },
-        {
-            key: "weben_schema_hint",
-            label: "Weben Schema 提示",
-            description: "约束 LLM 输出概念、关系、闪卡的 JSON 结构",
-            kind: "text",
-            required: true,
-        },
-    ];
 }
 
 // ── GraalJS 沙箱执行 ──────────────────────────────────────────────────────────

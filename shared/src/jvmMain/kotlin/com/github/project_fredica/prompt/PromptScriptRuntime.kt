@@ -1,4 +1,4 @@
-package com.github.project_fredica.api.routes
+package com.github.project_fredica.prompt
 
 // =============================================================================
 // PromptScriptRuntime (jvmMain)

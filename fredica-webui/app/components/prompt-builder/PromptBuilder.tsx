@@ -1,6 +1,5 @@
 import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Eye, Play, Settings2, Sparkles, Cloud, CloudOff } from "lucide-react";
-import { buildPrompt } from "~/util/prompt-builder/buildPrompt";
 import { print_error } from "~/util/error_handler";
 import {
     fetchLlmModelAvailability,
@@ -399,8 +398,4 @@ export function PromptBuilder(props: PromptBuilderProps) {
             </div>
         </div>
     );
-}
-
-export async function buildPromptPreviewText(value: string, variableResolver: PromptBuilderProps["variableResolver"]) {
-    return buildPrompt(value, variableResolver, { mode: "preview" });
 }

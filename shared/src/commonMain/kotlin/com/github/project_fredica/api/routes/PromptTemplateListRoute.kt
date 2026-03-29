@@ -21,6 +21,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.PromptTemplate
 import com.github.project_fredica.db.PromptTemplateService
+import com.github.project_fredica.prompt.BuiltInTemplateLoader
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 

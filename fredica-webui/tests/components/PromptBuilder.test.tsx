@@ -11,8 +11,6 @@ vi.mock("~/util/error_handler", () => ({
     print_error: (...args: unknown[]) => printError(...args),
 }));
 
-const variableResolver = async () => ({ kind: "text" as const, status: "ok" as const, value: "value" });
-
 function createApiFetch(options?: {
     models?: Array<{ app_model_id: string; label: string; notes?: string | null }>;
     availability?: {
@@ -58,7 +56,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={onChange}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={vi.fn()}
                 onGenerate={vi.fn()}
@@ -87,7 +84,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={vi.fn()}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={onPreview}
                 onGenerate={onGenerate}
@@ -122,7 +118,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={vi.fn()}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={vi.fn()}
                 onGenerate={vi.fn()}
@@ -161,7 +156,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={vi.fn()}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={vi.fn()}
                 onGenerate={vi.fn()}
@@ -210,7 +204,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={vi.fn()}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={vi.fn()}
                 onGenerate={vi.fn()}
@@ -244,7 +237,6 @@ describe("PromptBuilder", () => {
             <PromptBuilder
                 value="hello"
                 onChange={vi.fn()}
-                variableResolver={variableResolver}
                 previewResult={{ text: "preview", charCount: 7, blocked: false, warnings: [] }}
                 onPreview={vi.fn()}
                 onGenerate={vi.fn()}

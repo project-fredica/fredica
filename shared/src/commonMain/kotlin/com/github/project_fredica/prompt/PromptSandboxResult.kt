@@ -1,4 +1,4 @@
-package com.github.project_fredica.api.routes
+package com.github.project_fredica.prompt
 
 // =============================================================================
 // PromptSandboxResult — GraalJS 沙箱执行结果数据类（commonMain）

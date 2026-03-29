@@ -1,4 +1,4 @@
-package com.github.project_fredica.api.routes
+package com.github.project_fredica.prompt
 
 // =============================================================================
 // BuiltInTemplateLoader —— 内置系统模板加载器（expect/actual）

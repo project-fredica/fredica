@@ -1,4 +1,4 @@
-package com.github.project_fredica.api.routes
+package com.github.project_fredica.prompt
 
 // =============================================================================
 // PromptScriptRuntimeTest — GraalJS 沙箱执行引擎单元测试

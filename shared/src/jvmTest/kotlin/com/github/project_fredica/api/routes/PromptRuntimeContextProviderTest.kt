@@ -16,6 +16,7 @@ package com.github.project_fredica.api.routes
 // 留待集成测试覆盖。
 // =============================================================================
 
+import com.github.project_fredica.prompt.PromptRuntimeContextProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

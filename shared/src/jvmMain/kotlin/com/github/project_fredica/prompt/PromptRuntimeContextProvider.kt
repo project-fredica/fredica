@@ -1,4 +1,4 @@
-package com.github.project_fredica.api.routes
+package com.github.project_fredica.prompt
 
 // =============================================================================
 // PromptRuntimeContextProvider (jvmMain)
@@ -20,6 +20,14 @@ package com.github.project_fredica.api.routes
 //   脚本通过路径字符串拼接显式传递，后端解析路径提取 materialId 与 lan。
 // =============================================================================
 
+import com.github.project_fredica.api.routes.MaterialGetRoute
+import com.github.project_fredica.api.routes.MaterialSubtitleContentParam
+import com.github.project_fredica.api.routes.MaterialSubtitleContentResponse
+import com.github.project_fredica.api.routes.MaterialSubtitleContentRoute
+import com.github.project_fredica.api.routes.MaterialSubtitleItem
+import com.github.project_fredica.api.routes.MaterialSubtitleListRoute
+import com.github.project_fredica.api.routes.WebenSummary
+import com.github.project_fredica.api.routes.jsonSchemaString
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.buildValidJson
@@ -32,7 +40,6 @@ import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.MaterialVideoService
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
-import kotlin.math.log
 
 class PromptRuntimeContextProvider {
     private val logger = createLogger { "PromptRuntimeContextProvider" }

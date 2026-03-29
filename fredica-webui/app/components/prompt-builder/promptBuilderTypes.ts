@@ -1,4 +1,4 @@
-import type { BuildPromptResult, VariableMeta, VariableResolver } from "~/util/prompt-builder/types";
+import type { BuildPromptResult } from "~/util/prompt-builder/types";
 import type { ApiFetchFn } from "~/util/materialWebenApi";
 import type { PromptTemplateListItem } from "~/util/prompt-builder/promptTemplateApi";
 
@@ -18,8 +18,6 @@ export interface PromptBuilderRenderProps {
 export interface PromptBuilderProps {
     value: string;
     onChange: (value: string) => void;
-    variableResolver: VariableResolver;
-    variables?: VariableMeta[];
     previewResult: BuildPromptResult | null;
     previewLoading?: boolean;
     streamPane?: React.ReactNode;

@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, Loader2, Save, Sparkles, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "react-toastify";
@@ -19,16 +19,11 @@ import {
     validateWebenResult,
     type WebenValidationIssue,
 } from "~/util/materialWebenGuards";
-import { createVariableResolver } from "~/util/prompt-builder/createVariableResolver";
-import { VariableResolverCache } from "~/util/prompt-builder/VariableResolverCache";
 import type { BuildPromptResult } from "~/util/prompt-builder/types";
 import type { PromptTemplateListItem } from "~/util/prompt-builder/promptTemplateApi";
-import { CONCEPT_TYPES, PREDICATES } from "~/util/weben";
 import { json_parse } from "~/util/json";
 import {
     fetchMaterialSubtitles,
-    fetchSubtitleContent,
-    getWebenPromptVariables,
     importWebenResult,
     previewPromptScript,
     type MaterialSubtitleItem,
@@ -36,21 +31,6 @@ import {
 } from "~/util/materialWebenApi";
 
 type Stage = "editing" | "previewed" | "generating" | "parsed" | "parse_error";
-
-function buildWebenSchemaHint() {
-    const conceptTypes = CONCEPT_TYPES.map(item => item.key).join("、");
-    const predicates = PREDICATES.join("、");
-    return [
-        "请严格输出如下 JSON 结构：",
-        "{",
-        '  "concepts": [{ "name": string, "type": string, "description": string, "aliases"?: string[] }],',
-        '  "relations": [{ "subject": string, "predicate": string, "object": string, "excerpt"?: string }],',
-        '  "flashcards": [{ "question": string, "answer": string, "concept": string }]',
-        "}",
-        `concept.type 可选值：${conceptTypes}`,
-        `relation.predicate 可选值：${predicates}`,
-    ].join("\n");
-}
 
 function parseWebenResult(raw: string): MaterialWebenLlmResult {
     const trimmed = raw.trim();
@@ -309,9 +289,7 @@ export default function SummaryWebenPage() {
     /** 上次加载/保存时的脚本内容快照，用于判断是否有未保存修改。 */
     const [loadedTemplateCode, setLoadedTemplateCode] = useState<string | null>(null);
 
-    const schemaHint = useMemo(() => buildWebenSchemaHint(), []);
     const selectedSubtitle = subtitles[0] ?? null;
-    const variables = useMemo(() => getWebenPromptVariables(), []);
 
     // 头部代码：由编辑器自动注入，不属于模板内容，不可编辑。
     // 使用路由参数 routeMaterialId（直接来自 URL），确保始终非空。
@@ -335,49 +313,6 @@ export default function SummaryWebenPage() {
         loadedTemplateCode !== null &&
         template !== loadedTemplateCode;
 
-    const cacheRef = useRef<VariableResolverCache | null>(null);
-    const resolver = useMemo(() => createVariableResolver({
-        variables,
-        resolve: async key => {
-            if (key === "material.title") {
-                return { kind: "text", status: "ok", value: material.title || material.source_id };
-            }
-            if (key === "material.duration") {
-                const minutes = material.duration > 0 ? `${Math.max(1, Math.round(material.duration / 60))} 分钟` : "未知";
-                return { kind: "text", status: "ok", value: minutes };
-            }
-            if (key === "weben_schema_hint") {
-                return { kind: "text", status: "ok", value: schemaHint };
-            }
-            if (key === "subtitle") {
-                if (!selectedSubtitle?.subtitle_url) {
-                    return { kind: "text", status: "unavailable", unavailableReason: "暂无可用字幕，请先完成字幕提取" };
-                }
-                const subtitleContent = await fetchSubtitleContent(apiFetch, selectedSubtitle);
-                const text = subtitleContent.text;
-                if (!text.trim()) {
-                    return { kind: "text", status: "unavailable", unavailableReason: "字幕内容为空" };
-                }
-                return {
-                    kind: "text",
-                    status: "ok",
-                    value: text,
-                    preview: text.length > 1200 ? `${text.slice(0, 1200)}\n\n[...已截断预览，提交时仍使用完整字幕...]` : text,
-                    charCount: subtitleContent.word_count,
-                };
-            }
-            return { kind: "text", status: "unimplemented", unavailableReason: `变量 ${key} 尚未实现` };
-        },
-    }), [apiFetch, material.duration, material.source_id, material.title, schemaHint, selectedSubtitle?.subtitle_url, variables]);
-
-    if (!cacheRef.current) {
-        cacheRef.current = new VariableResolverCache(key => resolver(key), { ttlMs: 60_000 });
-    }
-
-    useEffect(() => {
-        cacheRef.current = new VariableResolverCache(key => resolver(key), { ttlMs: 60_000 });
-    }, [resolver]);
-
     useEffect(() => {
         let cancelled = false;
         fetchMaterialSubtitles(apiFetch, material.id)
@@ -390,10 +325,6 @@ export default function SummaryWebenPage() {
 
         return () => { cancelled = true; };
     }, [apiFetch, material.id]);
-
-    const variableResolver = useMemo(() => {
-        return (key: string) => cacheRef.current!.resolve(key);
-    }, []);
 
     const handlePreview = async () => {
         console.debug("[SummaryWebenPage] handlePreview: routeMaterialId=", routeMaterialId, "template.length=", template.length, "scriptHeader.length=", scriptHeader.length);
@@ -641,8 +572,6 @@ export default function SummaryWebenPage() {
                     setTemplate(next);
                     setStage("editing");
                 }}
-                variableResolver={variableResolver}
-                variables={variables}
                 previewResult={previewResult}
                 previewLoading={previewLoading}
                 onPreview={handlePreview}
