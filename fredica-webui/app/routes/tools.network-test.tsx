@@ -6,6 +6,7 @@ import {
 import { Link } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
 import { json_parse } from "~/util/json";
+import { reportHttpError } from "~/util/error_handler";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -131,25 +132,33 @@ export default function NetworkTestPage() {
         stopPolling();
 
         try {
-            const { data } = await apiFetch("/api/v1/NetworkTestRoute", {
+            const { resp, data } = await apiFetch("/api/v1/NetworkTestRoute", {
                 method: "POST",
                 body: "{}",
             });
 
-            const newPipelineId = (data as any).pipeline_id as string;
+            if (!resp.ok) {
+                reportHttpError("提交测试任务失败", resp);
+                setPhase("failed");
+                setTaskError("提交失败，请重试");
+                return;
+            }
+
+            const newWorkflowRunId = (data as any).workflow_run_id as string;
             const newTaskId = (data as any).task_id as string;
-            setPipelineId(newPipelineId);
+            setPipelineId(newWorkflowRunId);
             setTaskId(newTaskId);
             setPhase("waiting");
 
             pollRef.current = setInterval(async () => {
                 try {
-                    const { data: taskData } = await apiFetch<NetworkTestTask>(
-                        `/api/v1/WorkerTaskListRoute?pipeline_id=${newPipelineId}`,
+                    const { data: taskData } = await apiFetch<{ items: NetworkTestTask[]; total: number }>(
+                        `/api/v1/WorkerTaskListRoute?workflow_run_id=${newWorkflowRunId}`,
                         { method: "GET" },
                     );
-                    if (!Array.isArray(taskData) || taskData.length === 0) return;
-                    const task = taskData[0];
+                    const items = taskData?.items;
+                    if (!items?.length) return;
+                    const task = items[0];
 
                     if (task.status === "completed") {
                         stopPolling();

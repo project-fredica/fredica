@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
-import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, Loader2, Save, Sparkles, Trash2, AlertTriangle } from "lucide-react";
+import { Link, useParams } from "react-router";
+import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, ExternalLink, Loader2, RotateCcw, Save, Sparkles, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "react-toastify";
 import { PromptBuilder } from "~/components/prompt-builder/PromptBuilder";
 import { PromptPaneShell } from "~/components/prompt-builder/PromptPaneShell";
@@ -548,13 +548,36 @@ export default function SummaryWebenPage() {
                         </div>
                         <div className="mt-1 text-xs text-gray-500">preview 与 submit 共享同一套变量解析链路。</div>
                         {lastSavedSourceId ? (
-                            <div className="mt-2 text-xs text-green-700">最近一次保存 source_id：{lastSavedSourceId}</div>
+                            <Link
+                                to={`/weben/sources/${lastSavedSourceId}`}
+                                className="mt-2 inline-flex items-center gap-1 text-xs text-green-700 hover:text-green-900 hover:underline"
+                            >
+                                <ExternalLink className="w-3 h-3" />
+                                已保存 · 查看来源详情
+                            </Link>
                         ) : null}
                     </div>
                 </div>
             </div>
 
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-end gap-2">
+                {(stage === "parsed" || stage === "parse_error") && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setStage("editing");
+                            setStreamText("");
+                            setStreamError(null);
+                            setParsedResult(null);
+                            setReviewedResult(null);
+                            setParseError(null);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                    >
+                        <RotateCcw className="w-4 h-4" />
+                        重新生成
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={() => void handleSave()}

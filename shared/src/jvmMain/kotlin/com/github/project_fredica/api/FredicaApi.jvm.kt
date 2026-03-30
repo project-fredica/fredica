@@ -173,9 +173,9 @@ object FredicaApiJvmService {
             maxWorkers = 2,
             scope = engineScope,
             executors = listOf(
+                NetworkTestExecutor,
                 DownloadBilibiliVideoExecutor,
                 TranscodeMp4Executor,
-//                FetchSubtitleExecutor,
                 ExtractAudioExecutor,
                 TranscribeExecutor,
                 DownloadWhisperModelExecutor,

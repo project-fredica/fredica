@@ -71,6 +71,7 @@ object AppUtil {
          * 返回指定素材的媒体工作目录（首次调用时自动创建）：
          * `{appDataDir}/media/{materialId}/`
          */
+        @Suppress("RedundantSuspendModifier")
         suspend fun materialMediaDir(materialId: String): File =
             appMediaDir.resolve(materialId).also { it.mkdirs() }
 

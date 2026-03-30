@@ -3,6 +3,7 @@ package com.github.project_fredica.db
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.ktorm.database.Database
+import java.sql.ResultSet
 
 class LlmResponseCacheDb(private val db: Database) : LlmResponseCacheRepo {
 
@@ -120,7 +121,7 @@ class LlmResponseCacheDb(private val db: Database) : LlmResponseCacheRepo {
             }
         }
 
-    private fun rowToCache(rs: java.sql.ResultSet) = LlmResponseCache(
+    private fun rowToCache(rs: ResultSet) = LlmResponseCache(
         id = rs.getLong("id"),
         keyHash = rs.getString("key_hash"),
         cacheKey = rs.getString("cache_key"),
