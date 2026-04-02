@@ -9,10 +9,6 @@ import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.weben.WebenConceptDb
 import com.github.project_fredica.db.weben.WebenConceptService
-import com.github.project_fredica.db.weben.WebenFlashcardDb
-import com.github.project_fredica.db.weben.WebenFlashcardService
-import com.github.project_fredica.db.weben.WebenRelationDb
-import com.github.project_fredica.db.weben.WebenRelationService
 import com.github.project_fredica.db.weben.WebenSourceDb
 import com.github.project_fredica.db.weben.WebenSourceService
 import kotlinx.coroutines.runBlocking
@@ -25,14 +21,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/**
- * WebenConceptBatchImportRoute 集成测试。
- *
- * 使用临时 SQLite，符合 testing.md：
- * - 不用 :memory:
- * - 初始化真实 DB repo
- * - 直接调用 handler 验证批量导入副作用
- */
 @Serializable
 private data class BatchImportResponse(
     val ok: Boolean? = null,
@@ -40,16 +28,12 @@ private data class BatchImportResponse(
     val source_id: String? = null,
     val concept_created: Int? = null,
     val concept_total: Int? = null,
-    val relation_imported: Int? = null,
-    val flashcard_imported: Int? = null,
 )
 
 class WebenConceptBatchImportRouteTest {
 
     private lateinit var db: Database
     private lateinit var conceptDb: WebenConceptDb
-    private lateinit var relationDb: WebenRelationDb
-    private lateinit var flashcardDb: WebenFlashcardDb
     private lateinit var sourceDb: WebenSourceDb
 
     @BeforeTest
@@ -66,17 +50,11 @@ class WebenConceptBatchImportRouteTest {
         MaterialVideoService.initialize(materialVideoDb)
 
         conceptDb = WebenConceptDb(db)
-        relationDb = WebenRelationDb(db)
-        flashcardDb = WebenFlashcardDb(db)
         sourceDb = WebenSourceDb(db)
         conceptDb.initialize()
-        relationDb.initialize()
-        flashcardDb.initialize()
         sourceDb.initialize()
 
         WebenConceptService.initialize(conceptDb)
-        WebenRelationService.initialize(relationDb)
-        WebenFlashcardService.initialize(flashcardDb)
         WebenSourceService.initialize(sourceDb)
 
         MaterialVideoService.repo.upsertAll(
@@ -102,20 +80,14 @@ class WebenConceptBatchImportRouteTest {
     }
 
     @Test
-    fun `batch import creates source concepts relations and flashcards`() = runBlocking {
+    fun `batch import creates source concepts aliases and source excerpts`() = runBlocking {
         val result = WebenConceptBatchImportRoute.handler(
             """
                 {
                   "material_id": "mat-1",
                   "concepts": [
-                    {"name": "GPIO", "type": "术语", "description": "通用输入输出接口", "aliases": ["General Purpose IO"]},
-                    {"name": "开漏输出", "type": "术语", "description": "一种输出模式", "aliases": []}
-                  ],
-                  "relations": [
-                    {"subject": "GPIO", "predicate": "包含", "object": "开漏输出", "excerpt": "GPIO 包含开漏输出模式"}
-                  ],
-                  "flashcards": [
-                    {"question": "GPIO 的一种输出模式是什么？", "answer": "开漏输出", "concept": "GPIO"}
+                    {"name": "GPIO", "types": ["术语"], "description": "通用输入输出接口", "aliases": ["General Purpose IO"]},
+                    {"name": "开漏输出", "types": ["术语"], "description": "一种输出模式", "aliases": []}
                   ]
                 }
             """.trimIndent()
@@ -130,8 +102,8 @@ class WebenConceptBatchImportRouteTest {
         assertNotNull(source)
         assertEquals("mat-1", source.materialId)
 
-        val gpio = conceptDb.getByCanonicalName("GPIO")
-        val openDrain = conceptDb.getByCanonicalName("开漏输出")
+        val gpio = conceptDb.getByCanonicalName("GPIO", materialId = "mat-1")
+        val openDrain = conceptDb.getByCanonicalName("开漏输出", materialId = "mat-1")
         assertNotNull(gpio)
         assertNotNull(openDrain)
         assertEquals("通用输入输出接口", gpio.briefDefinition)
@@ -140,20 +112,88 @@ class WebenConceptBatchImportRouteTest {
         assertTrue(aliases.any { it.alias == "General Purpose IO" })
 
         val sources = conceptDb.listSources(gpio.id)
-        assertTrue(sources.any { it.sourceId == sourceId })
+        assertTrue(sources.any { it.sourceId == sourceId && it.excerpt == "通用输入输出接口" })
 
-        val relations = relationDb.listByConcept(gpio.id)
-        assertEquals(1, relations.size)
-        assertEquals("包含", relations.first().predicate)
-
-        val cards = flashcardDb.listByConcept(gpio.id)
-        assertEquals(1, cards.size)
-        assertEquals(sourceId, cards.first().sourceId)
-        assertEquals(true, cards.first().isSystem)
         assertEquals(2, payload.concept_created)
         assertEquals(2, payload.concept_total)
-        assertEquals(1, payload.relation_imported)
-        assertEquals(1, payload.flashcard_imported)
+    }
+
+    @Test
+    fun `reimport updates existing concept instead of duplicating`() = runBlocking {
+        WebenConceptBatchImportRoute.handler(
+            """
+                {
+                  "material_id": "mat-1",
+                  "concepts": [
+                    {"name": "GPIO", "types": ["术语"], "description": "旧描述", "aliases": ["GPIO口"]}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        val result = WebenConceptBatchImportRoute.handler(
+            """
+                {
+                  "material_id": "mat-1",
+                  "concepts": [
+                    {"name": "GPIO", "types": ["术语"], "description": "新描述", "aliases": ["General Purpose IO"]}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
+        assertEquals(true, payload.ok)
+        assertEquals(0, payload.concept_created)
+        assertEquals(1, payload.concept_total)
+
+        val gpio = conceptDb.getByCanonicalName("GPIO", materialId = "mat-1")
+        assertNotNull(gpio)
+        assertEquals("新描述", gpio.briefDefinition)
+        assertEquals(1, conceptDb.listAll(materialId = "mat-1").count { it.canonicalName == "GPIO" })
+
+        val aliases = conceptDb.listAliases(gpio.id)
+        assertTrue(aliases.any { it.alias == "GPIO口" })
+        assertTrue(aliases.any { it.alias == "General Purpose IO" })
+    }
+
+    @Test
+    fun `batch import preserves free-form concept type`() = runBlocking {
+        val result = WebenConceptBatchImportRoute.handler(
+            """
+                {
+                  "material_id": "mat-1",
+                  "concepts": [
+                    {"name": "链表", "types": ["数据结构"], "description": "一种线性数据结构"}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
+        assertEquals(true, payload.ok)
+
+        val linkedList = conceptDb.getByCanonicalName("链表", materialId = "mat-1")
+        assertNotNull(linkedList)
+        assertEquals("数据结构", linkedList.conceptType)
+    }
+
+    @Test
+    fun `blank concept type returns error field`() = runBlocking {
+        val result = WebenConceptBatchImportRoute.handler(
+            """
+                {
+                  "material_id": "mat-1",
+                  "concepts": [
+                    {"name": "GPIO", "types": ["   "], "description": "通用输入输出接口"}
+                  ]
+                }
+            """.trimIndent()
+        )
+        val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
+        val error = payload.error
+        assertNotNull(error)
+        assertTrue(error.contains("concept types 不能全部为空"))
     }
 
     @Test

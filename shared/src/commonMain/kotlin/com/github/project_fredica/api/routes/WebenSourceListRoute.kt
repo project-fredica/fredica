@@ -9,11 +9,16 @@ import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.weben.WebenSource
 import com.github.project_fredica.db.weben.WebenSourceService
+import com.github.project_fredica.db.weben.WebenConceptService
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.warn
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
@@ -142,8 +147,14 @@ object WebenSourceListRoute : FredicaApi.Route {
     override val desc = "来源库列表（可按 material_id 过滤，分页，含双层状态对账 + 首次启动保护）"
 
     @Serializable
+    data class WebenSourceListItem(
+        val source: WebenSource,
+        @SerialName("concept_count") val conceptCount: Int,
+    )
+
+    @Serializable
     private data class PageResult(
-        val items: List<WebenSource>,
+        val items: List<WebenSourceListItem>,
         val total: Int,
         val offset: Int,
         val limit: Int,
@@ -175,7 +186,15 @@ object WebenSourceListRoute : FredicaApi.Route {
 
         val total = if (anyReconciled) WebenSourceService.repo.count(materialId) else allSources.size
         val items = WebenSourceService.repo.listPaged(materialId, limit, offset)
-        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(PageResult(items, total, offset, limit)))
+        val enrichedItems = coroutineScope {
+            items.map { source ->
+                async {
+                    val conceptCount = runCatching { WebenConceptService.repo.count(sourceId = source.id) }.getOrElse { 0 }
+                    WebenSourceListItem(source, conceptCount)
+                }
+            }.awaitAll()
+        }
+        return ValidJsonString(AppUtil.GlobalVars.json.encodeToString(PageResult(enrichedItems, total, offset, limit)))
     }
 
     /**

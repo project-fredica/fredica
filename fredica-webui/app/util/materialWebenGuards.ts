@@ -8,7 +8,7 @@ import type {
     MaterialWebenLlmResult,
     WebenBatchImportResponse,
 } from "~/util/materialWebenApi";
-import { CONCEPT_TYPES, PREDICATES } from "~/util/weben";
+import type { WebenSource } from "~/util/weben";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === "object" ? value as Record<string, unknown> : null;
@@ -131,14 +131,12 @@ export function normalizeImportResponse(data: unknown): WebenBatchImportResponse
         source_id: asString(record.source_id) || undefined,
         concept_created: asNumber(record.concept_created),
         concept_total: asNumber(record.concept_total),
-        relation_imported: asNumber(record.relation_imported),
-        flashcard_imported: asNumber(record.flashcard_imported),
     };
 }
 
 export interface WebenValidationIssue {
     level: "error" | "warning";
-    scope: "concept" | "relation" | "flashcard" | "result";
+    scope: "concept" | "result";
     index?: number;
     message: string;
 }
@@ -150,103 +148,76 @@ export interface WebenValidationResult {
 }
 
 export function validateWebenResult(result: MaterialWebenLlmResult): WebenValidationResult {
-    const validConceptTypes = new Set(CONCEPT_TYPES.map(item => item.key));
-    const validPredicates = new Set(PREDICATES);
-    const conceptNames = new Set(result.concepts.map(item => item.name.trim()).filter(Boolean));
-
     const blockingErrors: WebenValidationIssue[] = [];
     const warnings: WebenValidationIssue[] = [];
 
     const sanitizedConcepts = result.concepts.filter((concept, index) => {
-        if (!concept.name.trim() || !concept.type.trim() || !concept.description.trim()) {
+        const hasValidType = Array.isArray(concept.types) && concept.types.some(t => t.trim().length > 0);
+        if (!concept.name.trim() || !hasValidType || !concept.description.trim()) {
             blockingErrors.push({ level: "error", scope: "concept", index, message: `概念 #${index + 1} 缺少名称、类型或描述` });
             return false;
         }
-        if (!validConceptTypes.has(concept.type)) {
-            blockingErrors.push({ level: "error", scope: "concept", index, message: `概念“${concept.name}”的类型“${concept.type}”不在允许列表中` });
-            return false;
-        }
         return true;
     });
 
-    const sanitizedConceptNames = new Set(sanitizedConcepts.map(item => item.name));
-
-    const sanitizedRelations = result.relations.filter((relation, index) => {
-        if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) {
-            blockingErrors.push({ level: "error", scope: "relation", index, message: `关系 #${index + 1} 缺少主语、谓词或宾语` });
-            return false;
-        }
-        if (!validPredicates.has(relation.predicate)) {
-            blockingErrors.push({ level: "error", scope: "relation", index, message: `关系“${relation.subject} ${relation.predicate} ${relation.object}”的谓词不在允许列表中` });
-            return false;
-        }
-        if (!sanitizedConceptNames.has(relation.subject) || !sanitizedConceptNames.has(relation.object)) {
-            blockingErrors.push({ level: "error", scope: "relation", index, message: `关系“${relation.subject} ${relation.predicate} ${relation.object}”引用了不存在的概念` });
-            return false;
-        }
-        return true;
-    });
-
-    const sanitizedFlashcards = result.flashcards.filter((card, index) => {
-        if (!card.question.trim() || !card.answer.trim() || !card.concept.trim()) {
-            blockingErrors.push({ level: "error", scope: "flashcard", index, message: `闪卡 #${index + 1} 缺少问题、答案或概念` });
-            return false;
-        }
-        if (!sanitizedConceptNames.has(card.concept)) {
-            blockingErrors.push({ level: "error", scope: "flashcard", index, message: `闪卡“${card.question}”引用了不存在的概念“${card.concept}”` });
-            return false;
-        }
-        return true;
-    });
-
-    if (sanitizedConcepts.length === 0 && (sanitizedRelations.length > 0 || sanitizedFlashcards.length > 0 || conceptNames.size > 0)) {
-        warnings.push({ level: "warning", scope: "result", message: "当前结果没有可导入的有效概念，相关关系和闪卡也会被阻止保存。" });
+    if (sanitizedConcepts.length === 0 && result.concepts.length > 0) {
+        warnings.push({ level: "warning", scope: "result", message: "当前结果没有可导入的有效概念。" });
     }
 
     return {
-        sanitizedResult: {
-            concepts: sanitizedConcepts,
-            relations: sanitizedRelations,
-            flashcards: sanitizedFlashcards,
-        },
+        sanitizedResult: { concepts: sanitizedConcepts },
         blockingErrors,
         warnings,
+    };
+}
+
+/**
+ * 对 API 返回的 WebenSource 对象做守卫处理：
+ * - material_id: 空字符串归一化为 null（旧版数据库存储遗留问题）
+ * - url: 保留原始值，调用方需自行过滤 "material://" 占位符
+ */
+export function normalizeWebenSource(data: unknown): WebenSource | null {
+    const r = asRecord(data);
+    if (!r) return null;
+    const id = asString(r.id);
+    if (!id) return null;
+    const rawMaterialId = r.material_id;
+    return {
+        id,
+        material_id: typeof rawMaterialId === "string" && rawMaterialId.trim().length > 0
+            ? rawMaterialId
+            : null,
+        url: asString(r.url),
+        title: asString(r.title),
+        source_type: asString(r.source_type),
+        bvid: typeof r.bvid === "string" ? r.bvid : null,
+        duration_sec: typeof r.duration_sec === "number" && Number.isFinite(r.duration_sec)
+            ? r.duration_sec
+            : null,
+        quality_score: asNumber(r.quality_score, 0.5),
+        analysis_status: asString(r.analysis_status, "pending"),
+        workflow_run_id: typeof r.workflow_run_id === "string" ? r.workflow_run_id : null,
+        progress: asNumber(r.progress),
+        created_at: asNumber(r.created_at),
     };
 }
 
 export function normalizeWebenResult(data: unknown): MaterialWebenLlmResult {
     const record = asRecord(data);
     const concepts = Array.isArray(record?.concepts) ? record.concepts : [];
-    const relations = Array.isArray(record?.relations) ? record.relations : [];
-    const flashcards = Array.isArray(record?.flashcards) ? record.flashcards : [];
     return {
         concepts: concepts.map(item => {
             const concept = asRecord(item);
             return {
                 name: asString(concept?.name),
-                type: asString(concept?.type),
+                types: Array.isArray(concept?.types)
+                    ? concept.types.filter((t): t is string => typeof t === "string")
+                    : [],
                 description: asString(concept?.description),
                 aliases: Array.isArray(concept?.aliases)
                     ? concept.aliases.filter((alias): alias is string => typeof alias === "string")
                     : undefined,
             };
         }).filter(item => item.name.trim().length > 0),
-        relations: relations.map(item => {
-            const relation = asRecord(item);
-            return {
-                subject: asString(relation?.subject),
-                predicate: asString(relation?.predicate),
-                object: asString(relation?.object),
-                excerpt: typeof relation?.excerpt === "string" ? relation.excerpt : undefined,
-            };
-        }).filter(item => item.subject.trim().length > 0 && item.predicate.trim().length > 0 && item.object.trim().length > 0),
-        flashcards: flashcards.map(item => {
-            const card = asRecord(item);
-            return {
-                question: asString(card?.question),
-                answer: asString(card?.answer),
-                concept: asString(card?.concept),
-            };
-        }).filter(item => item.question.trim().length > 0 && item.answer.trim().length > 0 && item.concept.trim().length > 0),
     };
 }

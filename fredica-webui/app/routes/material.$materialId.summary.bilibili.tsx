@@ -3,10 +3,7 @@ import { useParams } from "react-router";
 import { Loader, RefreshCw, Sparkles } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { print_error, reportHttpError } from "~/util/error_handler";
-import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { useFloatingPlayerCtx } from "~/context/floatingPlayer";
-import { json_parse } from "~/util/json";
-import type { BilibiliExtra } from "~/components/material-library/materialTypes";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +26,52 @@ interface AiConclusionResult {
     } | null;
 }
 
+// ─── Runtime parser ───────────────────────────────────────────────────────────
+
+function parseOutlineItem(item: unknown): OutlineItem {
+    if (!item || typeof item !== "object") return { timestamp: 0, content: "" };
+    const i = item as Record<string, unknown>;
+    return {
+        timestamp: typeof i.timestamp === "number" ? i.timestamp : 0,
+        content: typeof i.content === "string" ? i.content : "",
+    };
+}
+
+function parseOutlineSection(sec: unknown): OutlineSection {
+    if (!sec || typeof sec !== "object") return { title: "", part_outline: [] };
+    const s = sec as Record<string, unknown>;
+    return {
+        title: typeof s.title === "string" ? s.title : "",
+        part_outline: Array.isArray(s.part_outline)
+            ? s.part_outline.map(parseOutlineItem)
+            : [],
+    };
+}
+
+function parseAiConclusion(data: unknown): AiConclusionResult | null {
+    if (!data || typeof data !== "object") return null;
+    const d = data as Record<string, unknown>;
+    if (typeof d.code !== "number") return null;
+
+    let model_result: AiConclusionResult["model_result"] = null;
+    if (d.model_result != null) {
+        if (typeof d.model_result !== "object") return null;
+        const mr = d.model_result as Record<string, unknown>;
+        model_result = {
+            summary: typeof mr.summary === "string" ? mr.summary : "",
+            outline: Array.isArray(mr.outline)
+                ? mr.outline.map(parseOutlineSection)
+                : [],
+        };
+    }
+
+    return {
+        code: d.code,
+        message: typeof d.message === "string" ? d.message : undefined,
+        model_result,
+    };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTimestamp(seconds: number): string {
@@ -37,10 +80,16 @@ function formatTimestamp(seconds: number): string {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/** Parse page index (0-based) from materialId: bilibili_bvid__BV1xx__P1 → 0 */
+/** bilibili_bvid__BV1xx__P1 → 0 */
 function parsePageIndex(materialId: string): number {
     const match = materialId.match(/__P(\d+)$/);
     return match ? Math.max(0, parseInt(match[1], 10) - 1) : 0;
+}
+
+/** bilibili_bvid__BV1xx__P1 → "BV1xx" */
+function parseBvid(materialId: string): string | null {
+    const match = materialId.match(/^bilibili_bvid__(.+)__P\d+$/);
+    return match ? match[1] : null;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -93,9 +142,7 @@ function OutlineView({
 
 export default function SummaryBilibiliPage() {
     const { materialId } = useParams<{ materialId: string }>();
-    const { material } = useWorkspaceContext();
-
-    const bvid = json_parse<BilibiliExtra>(material.extra ?? "{}")?.bvid ?? material.source_id;
+    const bvid = parseBvid(materialId ?? "");
     const pageIndex = parsePageIndex(materialId ?? "");
 
     const { apiFetch } = useAppFetch();
@@ -129,7 +176,7 @@ export default function SummaryBilibiliPage() {
                 setFetchError(true);
                 return;
             }
-            setResult(data as AiConclusionResult);
+            setResult(parseAiConclusion(data));
         }).catch(e => {
             if (cancelled || (e as Error)?.name === "AbortError") return;
             print_error({ reason: "B站AI总结获取失败", err: e });
@@ -139,7 +186,7 @@ export default function SummaryBilibiliPage() {
         });
 
         return () => { cancelled = true; abort.abort(); };
-    }, [bvid, pageIndex, refreshKey, apiFetch]);
+    }, [bvid, pageIndex, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const hasContent = result?.code === 0 && result.model_result != null;
 
@@ -179,24 +226,17 @@ export default function SummaryBilibiliPage() {
             )}
 
             {/* Content */}
-            {!loading && hasContent && (() => {
-                const { summary, outline } = result!.model_result!;
-                return (
-                    <>
-                        {summary && (
-                            <div className="bg-violet-50 rounded-xl p-4">
-                                <p className="text-sm text-gray-700 leading-relaxed">{summary}</p>
-                            </div>
-                        )}
-                        {outline && outline.length > 0 && (
-                            <div className="bg-white rounded-xl border border-gray-100 p-4">
-                                <p className="text-xs font-medium text-gray-400 mb-3 uppercase tracking-wide">章节大纲</p>
-                                <OutlineView outline={outline} materialId={materialId ?? ""} />
-                            </div>
-                        )}
-                    </>
-                );
-            })()}
+            {!loading && hasContent && result!.model_result!.summary && (
+                <div className="bg-violet-50 rounded-xl p-4">
+                    <p className="text-sm text-gray-700 leading-relaxed">{result!.model_result!.summary}</p>
+                </div>
+            )}
+            {!loading && hasContent && result!.model_result!.outline.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <p className="text-xs font-medium text-gray-400 mb-3 uppercase tracking-wide">章节大纲</p>
+                    <OutlineView outline={result!.model_result!.outline} materialId={materialId ?? ""} />
+                </div>
+            )}
         </div>
     );
 }

@@ -11,6 +11,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import "react-toastify/dist/ReactToastify.css";
 import { AppConfigProvider } from "~/context/appConfig";
 
 const ToastContainer = lazy(() =>

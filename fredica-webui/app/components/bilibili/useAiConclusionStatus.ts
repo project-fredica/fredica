@@ -9,25 +9,25 @@ import { useAppFetch } from "~/util/app_fetch";
  * 冷却：同一 bvid+pageIndex 30s 内不重复请求。
  */
 
-// 模块级冷却 Map，跨组件实例共享
-const cooldownMap = new Map<string, number>();
+// 模块级缓存 Map，跨组件实例共享：存储最近一次查询时间戳及成功结果
+const cacheMap = new Map<string, { ts: number; success: boolean }>();
 const COOLDOWN_MS = 30_000;
 const DEBOUNCE_MS = 600;
 
 export function useAiConclusionStatus(bvid: string, pageIndex: number) {
     const { apiFetch } = useAppFetch();
-    const [hasSuccess, setHasSuccess] = useState(false);
+    const cacheKey = `${bvid}__${pageIndex}`;
+    // 若缓存中已知有成功结果，直接初始化为 true（导航返回后立即恢复显示）
+    const [hasSuccess, setHasSuccess] = useState(() => cacheMap.get(cacheKey)?.success ?? false);
     const ref = useRef<HTMLElement | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const queriedRef = useRef(false);
 
-    const cacheKey = `${bvid}__${pageIndex}`;
-
     const query = () => {
         const now = Date.now();
-        const last = cooldownMap.get(cacheKey) ?? 0;
+        const last = cacheMap.get(cacheKey)?.ts ?? 0;
         if (now - last < COOLDOWN_MS) return;
-        cooldownMap.set(cacheKey, now);
+        cacheMap.set(cacheKey, { ts: now, success: false });
 
         apiFetch("/api/v1/BilibiliVideoAiConclusionRoute", {
             method: "POST",
@@ -42,9 +42,9 @@ export function useAiConclusionStatus(bvid: string, pageIndex: number) {
             silent: true,
         }).then(({ data }) => {
             const d = data as { code: number; model_result: unknown };
-            if (d?.code === 0 && d?.model_result != null) {
-                setHasSuccess(true);
-            }
+            const success = d?.code === 0 && d?.model_result != null;
+            cacheMap.set(cacheKey, { ts: now, success });
+            if (success) setHasSuccess(true);
         }).catch(() => {/* 静默失败 */});
     };
 

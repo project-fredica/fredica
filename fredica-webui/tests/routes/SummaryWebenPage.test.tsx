@@ -1,24 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import SummaryWebenPage from "~/routes/material.$materialId.summary.weben";
-
-// ────────────────────────────────────────────────────────────────────────────
-// SummaryWebenPage テスト概要
-// ────────────────────────────────────────────────────────────────────────────
-//
-// Phase 7 以降、"生成"/"预览" の fetch フローは 2 段階:
-//   1. PromptTemplatePreviewRoute (SSE) → resolved prompt text
-//   2. LlmProxyChatRoute (SSE)         → LLM delta chunks
-//
-// generateReviewedResult() ヘルパーは URL で判別して両方をモックする。
-//
-// 追加テスト (W1-W4):
-//   W1 preview calls PromptTemplatePreviewRoute
-//   W2 generate calls preview script first, then LLM (sequential order)
-//   W3 script error on generate stops before LLM call
-//   W4 previewPromptScript HTTP failure calls print_error
-// ────────────────────────────────────────────────────────────────────────────
+import SummaryWebenPage, { resolveConceptDiffBaseline } from "~/routes/material.$materialId.summary.weben";
 
 const mockApiFetch = vi.fn();
 const mockWorkspaceContext = vi.fn();
@@ -32,6 +15,7 @@ vi.mock("react-router", async () => {
     return {
         ...actual,
         useParams: () => ({ materialId: "bilibili_bvid__BV1sNA1ztEvY__P1" }),
+        Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={String(to)}>{children}</a>,
     };
 });
 
@@ -84,17 +68,80 @@ function createDeltaChunk(content: string) {
     return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n`;
 }
 
+describe("resolveConceptDiffBaseline", () => {
+    function makeConcept(name: string, materialId: string) {
+        return {
+            id: `c-${materialId}-${name}`,
+            material_id: materialId,
+            canonical_name: name,
+            concept_type: "术语",
+            brief_definition: `${name} 的定义`,
+            metadata_json: "{}",
+            confidence: 1,
+            first_seen_at: 0,
+            last_seen_at: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+    }
+
+    it("uses saved baseline first so changed/unchanged are preserved after a prior save", () => {
+        const savedBaseline = [makeConcept("图", "mat-1")];
+        const fetchedConcepts = [
+            makeConcept("图", "mat-1"),
+            makeConcept("消费升级", "mat-2"),
+        ];
+
+        const result = resolveConceptDiffBaseline({
+            fetchedConcepts,
+            savedConceptBaseline: savedBaseline,
+            materialId: "mat-1",
+        });
+
+        expect(result).toEqual(savedBaseline);
+    });
+
+    it("falls back to fetched concepts filtered by current material only", () => {
+        const fetchedConcepts = [
+            makeConcept("图", "mat-1"),
+            makeConcept("边", "mat-1"),
+            makeConcept("消费升级", "mat-2"),
+            makeConcept("房贷压力", "mat-2"),
+        ];
+
+        const result = resolveConceptDiffBaseline({
+            fetchedConcepts,
+            savedConceptBaseline: null,
+            materialId: "mat-1",
+        });
+
+        expect(result.map(item => item.canonical_name)).toEqual(["图", "边"]);
+    });
+
+    it("uses route material id fallback when workspace material id is empty", () => {
+        const fetchedConcepts = [
+            makeConcept("图", "bilibili_bvid__BV1sNA1ztEvY__P1"),
+            makeConcept("边", "bilibili_bvid__BV1sNA1ztEvY__P1"),
+            makeConcept("消费升级", "bilibili_bvid__BV1tv4y1q7eL__P1"),
+        ];
+
+        const result = resolveConceptDiffBaseline({
+            fetchedConcepts,
+            savedConceptBaseline: null,
+            materialId: "bilibili_bvid__BV1sNA1ztEvY__P1",
+        });
+
+        expect(result.map(item => item.canonical_name)).toEqual(["图", "边"]);
+    });
+});
+
 async function generateReviewedResult(user: ReturnType<typeof userEvent.setup>, payload: string) {
-    // Phase 7: 生成按钮触发两次 fetch:
-    //   1. PromptTemplatePreviewRoute → SSE {"type":"result","prompt_text":"..."}
-    //   2. LlmProxyChatRoute         → SSE delta chunks
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
         if (typeof url === "string" && url.includes("PromptTemplatePreviewRoute")) {
             return createSseResponse([
                 `data: ${JSON.stringify({ type: "result", prompt_text: "resolved prompt text" })}\n\n`,
             ]);
         }
-        // LlmProxyChatRoute: 返回 LLM delta 格式
         return createSseResponse([
             createDeltaChunk(payload),
             "data: [DONE]\n",
@@ -176,15 +223,20 @@ describe("SummaryWebenPage", () => {
                     },
                 };
             }
-            if (path === "/api/v1/WebenConceptBatchImportRoute") {
+            if (path.startsWith("/api/v1/WebenConceptListRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { items: [], total: 0, offset: 0, limit: 200 },
+                };
+            }
+            if (path === "/api/v1/WebenExtractionRunSaveRoute") {
                 return {
                     resp: new Response("{}", { status: 200 }),
                     data: {
                         ok: true,
                         source_id: "source-1",
+                        run_id: "run-1",
                         concept_total: 1,
-                        relation_imported: 1,
-                        flashcard_imported: 1,
                     },
                 };
             }
@@ -255,32 +307,31 @@ describe("SummaryWebenPage", () => {
         });
     });
 
-    it("generates and renders parsed result", async () => {
+    it("generates and renders parsed concept result", async () => {
         const user = userEvent.setup();
 
         await generateReviewedResult(
             user,
-            '{"concepts":[{"name":"GPIO","type":"术语","description":"通用输入输出"}],"relations":[],"flashcards":[]}',
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"}]}',
         );
 
         await waitFor(() => {
             expect(screen.getByText("概念 (1)")).toBeTruthy();
             expect(screen.getByText("GPIO")).toBeTruthy();
         });
+        expect(screen.queryByText(/关系|闪卡/)).toBeNull();
     });
 
-    it("updates reviewed result after deleting a concept and blocks save when references break", async () => {
+    it("updates reviewed result after deleting a concept", async () => {
         const user = userEvent.setup();
 
         await generateReviewedResult(
             user,
-            '{"concepts":[{"name":"GPIO","type":"术语","description":"通用输入输出"},{"name":"开漏输出","type":"术语","description":"一种模式"}],"relations":[{"subject":"GPIO","predicate":"用于","object":"开漏输出"}],"flashcards":[{"question":"GPIO 是什么？","answer":"一种接口","concept":"GPIO"}]}',
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"},{"name":"开漏输出","types":["术语"],"description":"一种模式"}]}',
         );
 
         await waitFor(() => {
             expect(screen.getByText("概念 (2)")).toBeTruthy();
-            expect(screen.getByText("关系 (1)")).toBeTruthy();
-            expect(screen.getByText("闪卡 (1)")).toBeTruthy();
         });
 
         await user.click(screen.getByRole("button", { name: "删除概念 开漏输出" }));
@@ -288,48 +339,37 @@ describe("SummaryWebenPage", () => {
         await waitFor(() => {
             expect(screen.getByText("概念 (1)")).toBeTruthy();
             expect(screen.queryByRole("button", { name: "删除概念 开漏输出" })).toBeNull();
-            expect(screen.getByText("关系“GPIO 用于 开漏输出”引用了不存在的概念")).toBeTruthy();
         });
-        expect(screen.getByRole("button", { name: "保存到 Weben" }).hasAttribute("disabled")).toBe(true);
     });
 
-    it("saves the sanitized reviewed result", async () => {
+    it("saves the reviewed concept result", async () => {
         const user = userEvent.setup();
 
         await generateReviewedResult(
             user,
-            '{"concepts":[{"name":"GPIO","type":"术语","description":"通用输入输出"},{"name":"开漏输出","type":"术语","description":"一种模式"}],"relations":[{"subject":"GPIO","predicate":"用于","object":"开漏输出"}],"flashcards":[{"question":"GPIO 是什么？","answer":"一种接口","concept":"GPIO"}]}',
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"},{"name":"链表","types":["数据结构"],"description":"一种线性数据结构"}]}',
         );
 
         await waitFor(() => {
             expect(screen.getByText("概念 (2)")).toBeTruthy();
         });
 
-        await user.click(screen.getByRole("button", { name: "删除关系 GPIO 用于 开漏输出" }));
         await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        // Editor modal appears — click confirm
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+        });
+        await user.click(screen.getByRole("button", { name: "确认保存" }));
 
         await waitFor(() => {
             expect(mockApiFetch).toHaveBeenCalledWith(
-                "/api/v1/WebenConceptBatchImportRoute",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({
-                        material_id: "bilibili_bvid__BV1sNA1ztEvY__P1",
-                        source_title: "测试素材",
-                        concepts: [
-                            { name: "GPIO", type: "术语", description: "通用输入输出" },
-                            { name: "开漏输出", type: "术语", description: "一种模式" },
-                        ],
-                        relations: [],
-                        flashcards: [
-                            { question: "GPIO 是什么？", answer: "一种接口", concept: "GPIO" },
-                        ],
-                    }),
-                }),
+                "/api/v1/WebenExtractionRunSaveRoute",
+                expect.objectContaining({ method: "POST" }),
                 { silent: true },
             );
         });
-        expect(toastSuccess).toHaveBeenCalled();
+        expect(toastSuccess).toHaveBeenCalledWith("已保存到 Weben：概念 1 条");
     });
 
     it("reports HTTP errors when save fails with non-2xx response", async () => {
@@ -363,7 +403,13 @@ describe("SummaryWebenPage", () => {
                     data: { text: "GPIO 是一种接口。", word_count: 8, segment_count: 1, source: "bilibili_platform", subtitle_url: "https://example.com/subtitle.json" },
                 };
             }
-            if (path === "/api/v1/WebenConceptBatchImportRoute") {
+            if (path.startsWith("/api/v1/WebenConceptListRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { items: [], total: 0, offset: 0, limit: 200 },
+                };
+            }
+            if (path === "/api/v1/WebenExtractionRunSaveRoute") {
                 return {
                     resp: new Response("{}", { status: 500 }),
                     data: {},
@@ -375,10 +421,12 @@ describe("SummaryWebenPage", () => {
         const user = userEvent.setup();
         await generateReviewedResult(
             user,
-            '{"concepts":[{"name":"GPIO","type":"术语","description":"通用输入输出"}],"relations":[],"flashcards":[]}',
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"}]}',
         );
 
         await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+        await waitFor(() => { expect(screen.getByText("审阅概念变更")).toBeTruthy(); });
+        await user.click(screen.getByRole("button", { name: "确认保存" }));
 
         await waitFor(() => {
             expect(reportHttpError).toHaveBeenCalledWith("保存到 Weben 失败", expect.any(Response));
@@ -416,7 +464,13 @@ describe("SummaryWebenPage", () => {
                     data: { text: "GPIO 是一种接口。", word_count: 8, segment_count: 1, source: "bilibili_platform", subtitle_url: "https://example.com/subtitle.json" },
                 };
             }
-            if (path === "/api/v1/WebenConceptBatchImportRoute") {
+            if (path.startsWith("/api/v1/WebenConceptListRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { items: [], total: 0, offset: 0, limit: 200 },
+                };
+            }
+            if (path === "/api/v1/WebenExtractionRunSaveRoute") {
                 return {
                     resp: new Response("{}", { status: 200 }),
                     data: { error: "duplicate source" },
@@ -428,10 +482,12 @@ describe("SummaryWebenPage", () => {
         const user = userEvent.setup();
         await generateReviewedResult(
             user,
-            '{"concepts":[{"name":"GPIO","type":"术语","description":"通用输入输出"}],"relations":[],"flashcards":[]}',
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"}]}',
         );
 
         await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+        await waitFor(() => { expect(screen.getByText("审阅概念变更")).toBeTruthy(); });
+        await user.click(screen.getByRole("button", { name: "确认保存" }));
 
         await waitFor(() => {
             expect(printError).toHaveBeenCalledWith({ reason: "保存到 Weben 失败: duplicate source" });
@@ -521,8 +577,6 @@ describe("SummaryWebenPage", () => {
         expect(screen.getAllByRole("button", { name: "生成" })[0].hasAttribute("disabled")).toBe(false);
     });
 
-    // ── W1-W4: Phase 7 backend script execution ─────────────────────────────
-
     it("W1: 预览 calls PromptTemplatePreviewRoute (backend script execution)", async () => {
         const fetchMock = vi.fn(async (_url: string) =>
             createSseResponse([
@@ -568,7 +622,6 @@ describe("SummaryWebenPage", () => {
             const llmIdx = callOrder.findIndex(u => u.includes("LlmProxyChatRoute"));
             expect(previewIdx).toBeGreaterThanOrEqual(0);
             expect(llmIdx).toBeGreaterThanOrEqual(0);
-            // preview script 必须先于 LLM 调用
             expect(previewIdx).toBeLessThan(llmIdx);
         });
     });
@@ -595,7 +648,6 @@ describe("SummaryWebenPage", () => {
             expect(calledUrls.some(u => u.includes("PromptTemplatePreviewRoute"))).toBe(true);
             expect(printError).toHaveBeenCalledWith({ reason: "脚本执行失败: 字幕不可用" });
         });
-        // 确认 LLM 路由未被调用
         expect(calledUrls.every(u => !u.includes("LlmProxyChatRoute"))).toBe(true);
     });
 
@@ -634,5 +686,295 @@ describe("SummaryWebenPage", () => {
                 expect.objectContaining({ reason: "构建 Prompt 预览失败" }),
             );
         });
+    });
+
+    it("W5: scrolls save button into view when LLM output is parsed", async () => {
+        const scrollIntoView = vi.spyOn(window.HTMLElement.prototype, "scrollIntoView");
+
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"}]}',
+        );
+
+        await waitFor(() => {
+            expect(screen.getByText("概念 (1)")).toBeTruthy();
+        });
+        expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "nearest" });
+    });
+
+    // ── 审阅概念变更 diff modal ──────────────────────────────────────────────────
+
+    /**
+     * 辅助：在 generateReviewedResult 之后，覆写 mockApiFetch 让
+     * WebenConceptListRoute 返回指定的已有概念列表。
+     * 其余路径不会在"保存到 Weben"流程中被调用，直接 throw 以便发现漏网请求。
+     */
+    function mockExistingConcepts(items: object[]) {
+        mockApiFetch.mockImplementation(async (path: string) => {
+            if (path.startsWith("/api/v1/WebenConceptListRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { items, total: items.length, offset: 0, limit: 200 },
+                };
+            }
+            if (path === "/api/v1/WebenExtractionRunSaveRoute") {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { ok: true, source_id: "source-1", run_id: "run-1", concept_total: items.length },
+                };
+            }
+            throw new Error(`unexpected API path after render: ${path}`);
+        });
+    }
+
+    function makeExistingConcept(
+        canonicalName: string,
+        conceptType: string,
+        briefDefinition: string,
+        overrides: Record<string, unknown> = {},
+    ) {
+        return {
+            id: `c-${canonicalName}`,
+            material_id: "bilibili_bvid__BV1sNA1ztEvY__P1",
+            canonical_name: canonicalName,
+            concept_type: conceptType,
+            brief_definition: briefDefinition,
+            metadata_json: "{}",
+            confidence: 1.0,
+            first_seen_at: 1000,
+            last_seen_at: 1000,
+            created_at: 1000,
+            updated_at: 1000,
+            ...overrides,
+        };
+    }
+
+    it("W7: 审阅概念变更 shows all 新增 when no existing concepts for this material", async () => {
+        // beforeEach already mocks WebenConceptListRoute → { items: [] }
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":['
+            + '{"name":"图","types":["术语"],"description":"由节点和边组成的数学结构"},'
+            + '{"name":"节点","types":["术语"],"description":"图的基本组成单位"}'
+            + ']}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (2)")).toBeTruthy(); });
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("新增概念")).toBeTruthy();
+        });
+        // No 变化概念 or 本次未提及 when nothing existed before
+        expect(screen.queryByText("变化概念")).toBeNull();
+        expect(screen.queryByText(/本次未提及/)).toBeNull();
+    });
+
+    it("W8: 审阅概念变更 shows 新增 and 本次未提及 on re-save", async () => {
+        const user = userEvent.setup();
+        // incoming: 图 (same) + 握手引理 (new), but NOT 边 → 边 should appear in 本次未提及
+        await generateReviewedResult(
+            user,
+            '{"concepts":['
+            + '{"name":"图","types":["术语"],"description":"由节点和边组成的数学结构"},'
+            + '{"name":"握手引理","types":["定理"],"description":"所有顶点度数之和等于边数的两倍"}'
+            + ']}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (2)")).toBeTruthy(); });
+
+        mockExistingConcepts([
+            makeExistingConcept("图", "术语", "由节点和边组成的数学结构"),
+            makeExistingConcept("边", "术语", "连接两节点的线段"),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+        });
+        // 握手引理 is new → 新增概念 section
+        expect(screen.getByText("新增概念")).toBeTruthy();
+        // 边 is not in incoming → 本次未提及（原有概念） section
+        expect(screen.getByText("本次未提及（原有概念）")).toBeTruthy();
+        // 图 is unchanged → no 变化概念 section
+        expect(screen.queryByText("变化概念")).toBeNull();
+    });
+
+    it("W10: 审阅概念变更 shows 没有变化 when re-save with identical concepts", async () => {
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"图","types":["术语"],"description":"由节点和边组成的数学结构"}]}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockExistingConcepts([
+            makeExistingConcept("图", "术语", "由节点和边组成的数学结构"),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("没有变化")).toBeTruthy();
+        });
+        expect(screen.queryByText("新增概念")).toBeNull();
+        expect(screen.queryByText("变化概念")).toBeNull();
+        expect(screen.queryByText(/本次未提及/)).toBeNull();
+    });
+
+    it("W11: 审阅概念变更 folds changed concept into 合并后无变化 when merge removes effective type-only diff", async () => {
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"图","types":["术语"],"description":"由节点和边组成的数学结构"}]}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockExistingConcepts([
+            makeExistingConcept("图", "术语,定理", "由节点和边组成的数学结构"),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("变化概念")).toBeTruthy();
+            expect(screen.getByText("合并后无变化")).toBeTruthy();
+        });
+    });
+
+    it("W12: 审阅概念变更 shows 变化概念 when concept description changed on re-save", async () => {
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"图","types":["术语"],"description":"新描述：图是抽象的节点集合"}]}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockExistingConcepts([
+            makeExistingConcept("图", "术语", "旧描述：图论的基础结构"),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("变化概念")).toBeTruthy();
+        });
+        expect(screen.queryByText("新增概念")).toBeNull();
+        expect(screen.queryByText(/本次未提及/)).toBeNull();
+    });
+
+    it("W12: save refreshes local old-data baseline so next save shows 没有变化 even if list API is stale", async () => {
+        const user = userEvent.setup();
+        const savedConcepts = [
+            {
+                name: "图",
+                types: ["术语"],
+                description: "由节点和边组成的数学结构",
+            },
+        ];
+
+        await generateReviewedResult(
+            user,
+            JSON.stringify({ concepts: savedConcepts }),
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockApiFetch.mockImplementation(async (path: string) => {
+            if (path.startsWith("/api/v1/WebenConceptListRoute")) {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { items: [], total: 0, offset: 0, limit: 200 },
+                };
+            }
+            if (path === "/api/v1/WebenExtractionRunSaveRoute") {
+                return {
+                    resp: new Response("{}", { status: 200 }),
+                    data: { ok: true, source_id: "source-1", run_id: "run-1", concept_total: 1 },
+                };
+            }
+            throw new Error(`unexpected API path after render: ${path}`);
+        });
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+        await waitFor(() => { expect(screen.getByText("审阅概念变更")).toBeTruthy(); });
+        await user.click(screen.getByRole("button", { name: "确认保存" }));
+        await waitFor(() => {
+            expect(toastSuccess).toHaveBeenCalledWith("已保存到 Weben：概念 1 条");
+        });
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("没有变化")).toBeTruthy();
+        });
+    });
+
+    it("W14: initial review uses route material id when workspace material id is empty", async () => {
+        mockWorkspaceContext.mockReturnValueOnce({
+            material: {
+                id: "",
+                title: "测试素材",
+                source_id: "BV1sNA1ztEvY",
+                duration: 180,
+            },
+        });
+
+        const user = userEvent.setup();
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"图","types":["术语"],"description":"由节点和边组成的数学结构"}]}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockExistingConcepts([
+            makeExistingConcept("图", "术语", "由节点和边组成的数学结构"),
+            makeExistingConcept("边", "术语", "连接两节点的线段"),
+        ]);
+
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("审阅概念变更")).toBeTruthy();
+            expect(screen.getByText("本次未提及（原有概念）")).toBeTruthy();
+        });
+        expect(screen.queryByText("新增概念")).toBeNull();
+        expect(screen.queryByText("变化概念")).toBeNull();
+    });
+
+    it("W6: save uses material_id filter (not exclusive_material_id or source_id)", async () => {
+        const user = userEvent.setup();
+
+        await generateReviewedResult(
+            user,
+            '{"concepts":[{"name":"GPIO","types":["术语"],"description":"通用输入输出"}]}',
+        );
+        await waitFor(() => { expect(screen.getByText("概念 (1)")).toBeTruthy(); });
+
+        mockApiFetch.mockClear();
+        await user.click(screen.getByRole("button", { name: "保存到 Weben" }));
+
+        await waitFor(() => {
+            expect(mockApiFetch).toHaveBeenCalledWith(
+                expect.stringContaining("material_id=bilibili_bvid__BV1sNA1ztEvY__P1"),
+                expect.anything(),
+                expect.anything(),
+            );
+        });
+        expect(mockApiFetch).not.toHaveBeenCalledWith(
+            expect.stringContaining("exclusive_material_id="),
+            expect.anything(),
+            expect.anything(),
+        );
+        expect(mockApiFetch).not.toHaveBeenCalledWith(
+            expect.stringContaining("source_id="),
+            expect.anything(),
+            expect.anything(),
+        );
     });
 });

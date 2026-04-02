@@ -1,3 +1,4 @@
+import type { WebenConcept, WebenExtractionRun } from "~/util/weben";
 import {
     normalizeImportResponse,
     normalizeLlmModelAvailability,
@@ -28,20 +29,9 @@ export interface MaterialSubtitleItem {
 export interface MaterialWebenLlmResult {
     concepts: Array<{
         name: string;
-        type: string;
+        types: string[];
         description: string;
         aliases?: string[];
-    }>;
-    relations: Array<{
-        subject: string;
-        predicate: string;
-        object: string;
-        excerpt?: string;
-    }>;
-    flashcards: Array<{
-        question: string;
-        answer: string;
-        concept: string;
     }>;
 }
 
@@ -126,14 +116,36 @@ export async function fetchLlmModelAvailability(
     return normalizeLlmModelAvailability(data);
 }
 
+export interface WebenConceptTypeHint {
+    key: string;
+    label: string;
+    color: string;
+    source_type: string;
+}
+
+export async function fetchWebenConceptTypeHints(
+    apiFetch: ApiFetchFn,
+): Promise<WebenConceptTypeHint[]> {
+    const { data } = await apiFetch(
+        "/api/v1/WebenConceptTypeHintsRoute",
+        { method: "GET" },
+        { silent: true },
+    );
+    if (!Array.isArray(data)) return [];
+    return data.map(item => ({
+        key: typeof item?.key === "string" ? item.key : "",
+        label: typeof item?.label === "string" ? item.label : "",
+        color: typeof item?.color === "string" ? item.color : "bg-gray-100 text-gray-600 ring-gray-200",
+        source_type: typeof item?.source_type === "string" ? item.source_type : "existing",
+    })).filter(item => item.key.trim().length > 0);
+}
+
 export interface WebenBatchImportResponse {
     ok?: boolean;
     error?: string;
     source_id?: string;
     concept_created?: number;
     concept_total?: number;
-    relation_imported?: number;
-    flashcard_imported?: number;
 }
 
 export async function importWebenResult(
@@ -142,8 +154,6 @@ export async function importWebenResult(
         material_id: string;
         source_title?: string;
         concepts: MaterialWebenLlmResult["concepts"];
-        relations: MaterialWebenLlmResult["relations"];
-        flashcards: MaterialWebenLlmResult["flashcards"];
     },
 ): Promise<{ resp: Response; data: WebenBatchImportResponse | null }> {
     const { resp, data } = await apiFetch(
@@ -186,7 +196,13 @@ export async function runPromptScript(
         { silent: true, timeout: 15_000 },
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return data as PromptSandboxResult;
+    const result = data as Record<string, unknown>;
+    return {
+        prompt_text: typeof result?.prompt_text === "string" ? result.prompt_text : null,
+        error: typeof result?.error === "string" ? result.error : null,
+        error_type: typeof result?.error_type === "string" ? result.error_type : null,
+        logs: Array.isArray(result?.logs) ? result.logs as PromptSandboxLog[] : [],
+    };
 }
 
 /**
@@ -267,4 +283,107 @@ export async function previewPromptScript(params: {
     }
 
     return { promptText, error, errorType, logs };
+}
+
+// ── 概念提取运行 ──────────────────────────────────────────────────────────────
+
+/** 按素材 ID 拉取已有概念列表（全量，用于 diff 计算）。 */
+export async function fetchConceptsByMaterial(
+    apiFetch: ApiFetchFn,
+    materialId: string,
+): Promise<WebenConcept[]> {
+    const params = new URLSearchParams({ material_id: materialId, limit: "200", offset: "0" });
+    const { data } = await apiFetch(
+        `/api/v1/WebenConceptListRoute?${params}`,
+        { method: "GET" },
+        { silent: true },
+    );
+    const page = data as { items?: WebenConcept[] } | null;
+    return page?.items ?? [];
+}
+
+/** 按来源 ID 拉取已有概念列表（全量，用于 diff 计算）。 */
+export async function fetchConceptsBySource(
+    apiFetch: ApiFetchFn,
+    sourceId: string,
+): Promise<WebenConcept[]> {
+    const params = new URLSearchParams({ source_id: sourceId, limit: "200", offset: "0" });
+    const { data } = await apiFetch(
+        `/api/v1/WebenConceptListRoute?${params}`,
+        { method: "GET" },
+        { silent: true },
+    );
+    const page = data as { items?: WebenConcept[] } | null;
+    return page?.items ?? [];
+}
+
+export interface ExtractionRunSavePayload {
+    material_id?: string;
+    source_id?: string;
+    source_url?: string;
+    source_title?: string;
+    prompt_script?: string;
+    prompt_text?: string;
+    llm_model_id?: string;
+    llm_input_json?: string;
+    llm_output_raw?: string;
+    concepts: MaterialWebenLlmResult["concepts"];
+}
+
+export interface ExtractionRunSaveResponse {
+    ok?: boolean;
+    error?: string;
+    source_id?: string;
+    run_id?: string;
+    concept_created?: number;
+    concept_total?: number;
+}
+
+/** 保存概念提取运行（含提取上下文 + 概念批量写入），取代旧的 importWebenResult。 */
+export async function saveExtractionRun(
+    apiFetch: ApiFetchFn,
+    payload: ExtractionRunSavePayload,
+): Promise<{ resp: Response; data: ExtractionRunSaveResponse | null }> {
+    const { resp, data } = await apiFetch(
+        "/api/v1/WebenExtractionRunSaveRoute",
+        { method: "POST", body: JSON.stringify(payload) },
+        { silent: true },
+    );
+    if (!data || typeof data !== "object") return { resp, data: null };
+    return { resp, data: data as ExtractionRunSaveResponse };
+}
+
+/** 拉取来源的提取历史列表（分页，不含大字段）。 */
+export async function fetchExtractionRunList(
+    apiFetch: ApiFetchFn,
+    sourceId: string,
+    opts: { limit?: number; offset?: number } = {},
+): Promise<{ items: WebenExtractionRun[]; total: number }> {
+    const params = new URLSearchParams({
+        source_id: sourceId,
+        limit: String(opts.limit ?? 20),
+        offset: String(opts.offset ?? 0),
+    });
+    const { data } = await apiFetch(
+        `/api/v1/WebenExtractionRunListRoute?${params}`,
+        { method: "GET" },
+        { silent: true },
+    );
+    const page = data as { items?: WebenExtractionRun[]; total?: number } | null;
+    return { items: page?.items ?? [], total: page?.total ?? 0 };
+}
+
+/** 拉取单次提取运行的完整详情（含 prompt_text / llm_output_raw）。 */
+export async function fetchExtractionRunDetail(
+    apiFetch: ApiFetchFn,
+    runId: string,
+): Promise<WebenExtractionRun | null> {
+    const { resp, data } = await apiFetch(
+        `/api/v1/WebenExtractionRunGetRoute?id=${encodeURIComponent(runId)}`,
+        { method: "GET" },
+        { silent: true },
+    );
+    if (!resp.ok) return null;
+    if (!data || typeof data !== "object") return null;
+    return data as WebenExtractionRun;
 }

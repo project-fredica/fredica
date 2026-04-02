@@ -287,7 +287,7 @@ class WebenSourceDb(private val db: Database) : WebenSourceRepo {
 
     private fun ResultSet.toSource() = WebenSource(
         id             = getString("id"),
-        materialId     = getString("material_id"),
+        materialId     = getString("material_id")?.takeIf { it.isNotBlank() },
         url            = getString("url"),
         title          = getString("title"),
         sourceType     = getString("source_type"),

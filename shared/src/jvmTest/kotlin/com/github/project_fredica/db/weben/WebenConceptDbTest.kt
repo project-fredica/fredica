@@ -1,24 +1,15 @@
 package com.github.project_fredica.db.weben
 
-// =============================================================================
-// WebenConceptDbTest —— 概念数据层单元测试
-// =============================================================================
-//
-// 测试范围：
-//   1. create / getById         — 创建与查询，字段正确落库
-//   2. getByCanonicalName        — 按规范名查询（去重基础）
-//   3. listAll / 分页过滤        — 瀑布流查询（按类型过滤 + 掌握度排序）
-//   4. update                   — 更新定义/元数据，mastery 不被覆盖
-//   5. alias CRUD               — 别名增删查（UNIQUE 约束去重）
-//   6. concept_source CRUD      — 来源关联增查
-//   7. mastery 缓存不变量       — updateMastery 正确写入，不影响其他字段
-//
-// =============================================================================
-
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
-import kotlin.test.*
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class WebenConceptDbTest {
 
@@ -28,142 +19,200 @@ class WebenConceptDbTest {
     @BeforeTest
     fun setup() = runBlocking {
         val tmpFile = File.createTempFile("webenconceptdbtest_", ".db").also { it.deleteOnExit() }
-        db        = Database.connect("jdbc:sqlite:${tmpFile.absolutePath}", "org.sqlite.JDBC")
+        db = Database.connect("jdbc:sqlite:${tmpFile.absolutePath}", "org.sqlite.JDBC")
         conceptDb = WebenConceptDb(db)
         conceptDb.initialize()
         WebenConceptService.initialize(conceptDb)
     }
-
-    // ── helpers ──────────────────────────────────────────────────────────────
 
     private fun nowSec() = System.currentTimeMillis() / 1000L
 
     private fun makeConcept(
         id: String = java.util.UUID.randomUUID().toString(),
         canonicalName: String = "gpio",
+        materialId: String? = null,
         conceptType: String = "术语",
-        mastery: Double = 0.0,
+        briefDefinition: String? = null,
     ) = WebenConcept(
-        id            = id,
-        canonicalName = canonicalName,
-        conceptType   = conceptType,
-        mastery       = mastery,
-        firstSeenAt   = nowSec(),
-        lastSeenAt    = nowSec(),
-        createdAt     = nowSec(),
-        updatedAt     = nowSec(),
+        id              = id,
+        materialId      = materialId,
+        canonicalName   = canonicalName,
+        conceptType     = conceptType,
+        briefDefinition = briefDefinition,
+        firstSeenAt     = nowSec(),
+        lastSeenAt      = nowSec(),
+        createdAt       = nowSec(),
+        updatedAt       = nowSec(),
     )
 
-    // ── Test 1: create / getById ──────────────────────────────────────────────
+    // ─── 核心：素材作用域隔离 ──────────────────────────────────────────────────────
 
     @Test
-    fun `create and getById round-trip`() = runBlocking {
-        val concept = makeConcept(canonicalName = "pwm输出", conceptType = "理论")
+    fun `same canonical_name in different materials are independent records`() = runBlocking {
+        // 最重要的测试：同名概念在不同素材中必须是独立行，不能因 canonical_name 冲突而丢失
+        val a = makeConcept(id = "id-a", canonicalName = "gpio", materialId = "mat-a")
+        val b = makeConcept(id = "id-b", canonicalName = "gpio", materialId = "mat-b")
+        conceptDb.create(a)
+        conceptDb.create(b)
+
+        assertNotNull(conceptDb.getById("id-a"))
+        assertNotNull(conceptDb.getById("id-b"))
+        assertEquals(2, conceptDb.count())
+    }
+
+    @Test
+    fun `getByCanonicalName is scoped to materialId`() = runBlocking {
+        conceptDb.create(makeConcept(id = "id-a", canonicalName = "gpio", materialId = "mat-a"))
+        conceptDb.create(makeConcept(id = "id-b", canonicalName = "gpio", materialId = "mat-b"))
+
+        val foundA = conceptDb.getByCanonicalName("gpio", materialId = "mat-a")
+        assertNotNull(foundA)
+        assertEquals("id-a", foundA.id)
+
+        val foundB = conceptDb.getByCanonicalName("gpio", materialId = "mat-b")
+        assertNotNull(foundB)
+        assertEquals("id-b", foundB.id)
+
+        // 不存在的素材返回 null
+        assertNull(conceptDb.getByCanonicalName("gpio", materialId = "mat-x"))
+    }
+
+    @Test
+    fun `create is idempotent within same material on id conflict`() = runBlocking {
+        val concept = makeConcept(id = "fixed-id", canonicalName = "gpio", materialId = "mat-a")
         conceptDb.create(concept)
-        val found = conceptDb.getById(concept.id)
-        assertNotNull(found)
-        assertEquals("pwm输出", found.canonicalName)
-        assertEquals("理论", found.conceptType)
-        assertEquals(0.0, found.mastery)
+        conceptDb.create(concept.copy(canonicalName = "different"))  // same id → ignored
+        assertEquals("gpio", conceptDb.getById("fixed-id")!!.canonicalName)
     }
 
     @Test
-    fun `create is idempotent on id conflict`() = runBlocking {
-        val concept = makeConcept(id = "fixed-id")
-        conceptDb.create(concept)
-        conceptDb.create(concept.copy(canonicalName = "different")) // ON CONFLICT DO NOTHING
-        val found = conceptDb.getById("fixed-id")
-        assertNotNull(found)
-        assertEquals("gpio", found.canonicalName) // original retained
+    fun `create is idempotent within same material on (material_id, canonical_name) conflict`() = runBlocking {
+        // 同一素材内同名：第二次 create（id 不同）应被忽略
+        conceptDb.create(makeConcept(id = "id-1", canonicalName = "gpio", materialId = "mat-a"))
+        conceptDb.create(makeConcept(id = "id-2", canonicalName = "gpio", materialId = "mat-a"))
+        assertEquals(1, conceptDb.count(materialId = "mat-a"))
     }
 
-    // ── Test 2: getByCanonicalName ────────────────────────────────────────────
+    // ─── listAll / count 过滤 ─────────────────────────────────────────────────────
 
     @Test
-    fun `getByCanonicalName returns correct concept`() = runBlocking {
-        val concept = makeConcept(canonicalName = "uart协议")
-        conceptDb.create(concept)
-        val found = conceptDb.getByCanonicalName("uart协议")
-        assertNotNull(found)
-        assertEquals(concept.id, found.id)
-    }
+    fun `listAll with materialId filter returns only that material concepts`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "gpio",  materialId = "mat-a"))
+        conceptDb.create(makeConcept(canonicalName = "链表",  materialId = "mat-b"))
+        conceptDb.create(makeConcept(canonicalName = "算法",  materialId = "mat-a"))
 
-    @Test
-    fun `getByCanonicalName returns null for unknown name`() = runBlocking {
-        assertNull(conceptDb.getByCanonicalName("nonexistent"))
-    }
-
-    // ── Test 3: listAll / 分页过滤 ────────────────────────────────────────────
-
-    @Test
-    fun `listAll returns all concepts ordered by mastery asc`() = runBlocking {
-        conceptDb.create(makeConcept(canonicalName = "a", mastery = 0.8))
-        conceptDb.create(makeConcept(canonicalName = "b", mastery = 0.2))
-        conceptDb.create(makeConcept(canonicalName = "c", mastery = 0.5))
-        val list = conceptDb.listAll()
-        assertEquals(3, list.size)
-        assertEquals("b", list[0].canonicalName) // 0.2 lowest mastery first
-        assertEquals("c", list[1].canonicalName)
-        assertEquals("a", list[2].canonicalName)
+        val result = conceptDb.listAll(materialId = "mat-a")
+        assertEquals(2, result.size)
+        assertTrue(result.all { it.materialId == "mat-a" })
+        assertTrue(result.none { it.canonicalName == "链表" })
     }
 
     @Test
-    fun `listAll with conceptType filter`() = runBlocking {
-        conceptDb.create(makeConcept(canonicalName = "x", conceptType = "理论"))
-        conceptDb.create(makeConcept(canonicalName = "y", conceptType = "术语"))
-        conceptDb.create(makeConcept(canonicalName = "z", conceptType = "理论"))
-        val theories = conceptDb.listAll(conceptType = "理论")
-        assertEquals(2, theories.size)
-        assertTrue(theories.all { it.conceptType == "理论" })
+    fun `listAll returns all when no filter`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "a", materialId = "mat-a"))
+        conceptDb.create(makeConcept(canonicalName = "b", materialId = "mat-b"))
+        assertEquals(2, conceptDb.listAll().size)
+    }
+
+    @Test
+    fun `listAll returns results ordered by canonical_name`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "c", materialId = "mat-a"))
+        conceptDb.create(makeConcept(canonicalName = "a", materialId = "mat-a"))
+        conceptDb.create(makeConcept(canonicalName = "b", materialId = "mat-a"))
+        val result = conceptDb.listAll(materialId = "mat-a")
+        assertEquals(listOf("a", "b", "c"), result.map { it.canonicalName })
     }
 
     @Test
     fun `listAll pagination`() = runBlocking {
-        repeat(5) { i -> conceptDb.create(makeConcept(canonicalName = "concept$i", mastery = i * 0.1)) }
-        val page1 = conceptDb.listAll(limit = 2, offset = 0)
-        val page2 = conceptDb.listAll(limit = 2, offset = 2)
+        repeat(5) { i -> conceptDb.create(makeConcept(canonicalName = "concept$i", materialId = "mat-a")) }
+        val page1 = conceptDb.listAll(materialId = "mat-a", limit = 2, offset = 0)
+        val page2 = conceptDb.listAll(materialId = "mat-a", limit = 2, offset = 2)
         assertEquals(2, page1.size)
         assertEquals(2, page2.size)
         assertNotEquals(page1[0].id, page2[0].id)
     }
 
-    // ── Test 4: update ────────────────────────────────────────────────────────
-
     @Test
-    fun `update modifies definition but not mastery`() = runBlocking {
-        val concept = makeConcept(mastery = 0.0)
-        conceptDb.create(concept)
-        conceptDb.updateMastery(concept.id, 0.7) // simulate flashcard review
-
-        val nowSec = System.currentTimeMillis() / 1000L
-        conceptDb.update(concept.copy(briefDefinition = "GPIO是通用输入输出接口", updatedAt = nowSec))
-
-        val found = conceptDb.getById(concept.id)!!
-        assertEquals("GPIO是通用输入输出接口", found.briefDefinition)
-        // mastery must NOT be overwritten by update()
-        assertEquals(0.7, found.mastery, absoluteTolerance = 0.001)
+    fun `listAll with conceptType filter matches token in comma-separated types`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "二叉树", materialId = "mat-a", conceptType = "术语,数学领域"))
+        conceptDb.create(makeConcept(canonicalName = "导数",   materialId = "mat-a", conceptType = "数学领域"))
+        conceptDb.create(makeConcept(canonicalName = "链表",   materialId = "mat-a", conceptType = "数据结构"))
+        val result = conceptDb.listAll(conceptType = "数学领域")
+        assertEquals(2, result.size)
+        assertTrue(result.any { it.canonicalName == "二叉树" })
+        assertTrue(result.any { it.canonicalName == "导数" })
     }
 
-    // ── Test 5: mastery 缓存不变量 ─────────────────────────────────────────────
-
     @Test
-    fun `updateMastery correctly persists value`() = runBlocking {
-        val concept = makeConcept()
-        conceptDb.create(concept)
-        conceptDb.updateMastery(concept.id, 0.65)
-        val found = conceptDb.getById(concept.id)!!
-        assertEquals(0.65, found.mastery, absoluteTolerance = 0.001)
+    fun `listAll with conceptType filter does not partial-match type name`() = runBlocking {
+        // "数学" 不应匹配 "数学领域"
+        conceptDb.create(makeConcept(canonicalName = "导数",   materialId = "mat-a", conceptType = "数学领域"))
+        conceptDb.create(makeConcept(canonicalName = "概率论", materialId = "mat-a", conceptType = "数学"))
+        val result = conceptDb.listAll(conceptType = "数学")
+        assertEquals(1, result.size)
+        assertEquals("概率论", result[0].canonicalName)
     }
 
-    // ── Test 6: alias CRUD ────────────────────────────────────────────────────
+    @Test
+    fun `count with materialId filter counts only that material`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "gpio", materialId = "mat-a"))
+        conceptDb.create(makeConcept(canonicalName = "链表", materialId = "mat-b"))
+        conceptDb.create(makeConcept(canonicalName = "算法", materialId = "mat-a"))
+        assertEquals(2, conceptDb.count(materialId = "mat-a"))
+        assertEquals(1, conceptDb.count(materialId = "mat-b"))
+        assertEquals(3, conceptDb.count())
+    }
+
+    @Test
+    fun `count with conceptType filter handles comma-separated types`() = runBlocking {
+        conceptDb.create(makeConcept(canonicalName = "二叉树", materialId = "mat-a", conceptType = "术语,数学领域"))
+        conceptDb.create(makeConcept(canonicalName = "导数",   materialId = "mat-a", conceptType = "数学领域"))
+        conceptDb.create(makeConcept(canonicalName = "链表",   materialId = "mat-a", conceptType = "数据结构"))
+        assertEquals(2, conceptDb.count(conceptType = "数学领域"))
+        assertEquals(1, conceptDb.count(conceptType = "数据结构"))
+        assertEquals(0, conceptDb.count(conceptType = "算法"))
+    }
+
+    // ─── getById / getByCanonicalName ─────────────────────────────────────────────
+
+    @Test
+    fun `getById returns correct concept with materialId`() = runBlocking {
+        val concept = makeConcept(canonicalName = "pwm", materialId = "mat-a", conceptType = "理论")
+        conceptDb.create(concept)
+        val found = conceptDb.getById(concept.id)
+        assertNotNull(found)
+        assertEquals("pwm", found.canonicalName)
+        assertEquals("mat-a", found.materialId)
+        assertEquals("理论", found.conceptType)
+    }
+
+    @Test
+    fun `getByCanonicalName returns null for unknown name`() = runBlocking {
+        assertNull(conceptDb.getByCanonicalName("nonexistent", materialId = "mat-a"))
+    }
+
+    // ─── update ───────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `update modifies definition and metadata`() = runBlocking {
+        val concept = makeConcept(briefDefinition = "旧定义", materialId = "mat-a")
+        conceptDb.create(concept)
+        val nowSec = nowSec()
+        conceptDb.update(concept.copy(briefDefinition = "新定义", metadataJson = """{"source":"manual"}""", updatedAt = nowSec))
+        val found = conceptDb.getById(concept.id)!!
+        assertEquals("新定义", found.briefDefinition)
+        assertEquals("""{"source":"manual"}""", found.metadataJson)
+    }
+
+    // ─── 别名 ─────────────────────────────────────────────────────────────────────
 
     @Test
     fun `addAlias and listAliases`() = runBlocking {
-        val concept = makeConcept()
+        val concept = makeConcept(materialId = "mat-a")
         conceptDb.create(concept)
         conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "GPIO", aliasSource = "LLM提取"))
         conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "General Purpose IO"))
-
         val aliases = conceptDb.listAliases(concept.id)
         assertEquals(2, aliases.size)
         assertTrue(aliases.any { it.alias == "GPIO" })
@@ -172,49 +221,35 @@ class WebenConceptDbTest {
 
     @Test
     fun `addAlias is idempotent on duplicate`() = runBlocking {
-        val concept = makeConcept()
+        val concept = makeConcept(materialId = "mat-a")
         conceptDb.create(concept)
         conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "GPIO"))
-        conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "GPIO")) // duplicate
+        conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "GPIO"))
         assertEquals(1, conceptDb.listAliases(concept.id).size)
     }
 
     @Test
     fun `deleteAlias removes correct entry`() = runBlocking {
-        val concept = makeConcept()
+        val concept = makeConcept(materialId = "mat-a")
         conceptDb.create(concept)
         conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "GPIO"))
         conceptDb.addAlias(WebenConceptAlias(conceptId = concept.id, alias = "IO口"))
-
-        val aliases = conceptDb.listAliases(concept.id)
-        val toDelete = aliases.first { it.alias == "GPIO" }
+        val toDelete = conceptDb.listAliases(concept.id).first { it.alias == "GPIO" }
         conceptDb.deleteAlias(toDelete.id)
-
         val remaining = conceptDb.listAliases(concept.id)
         assertEquals(1, remaining.size)
         assertEquals("IO口", remaining[0].alias)
     }
 
-    // ── Test 7: concept_source CRUD ───────────────────────────────────────────
+    // ─── 来源关联 ─────────────────────────────────────────────────────────────────
 
     @Test
     fun `addSource and listSources`() = runBlocking {
-        val concept = makeConcept()
+        val concept = makeConcept(materialId = "mat-a")
         conceptDb.create(concept)
         val sourceId = java.util.UUID.randomUUID().toString()
-
-        conceptDb.addSource(WebenConceptSource(
-            conceptId    = concept.id,
-            sourceId     = sourceId,
-            timestampSec = 120.5,
-            excerpt      = "GPIO是通用输入输出...",
-        ))
-        conceptDb.addSource(WebenConceptSource(
-            conceptId = concept.id,
-            sourceId  = sourceId,
-            timestampSec = null,
-        ))
-
+        conceptDb.addSource(WebenConceptSource(conceptId = concept.id, sourceId = sourceId, timestampSec = 120.5, excerpt = "GPIO是..."))
+        conceptDb.addSource(WebenConceptSource(conceptId = concept.id, sourceId = sourceId, timestampSec = null))
         val sources = conceptDb.listSources(concept.id)
         assertEquals(2, sources.size)
         assertTrue(sources.any { it.timestampSec == 120.5 })

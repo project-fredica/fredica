@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
-import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, ExternalLink, Loader2, RotateCcw, Save, Sparkles, Trash2, AlertTriangle } from "lucide-react";
+import { BookMarked, BookmarkPlus, BrainCircuit, CheckCircle2, ExternalLink, Loader2, RotateCcw, Save, Sparkles, Trash2, AlertTriangle, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { PromptBuilder } from "~/components/prompt-builder/PromptBuilder";
 import { PromptPaneShell } from "~/components/prompt-builder/PromptPaneShell";
 import { PromptStreamPane } from "~/components/prompt-builder/PromptStreamPane";
 import { PromptTemplatePickerModal } from "~/components/prompt-builder/PromptTemplatePickerModal";
 import { SaveTemplateModal } from "~/components/prompt-builder/SaveTemplateModal";
+import { ConceptSaveEditor, computeConceptDiff } from "~/components/weben/ConceptSaveEditor";
+import type { ConceptDiff } from "~/components/weben/ConceptSaveEditor";
 import { useAppConfig } from "~/context/appConfig";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { buildAuthHeaders, DEFAULT_SERVER_PORT, useAppFetch } from "~/util/app_fetch";
@@ -23,15 +25,20 @@ import type { BuildPromptResult } from "~/util/prompt-builder/types";
 import type { PromptTemplateListItem } from "~/util/prompt-builder/promptTemplateApi";
 import { json_parse } from "~/util/json";
 import {
+    fetchConceptsByMaterial,
     fetchMaterialSubtitles,
-    importWebenResult,
     previewPromptScript,
+    saveExtractionRun,
     type MaterialSubtitleItem,
     type MaterialWebenLlmResult,
 } from "~/util/materialWebenApi";
+import type { WebenConcept } from "~/util/weben";
 
 type Stage = "editing" | "previewed" | "generating" | "parsed" | "parse_error";
 
+// 剥除部分 LLM 会在输出外包裹的 ```json ... ``` 代码块，
+// 再交给 normalizeWebenResult 对缺失/格式错误的字段补默认值。
+// JSON 解析失败时抛出异常，由调用方捕获并展示可读的报错信息。
 function parseWebenResult(raw: string): MaterialWebenLlmResult {
     const trimmed = raw.trim();
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -39,6 +46,11 @@ function parseWebenResult(raw: string): MaterialWebenLlmResult {
     return normalizeWebenResult(json_parse<any>(jsonText));
 }
 
+// 流式读取 LlmProxyChatRoute（OpenAI 兼容 SSE）。
+// 每条 data 行的格式：{ choices: [{ delta: { content: string } }] }
+// 遇到裸 `data: [DONE]` 时立即返回，无需等待 ReadableStream 的 done 标志。
+// `event: llm_error` 行携带 provider 错误，作为异常抛出。
+// 格式错误的 JSON chunk 会静默跳过（debug 日志），避免单帧乱码中断整个流。
 async function streamLlmRouterText(params: {
     appModelId: string;
     messagesJson: string;
@@ -76,6 +88,7 @@ async function streamLlmRouterText(params: {
     const decoder = new TextDecoder();
     let fullText = "";
     let buffer = "";
+    let currentEvent = "";
     try {
         while (true) {
             if (params.signal?.aborted) break;
@@ -85,9 +98,18 @@ async function streamLlmRouterText(params: {
             buffer = done ? "" : (lines.pop() ?? "");
             for (const line of lines) {
                 const trimmed = line.replace(/\r$/, "").trim();
+                if (trimmed.startsWith("event:")) {
+                    currentEvent = trimmed.slice(6).trim();
+                    continue;
+                }
                 if (!trimmed.startsWith("data:")) continue;
                 const data = trimmed.slice(5).trim();
                 if (data === "[DONE]") return fullText;
+                if (currentEvent === "llm_error") {
+                    const errData = json_parse<{ error_type?: string; message?: string }>(data);
+                    throw new Error(errData?.message ?? "LLM provider error");
+                }
+                currentEvent = "";
                 try {
                     const chunk = (json_parse<any>(data))?.choices?.[0]?.delta?.content;
                     if (!chunk) continue;
@@ -103,6 +125,58 @@ async function streamLlmRouterText(params: {
     } finally {
         reader.releaseLock();
     }
+}
+
+function filterConceptsForMaterial(existing: WebenConcept[], materialId: string): WebenConcept[] {
+    const normalizedMaterialId = materialId.trim();
+    if (!normalizedMaterialId) return [];
+    return existing.filter(concept => concept.material_id === normalizedMaterialId);
+}
+
+/**
+ * 计算打开"审阅概念变更" modal 时所用的 diff 基线。
+ *
+ * 优先级：
+ *   1. savedConceptBaseline — 本次会话保存成功后在本地写入的快照。
+ *      使用本地快照可避免重新拉取 API 时拿到刚写入的数据，
+ *      导致"下次点保存全部变成新增"的伪变更问题。
+ *   2. 过滤后的 fetchedConcepts — 从 API 拉取并按 materialId 过滤。
+ *      空字符串 material_id 的历史遗留行会被排除，避免跨素材概念污染。
+ *
+ * 作为具名导出，方便在测试中单独验证。
+ */
+export function resolveConceptDiffBaseline(params: {
+    fetchedConcepts: WebenConcept[];
+    savedConceptBaseline: WebenConcept[] | null;
+    materialId: string;
+}): WebenConcept[] {
+    if (params.savedConceptBaseline) {
+        console.debug("[SummaryWebenPage] resolveConceptDiffBaseline: use saved baseline", {
+            materialId: params.materialId,
+            savedBaselineCount: params.savedConceptBaseline.length,
+        });
+        return params.savedConceptBaseline;
+    }
+    const filtered = filterConceptsForMaterial(params.fetchedConcepts, params.materialId);
+    const emptyMaterialCount = params.fetchedConcepts.filter(c => !c.material_id?.trim()).length;
+    const otherMaterialCounts = params.fetchedConcepts.reduce<Record<string, number>>((acc, concept) => {
+        const materialId = concept.material_id?.trim();
+        if (!materialId || materialId === params.materialId) return acc;
+        acc[materialId] = (acc[materialId] ?? 0) + 1;
+        return acc;
+    }, {});
+    console.debug("[SummaryWebenPage] resolveConceptDiffBaseline: use fetched concepts", {
+        materialId: params.materialId,
+        fetchedCount: params.fetchedConcepts.length,
+        filteredCount: filtered.length,
+        emptyMaterialCount,
+        otherMaterialCounts,
+        sampleFetched: params.fetchedConcepts.slice(0, 10).map(c => ({
+            name: c.canonical_name,
+            material_id: c.material_id,
+        })),
+    });
+    return filtered;
 }
 
 function ValidationSummary({
@@ -164,16 +238,12 @@ function RenderResultPane({
     blockingErrors,
     warnings,
     onRemoveConcept,
-    onRemoveRelation,
-    onRemoveFlashcard,
 }: {
     result: MaterialWebenLlmResult | null;
     parseError: string | null;
     blockingErrors: WebenValidationIssue[];
     warnings: WebenValidationIssue[];
     onRemoveConcept?: (index: number) => void;
-    onRemoveRelation?: (index: number) => void;
-    onRemoveFlashcard?: (index: number) => void;
 }) {
     return (
         <PromptPaneShell title="组件渲染 / 保存前审阅">
@@ -183,7 +253,7 @@ function RenderResultPane({
                 ) : null}
 
                 {!result && !parseError ? (
-                    <div className="text-sm text-gray-400">生成完成后，在这里查看、校验并审阅 concepts / relations / flashcards。</div>
+                    <div className="text-sm text-gray-400">生成完成后，在这里查看、校验并审阅 concepts。</div>
                 ) : null}
 
                 {result ? (
@@ -199,7 +269,9 @@ function RenderResultPane({
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="text-sm font-semibold text-gray-900">{concept.name}</span>
-                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{concept.type}</span>
+                                                    {concept.types.map(t => (
+                                                        <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{t}</span>
+                                                    ))}
                                                 </div>
                                                 <p className="text-sm text-gray-600 mt-2 leading-relaxed">{concept.description}</p>
                                                 {concept.aliases?.length ? (
@@ -212,49 +284,30 @@ function RenderResultPane({
                                 ))}
                             </div>
                         </section>
-
-                        <section className="space-y-2">
-                            <h4 className="text-sm font-semibold text-gray-800">关系 ({result.relations.length})</h4>
-                            <div className="space-y-2">
-                                {result.relations.map((relation, index) => (
-                                    <div key={`${relation.subject}-${relation.predicate}-${relation.object}-${index}`} className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0 flex-1">
-                                                <div>
-                                                    <span className="font-medium">{relation.subject}</span>
-                                                    <span className="mx-2 text-violet-600">{relation.predicate}</span>
-                                                    <span className="font-medium">{relation.object}</span>
-                                                </div>
-                                                {relation.excerpt ? <p className="text-xs text-gray-500 mt-2">摘录：{relation.excerpt}</p> : null}
-                                            </div>
-                                            <DeleteRowButton onClick={() => onRemoveRelation?.(index)} label={`删除关系 ${relation.subject} ${relation.predicate} ${relation.object}`} />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-
-                        <section className="space-y-2">
-                            <h4 className="text-sm font-semibold text-gray-800">闪卡 ({result.flashcards.length})</h4>
-                            <div className="space-y-2">
-                                {result.flashcards.map((card, index) => (
-                                    <div key={`${card.question}-${index}`} className="rounded-lg border border-gray-200 bg-white p-3">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-sm font-medium text-gray-900">Q: {card.question}</div>
-                                                <div className="text-sm text-gray-700 mt-2">A: {card.answer}</div>
-                                                <div className="text-xs text-gray-500 mt-2">关联概念：{card.concept}</div>
-                                            </div>
-                                            <DeleteRowButton onClick={() => onRemoveFlashcard?.(index)} label={`删除闪卡 ${card.question}`} />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
                     </>
                 ) : null}
             </div>
         </PromptPaneShell>
+    );
+}
+
+function ConceptSaveModal({ diff, onConfirm, onCancel }: {
+    diff: ConceptDiff;
+    onConfirm: (concepts: MaterialWebenLlmResult["concepts"]) => void;
+    onCancel: () => void;
+}) {
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-gray-900">审阅概念变更</h3>
+                    <button onClick={onCancel} className="p-1 text-gray-400 hover:text-gray-600">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+                <ConceptSaveEditor diff={diff} onConfirm={onConfirm} onCancel={onCancel} />
+            </div>
+        </div>
     );
 }
 
@@ -274,12 +327,23 @@ export default function SummaryWebenPage() {
     const [subtitles, setSubtitles] = useState<MaterialSubtitleItem[]>([]);
     const [streamText, setStreamText] = useState("");
     const [streamError, setStreamError] = useState<string | null>(null);
+    // parsedResult：LLM 输出的原始解析结果，只写一次，不可变。
+    // reviewedResult：用户在渲染面板中手动删除条目后的可变副本，
+    //   保存时使用此值；重新生成时两者同时清空。
     const [parsedResult, setParsedResult] = useState<MaterialWebenLlmResult | null>(null);
     const [reviewedResult, setReviewedResult] = useState<MaterialWebenLlmResult | null>(null);
     const [parseError, setParseError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [lastSavedSourceId, setLastSavedSourceId] = useState<string | null>(null);
     const [stage, setStage] = useState<Stage>("editing");
+    const [saveEditorDiff, setSaveEditorDiff] = useState<ConceptDiff | "loading" | null>(null);
+    const [savedConceptBaseline, setSavedConceptBaseline] = useState<WebenConcept[] | null>(null);
+    const saveButtonRef = useRef<HTMLButtonElement>(null);
+
+    // Captured extraction context for WebenExtractionRunSaveRoute
+    const capturedPromptText = useRef<string | null>(null);
+    const capturedLlmInputJson = useRef<string | null>(null);
+    const capturedLlmOutputRaw = useRef<string | null>(null);
 
     // 模板管理状态
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -290,6 +354,7 @@ export default function SummaryWebenPage() {
     const [loadedTemplateCode, setLoadedTemplateCode] = useState<string | null>(null);
 
     const selectedSubtitle = subtitles[0] ?? null;
+    const effectiveMaterialId = material.id.trim() || routeMaterialId.trim();
 
     // 头部代码：由编辑器自动注入，不属于模板内容，不可编辑。
     // 使用路由参数 routeMaterialId（直接来自 URL），确保始终非空。
@@ -315,7 +380,7 @@ export default function SummaryWebenPage() {
 
     useEffect(() => {
         let cancelled = false;
-        fetchMaterialSubtitles(apiFetch, material.id)
+        fetchMaterialSubtitles(apiFetch, effectiveMaterialId)
             .then(items => {
                 if (!cancelled) setSubtitles(items);
             })
@@ -324,7 +389,14 @@ export default function SummaryWebenPage() {
             });
 
         return () => { cancelled = true; };
-    }, [apiFetch, material.id]);
+    }, [apiFetch, effectiveMaterialId]);
+
+    // LLM 输出解析完成后，将"保存到 Weben"按钮滚动进视口
+    useEffect(() => {
+        if (stage === "parsed") {
+            saveButtonRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+    }, [stage]);
 
     const handlePreview = async () => {
         console.debug("[SummaryWebenPage] handlePreview: routeMaterialId=", routeMaterialId, "template.length=", template.length, "scriptHeader.length=", scriptHeader.length);
@@ -403,6 +475,9 @@ export default function SummaryWebenPage() {
             }
 
             const resolvedText = promptText;
+            capturedPromptText.current = resolvedText;
+            const messagesJson = JSON.stringify([{ role: "user", content: resolvedText }]);
+            capturedLlmInputJson.current = messagesJson;
             setPreviewResult({ text: resolvedText, charCount: resolvedText.length, blocked: false, warnings: [] });
             setStage("generating");
             setStreamText("");
@@ -410,11 +485,12 @@ export default function SummaryWebenPage() {
             setParsedResult(null);
             setReviewedResult(null);
             setParseError(null);
+            capturedLlmOutputRaw.current = null;
 
             // Step 2: 将 Prompt 文本发送给 LLM，流式接收输出
             const fullText = await streamLlmRouterText({
                 appModelId: resolvedModelId,
-                messagesJson: JSON.stringify([{ role: "user", content: resolvedText }]),
+                messagesJson,
                 connection: {
                     domain: appConfig.webserver_domain,
                     port: appConfig.webserver_port,
@@ -429,6 +505,8 @@ export default function SummaryWebenPage() {
             });
 
             if (signal.aborted) return;
+
+            capturedLlmOutputRaw.current = fullText;
 
             try {
                 const parsed = parseWebenResult(fullText);
@@ -452,26 +530,12 @@ export default function SummaryWebenPage() {
     };
 
     const handleRemoveConcept = useCallback((index: number) => {
-        // 审阅态与原始解析结果分离，避免用户删改后丢失“原始输出”的定位上下文。
         setReviewedResult(prev => prev ? {
             ...prev,
             concepts: prev.concepts.filter((_, itemIndex) => itemIndex !== index),
         } : prev);
     }, []);
 
-    const handleRemoveRelation = useCallback((index: number) => {
-        setReviewedResult(prev => prev ? {
-            ...prev,
-            relations: prev.relations.filter((_, itemIndex) => itemIndex !== index),
-        } : prev);
-    }, []);
-
-    const handleRemoveFlashcard = useCallback((index: number) => {
-        setReviewedResult(prev => prev ? {
-            ...prev,
-            flashcards: prev.flashcards.filter((_, itemIndex) => itemIndex !== index),
-        } : prev);
-    }, []);
 
     // ── 模板管理回调 ──────────────────────────────────────────────────────────
 
@@ -487,30 +551,81 @@ export default function SummaryWebenPage() {
         setParsedResult(null);
         setReviewedResult(null);
         setParseError(null);
+        setSavedConceptBaseline(null);
     }, []);
 
-    const handleSave = async () => {        if (!reviewValidation.sanitizedResult || reviewValidation.blockingErrors.length > 0) return;
+    const handleSaveClick = async () => {
+        if (!reviewValidation.sanitizedResult || reviewValidation.blockingErrors.length > 0) return;
+        setSaveEditorDiff("loading");
+        try {
+            const fetchedConcepts = await fetchConceptsByMaterial(apiFetch, effectiveMaterialId);
+            const existing = resolveConceptDiffBaseline({
+                fetchedConcepts,
+                savedConceptBaseline,
+                materialId: effectiveMaterialId,
+            });
+            const diff = computeConceptDiff(existing, reviewValidation.sanitizedResult.concepts);
+            console.debug("[SummaryWebenPage] handleSaveClick: computed diff", {
+                materialId: effectiveMaterialId,
+                incomingCount: reviewValidation.sanitizedResult.concepts.length,
+                existingCount: existing.length,
+                addedCount: diff.added.length,
+                changedCount: diff.changed.length,
+                removedCount: diff.removed.length,
+                unchangedCount: diff.unchanged.length,
+                addedNames: diff.added.map(c => c.name),
+                changedNames: diff.changed.map(item => item.incoming.name),
+                removedNames: diff.removed.map(c => c.canonical_name),
+                unchangedNames: diff.unchanged.map(c => c.name),
+            });
+            setSaveEditorDiff(diff);
+        } catch (e) {
+            print_error({ reason: "加载已有概念失败", err: e });
+            setSaveEditorDiff(null);
+        }
+    };
+
+    const handleEditorConfirm = async (finalConcepts: MaterialWebenLlmResult["concepts"]) => {
+        setSaveEditorDiff(null);
         setSaving(true);
         try {
-            const { resp, data } = await importWebenResult(apiFetch, {
-                material_id: material.id,
+            const { resp, data } = await saveExtractionRun(apiFetch, {
+                material_id: effectiveMaterialId,
                 source_title: material.title,
-                concepts: reviewValidation.sanitizedResult.concepts,
-                relations: reviewValidation.sanitizedResult.relations,
-                flashcards: reviewValidation.sanitizedResult.flashcards,
+                prompt_script: template || undefined,
+                prompt_text: capturedPromptText.current ?? undefined,
+                llm_model_id: resolvedModelId ?? undefined,
+                llm_input_json: capturedLlmInputJson.current ?? undefined,
+                llm_output_raw: capturedLlmOutputRaw.current ?? undefined,
+                concepts: finalConcepts,
             });
-            if (!resp.ok) {
-                reportHttpError("保存到 Weben 失败", resp);
-                return;
-            }
-            if (data?.error) {
-                print_error({ reason: `保存到 Weben 失败: ${data.error}` });
-                return;
-            }
+            if (!resp.ok) { reportHttpError("保存到 Weben 失败", resp); return; }
+            if (data?.error) { print_error({ reason: `保存到 Weben 失败: ${data.error}` }); return; }
+            const nextBaseline = finalConcepts.map((concept, index) => ({
+                id: `saved-${index}-${concept.name}`,
+                material_id: effectiveMaterialId,
+                canonical_name: concept.name,
+                concept_type: concept.types.join(","),
+                brief_definition: concept.description,
+                metadata_json: "{}",
+                confidence: 1.0,
+                first_seen_at: 0,
+                last_seen_at: 0,
+                created_at: 0,
+                updated_at: 0,
+            }));
+            console.debug("[SummaryWebenPage] handleEditorConfirm: save success", {
+                materialId: effectiveMaterialId,
+                savedCount: nextBaseline.length,
+                savedNames: nextBaseline.map(c => c.canonical_name),
+                sourceId: data?.source_id ?? null,
+                runId: data?.run_id ?? null,
+            });
+            setSavedConceptBaseline(nextBaseline);
             setLastSavedSourceId(data?.source_id ?? null);
-            toast.success(`已保存到 Weben：概念 ${data?.concept_total ?? 0} 条，关系 ${data?.relation_imported ?? 0} 条，闪卡 ${data?.flashcard_imported ?? 0} 条`);
-        } catch (error) {
-            print_error({ reason: "保存到 Weben 异常", err: error });
+            toast.success(`已保存到 Weben：概念 ${data?.concept_total ?? 0} 条`);
+        } catch (e) {
+            print_error({ reason: "保存到 Weben 异常", err: e });
         } finally {
             setSaving(false);
         }
@@ -580,11 +695,12 @@ export default function SummaryWebenPage() {
                 )}
                 <button
                     type="button"
-                    onClick={() => void handleSave()}
-                    disabled={!reviewValidation.sanitizedResult || reviewValidation.blockingErrors.length > 0 || saving}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    ref={saveButtonRef}
+                    onClick={() => void handleSaveClick()}
+                    disabled={!reviewValidation.sanitizedResult || reviewValidation.blockingErrors.length > 0 || saving || saveEditorDiff === "loading"}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {saving || saveEditorDiff === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     保存到 Weben
                 </button>
             </div>
@@ -602,7 +718,7 @@ export default function SummaryWebenPage() {
                 generateDisabled={!hasUsableModel}
                 renderDisabled={!reviewedResult && !parseError}
                 currentTemplateName={loadedTemplate?.name}
-                settingsStorageKey={`material.summary.weben:${material.id}`}
+                settingsStorageKey={`material.summary.weben:${effectiveMaterialId}`}
                 onResolvedModelChange={setResolvedModelId}
                 defaultTemplateId="sys_weben_extract_v1"
                 apiFetch={apiFetch}
@@ -643,8 +759,6 @@ export default function SummaryWebenPage() {
                         blockingErrors={reviewValidation.blockingErrors}
                         warnings={reviewValidation.warnings}
                         onRemoveConcept={handleRemoveConcept}
-                        onRemoveRelation={handleRemoveRelation}
-                        onRemoveFlashcard={handleRemoveFlashcard}
                     />
                 )}
             />
@@ -686,6 +800,14 @@ export default function SummaryWebenPage() {
                     这一版已接入真实 LlmModelListRoute、通用字幕内容接口，以及最小可用的保存到 Weben DB 链路；后续可继续扩展更多信息源与更细的导入控制。
                 </div>
             </div>
+
+            {saveEditorDiff !== null && saveEditorDiff !== "loading" && (
+                <ConceptSaveModal
+                    diff={saveEditorDiff}
+                    onConfirm={handleEditorConfirm}
+                    onCancel={() => setSaveEditorDiff(null)}
+                />
+            )}
         </div>
     );
 }

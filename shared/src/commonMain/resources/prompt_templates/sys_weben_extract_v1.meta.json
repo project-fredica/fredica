@@ -1,7 +1,7 @@
 {
   "id": "sys_weben_extract_v1",
   "name": "Weben 知识抽取（默认）",
-  "description": "从视频字幕中抽取概念、关系与记忆卡片，写入 Weben 知识图谱。",
+  "description": "从视频字幕中抽取概念，写入 Weben 知识图谱。",
   "category": "weben_extract",
   "schema_target": "weben_v1"
 }

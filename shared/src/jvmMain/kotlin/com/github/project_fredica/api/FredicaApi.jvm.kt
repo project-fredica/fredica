@@ -73,6 +73,7 @@ actual suspend fun FredicaApi.Companion.init(options: Any?) {
 actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route> {
     return listOf(
         TorchInstallCheckRoute,
+        WebenConceptTypeHintsRoute,
     )
 }
 
@@ -140,13 +141,12 @@ object FredicaApiJvmService {
             BilibiliSubtitleBodyCacheDb(database).also  { it.initialize(); BilibiliSubtitleBodyCacheService.initialize(it) }
             // LLM 响应缓存
             LlmResponseCacheDb(database).also { it.initialize(); LlmResponseCacheService.initialize(it) }
-            // Weben 知识图谱（flashcard 依赖 concept 表存在）
-            WebenSourceDb(database).also    { it.initialize(); WebenSourceService.initialize(it) }
-            WebenConceptDb(database).also   { it.initialize(); WebenConceptService.initialize(it) }
-            WebenRelationDb(database).also  { it.initialize(); WebenRelationService.initialize(it) }
-            WebenSegmentDb(database).also   { it.initialize(); WebenSegmentService.initialize(it) }
-            WebenFlashcardDb(database).also { it.initialize(); WebenFlashcardService.initialize(it) }
-            WebenNoteDb(database).also      { it.initialize(); WebenNoteService.initialize(it) }
+            // Weben 知识图谱
+            WebenSourceDb(database).also         { it.initialize(); WebenSourceService.initialize(it) }
+            WebenConceptDb(database).also        { it.initialize(); WebenConceptService.initialize(it) }
+            WebenExtractionRunDb(database).also  { it.initialize(); WebenExtractionRunService.initialize(it) }
+            WebenSegmentDb(database).also        { it.initialize(); WebenSegmentService.initialize(it) }
+            WebenNoteDb(database).also           { it.initialize(); WebenNoteService.initialize(it) }
             // Prompt 脚本模板
             PromptTemplateDb(database).also { it.initialize(); PromptTemplateService.initialize(it) }
 

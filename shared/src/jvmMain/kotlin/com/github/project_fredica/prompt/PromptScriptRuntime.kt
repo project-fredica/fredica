@@ -16,7 +16,7 @@ package com.github.project_fredica.prompt
 // 脚本约定：
 //   - 必须定义 `async function main()` 或 `function main()`。
 //   - main() 返回字符串（Prompt 文本）。
-//   - 可调用注入函数：getVar(key)、getSchemaHint(key)、readRoute(name, param)。
+//   - 可调用注入函数：getVar(key)、getSchemaHint(key)。
 //   - 可使用 console.log/warn/error 写入日志。
 // =============================================================================
 
@@ -175,17 +175,22 @@ object PromptScriptRuntime {
             logs.add(PromptSandboxLog(level = level, args = msg, ts = System.currentTimeMillis()))
             null
         })
-        // 主机 API
+        // JS main() -> GraalJS ProxyExecutable -> PromptRuntimeContextProvider -> resolver
         b.putMember("getVar", ProxyExecutable { args: Array<out Value> ->
-            provider.getVar(args.getOrNull(0)?.asString() ?: "")
+            val key = args.getOrNull(0)?.asString() ?: ""
+            logger.debug("[PromptScriptRuntime] JS 调用 getVar key=$key")
+            provider.getVar(key).also {
+                logger.debug("[PromptScriptRuntime] JS getVar 返回 key=$key isBlank=${it.isBlank()} length=${it.length}")
+            }
         })
         b.putMember("getSchemaHint", ProxyExecutable { args: Array<out Value> ->
-            provider.getSchemaHint(args.getOrNull(0)?.asString() ?: "")
-        })
-        b.putMember("readRoute", ProxyExecutable { args: Array<out Value> ->
-            val name = args.getOrNull(0)?.asString() ?: ""
-            val param = args.getOrNull(1)?.asString() ?: "{}"
-            provider.readRoute(name, param)
+            val key = args.getOrNull(0)?.asString() ?: ""
+            logger.debug("[PromptScriptRuntime] JS 调用 getSchemaHint key=$key")
+            provider.getSchemaHint(key).also {
+                logger.debug(
+                    "[PromptScriptRuntime] JS getSchemaHint 返回 key=$key isBlank=${it.isBlank()} length=${it.length}",
+                )
+            }
         })
     }
 

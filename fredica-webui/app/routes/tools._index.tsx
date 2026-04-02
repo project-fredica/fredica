@@ -1,4 +1,4 @@
-import { Wifi } from "lucide-react";
+import { FlaskConical, Wifi } from "lucide-react";
 import { Link } from "react-router";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 
@@ -9,6 +9,13 @@ const TOOLS = [
         Icon: Wifi,
         title: "网速和延迟测试",
         desc: "区分直连与代理两种路径，通过 Worker Engine 异步执行",
+    },
+    {
+        id: "dev-test",
+        href: "/tools/dev-test",
+        Icon: FlaskConical,
+        title: "开发者测试",
+        desc: "Toast 通知等 UI 组件与行为的快速验证",
     },
 ];
 

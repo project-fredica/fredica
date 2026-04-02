@@ -5,11 +5,13 @@ package com.github.project_fredica.db.weben
 // =============================================================================
 //
 // 管理三张表：
-//   weben_concept        — 概念节点（mastery 为聚合缓存，禁止应用层直接写入）
+//   weben_concept        — 概念节点
 //   weben_concept_alias  — 概念别名（用于去重合并时的模糊匹配）
 //   weben_concept_source — 概念-来源时间点关联（M:N）
 // =============================================================================
 
+import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.error
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -17,14 +19,18 @@ import kotlinx.serialization.Serializable
 import org.ktorm.database.Database
 import java.sql.ResultSet
 import java.sql.Types
+import kotlin.collections.map
+import kotlin.collections.plus
 
 @Serializable
 data class WebenConcept(
     /** UUID，概念唯一标识。 */
     val id: String,
-    /** 规范化名称（去标点小写后的去重键，同时作为展示名）。 */
+    /** 所属素材 ID（素材作用域）；null 表示全局/遗留数据。概念在同一素材内按 canonical_name 去重。 */
+    @SerialName("material_id") val materialId: String? = null,
+    /** 规范化名称（去标点小写后的去重键，同时作为展示名）。同一素材内唯一。 */
     @SerialName("canonical_name") val canonicalName: String,
-    /** 概念类型：'理论'|'术语'|'硬件经验'|'开发经验'|'方法技巧'|'工具软件'|'器件芯片'|'协议'|'公式'|'设计模式'。 */
+    /** 概念类型：开放文本字段，由 LLM / 用户自由定义；程序侧只提供 examples，不维护允许列表。 */
     @SerialName("concept_type") val conceptType: String,
     /** AI 生成的简短定义，用户可手动修正；null 表示尚未生成。 */
     @SerialName("brief_definition") val briefDefinition: String? = null,
@@ -32,8 +38,6 @@ data class WebenConcept(
     @SerialName("metadata_json") val metadataJson: String = "{}",
     /** AI 提取置信度（0-1），用户手动添加的概念固定为 1.0。 */
     val confidence: Double = 1.0,
-    /** 【只读缓存】该概念所有闪卡 ease_factor 的归一化均值（0-1），禁止应用层直接写入。 */
-    val mastery: Double = 0.0,
     /** 首次在来源中出现的时间，Unix 秒；一旦写入不可更改。 */
     @SerialName("first_seen_at") val firstSeenAt: Long,
     /** 最近一次新增来源关联的时间，Unix 秒；每次关联新来源时更新。 */
@@ -77,15 +81,16 @@ data class WebenConceptSource(
 interface WebenConceptRepo {
     suspend fun create(concept: WebenConcept)
     suspend fun getById(id: String): WebenConcept?
-    suspend fun getByCanonicalName(canonicalName: String): WebenConcept?
-    /** 瀑布流分页：可按 conceptType 过滤，按 mastery 升序（掌握度低的优先）。 */
-    suspend fun listAll(conceptType: String? = null, sourceId: String? = null, limit: Int = 50, offset: Int = 0): List<WebenConcept>
+    suspend fun getByCanonicalName(canonicalName: String, materialId: String? = null): WebenConcept?
+    suspend fun listDistinctConceptTypes(): List<String>
+    /** 瀑布流分页：可按 conceptType / sourceId / materialId 过滤，按 canonical_name 排序。
+     *  materialId：按 weben_concept.material_id 直接过滤（概念存储时即绑定素材）。
+     */
+    suspend fun listAll(conceptType: String? = null, sourceId: String? = null, materialId: String? = null, limit: Int = 50, offset: Int = 0): List<WebenConcept>
     /** 返回满足过滤条件的概念总数。 */
-    suspend fun count(conceptType: String? = null, sourceId: String? = null): Int
+    suspend fun count(conceptType: String? = null, sourceId: String? = null, materialId: String? = null): Int
     /** 更新概念定义与元数据（用户手动修正），同步更新 updated_at。 */
     suspend fun update(concept: WebenConcept)
-    /** 【内部】由 WebenFlashcardDb 在每次闪卡评分后调用，更新聚合缓存。 */
-    suspend fun updateMastery(id: String, mastery: Double)
     // — 别名 —
     /** 插入别名，UNIQUE(concept_id, alias) 冲突时忽略。 */
     suspend fun addAlias(alias: WebenConceptAlias)
@@ -117,25 +122,63 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
     suspend fun initialize() = withContext(Dispatchers.IO) {
         db.useConnection { conn ->
             conn.createStatement().use { stmt ->
-                // weben_concept
+                // weben_concept (新 schema：material_id 列 + UNIQUE(material_id, canonical_name))
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS weben_concept (
                         id               TEXT    PRIMARY KEY,
-                        canonical_name   TEXT    NOT NULL UNIQUE,
+                        material_id      TEXT,
+                        canonical_name   TEXT    NOT NULL,
                         concept_type     TEXT    NOT NULL,
                         brief_definition TEXT,
                         metadata_json    TEXT    NOT NULL DEFAULT '{}',
                         confidence       REAL    NOT NULL DEFAULT 1.0,
-                        mastery          REAL    NOT NULL DEFAULT 0.0,
                         first_seen_at    INTEGER NOT NULL,
                         last_seen_at     INTEGER NOT NULL,
                         created_at       INTEGER NOT NULL,
-                        updated_at       INTEGER NOT NULL
+                        updated_at       INTEGER NOT NULL,
+                        UNIQUE (material_id, canonical_name)
                     )
                 """.trimIndent())
-                stmt.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_wc_type_mastery ON weben_concept(concept_type, mastery)"
-                )
+
+                // 迁移旧 schema（canonical_name UNIQUE 全局，无 material_id 列）→ 新 schema
+                val hasMaterialId = conn.prepareStatement("PRAGMA table_info(weben_concept)").use { ps ->
+                    ps.executeQuery().use { rs ->
+                        var found = false
+                        while (rs.next()) { if (rs.getString("name") == "material_id") { found = true; break } }
+                        found
+                    }
+                }
+                if (!hasMaterialId) {
+                    stmt.execute("""
+                        CREATE TABLE weben_concept_v2 (
+                            id               TEXT    PRIMARY KEY,
+                            material_id      TEXT,
+                            canonical_name   TEXT    NOT NULL,
+                            concept_type     TEXT    NOT NULL,
+                            brief_definition TEXT,
+                            metadata_json    TEXT    NOT NULL DEFAULT '{}',
+                            confidence       REAL    NOT NULL DEFAULT 1.0,
+                            first_seen_at    INTEGER NOT NULL,
+                            last_seen_at     INTEGER NOT NULL,
+                            created_at       INTEGER NOT NULL,
+                            updated_at       INTEGER NOT NULL,
+                            UNIQUE (material_id, canonical_name)
+                        )
+                    """.trimIndent())
+                    stmt.execute("""
+                        INSERT INTO weben_concept_v2
+                            (id, material_id, canonical_name, concept_type, brief_definition,
+                             metadata_json, confidence, first_seen_at, last_seen_at, created_at, updated_at)
+                        SELECT id, NULL, canonical_name, concept_type, brief_definition,
+                               metadata_json, confidence, first_seen_at, last_seen_at, created_at, updated_at
+                        FROM weben_concept
+                    """.trimIndent())
+                    stmt.execute("DROP TABLE weben_concept")
+                    stmt.execute("ALTER TABLE weben_concept_v2 RENAME TO weben_concept")
+                }
+
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_wc_type ON weben_concept(concept_type)")
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_wc_material ON weben_concept(material_id)")
                 // weben_concept_alias
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS weben_concept_alias (
@@ -172,19 +215,18 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
     override suspend fun create(concept: WebenConcept) = withContext(Dispatchers.IO) {
         db.useConnection { conn ->
             conn.prepareStatement("""
-                INSERT INTO weben_concept
-                    (id, canonical_name, concept_type, brief_definition, metadata_json,
-                     confidence, mastery, first_seen_at, last_seen_at, created_at, updated_at)
+                INSERT OR IGNORE INTO weben_concept
+                    (id, material_id, canonical_name, concept_type, brief_definition, metadata_json,
+                     confidence, first_seen_at, last_seen_at, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO NOTHING
             """.trimIndent()).use { ps ->
                 ps.setString(1, concept.id)
-                ps.setString(2, concept.canonicalName)
-                ps.setString(3, concept.conceptType)
-                ps.setStringOrNull(4, concept.briefDefinition)
-                ps.setString(5, concept.metadataJson)
-                ps.setDouble(6, concept.confidence)
-                ps.setDouble(7, concept.mastery)
+                ps.setStringOrNull(2, concept.materialId)
+                ps.setString(3, concept.canonicalName)
+                ps.setString(4, concept.conceptType)
+                ps.setStringOrNull(5, concept.briefDefinition)
+                ps.setString(6, concept.metadataJson)
+                ps.setDouble(7, concept.confidence)
                 ps.setLong(8, concept.firstSeenAt)
                 ps.setLong(9, concept.lastSeenAt)
                 ps.setLong(10, concept.createdAt)
@@ -204,27 +246,53 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
         }
     }
 
-    override suspend fun getByCanonicalName(canonicalName: String): WebenConcept? = withContext(Dispatchers.IO) {
+    override suspend fun getByCanonicalName(canonicalName: String, materialId: String?): WebenConcept? = withContext(Dispatchers.IO) {
         db.useConnection { conn ->
-            conn.prepareStatement("SELECT * FROM weben_concept WHERE canonical_name = ?").use { ps ->
+            val sql = if (materialId != null)
+                "SELECT * FROM weben_concept WHERE canonical_name = ? AND material_id = ?"
+            else
+                "SELECT * FROM weben_concept WHERE canonical_name = ? AND material_id IS NULL"
+            conn.prepareStatement(sql).use { ps ->
                 ps.setString(1, canonicalName)
+                if (materialId != null) ps.setString(2, materialId)
                 ps.executeQuery().use { rs -> if (rs.next()) rs.toConcept() else null }
             }
         }
     }
 
-    override suspend fun listAll(conceptType: String?, sourceId: String?, limit: Int, offset: Int): List<WebenConcept> =
+    override suspend fun listDistinctConceptTypes(): List<String> = withContext(Dispatchers.IO) {
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "SELECT DISTINCT concept_type FROM weben_concept WHERE TRIM(concept_type) <> ''"
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            rs.getString(1).split(",")
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .forEach { add(it) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun listAll(conceptType: String?, sourceId: String?, materialId: String?, limit: Int, offset: Int): List<WebenConcept> =
         withContext(Dispatchers.IO) {
             db.useConnection { conn ->
                 val conditions = buildList {
                     if (sourceId != null) add("c.id IN (SELECT concept_id FROM weben_concept_source WHERE source_id = ?)")
-                    if (conceptType != null) add("c.concept_type = ?")
+                    if (materialId != null) add("c.material_id = ?")
+                    if (conceptType != null) add("INSTR(','||c.concept_type||',', ','||?||',') > 0")
                 }
                 val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
-                val sql = "SELECT c.* FROM weben_concept c $where ORDER BY c.mastery ASC LIMIT ? OFFSET ?"
+                val sql = "SELECT c.* FROM weben_concept c $where ORDER BY c.canonical_name ASC LIMIT ? OFFSET ?"
                 conn.prepareStatement(sql).use { ps ->
                     var idx = 1
                     if (sourceId != null) ps.setString(idx++, sourceId)
+                    if (materialId != null) ps.setString(idx++, materialId)
                     if (conceptType != null) ps.setString(idx++, conceptType)
                     ps.setInt(idx++, limit); ps.setInt(idx, offset)
                     ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.toConcept()) } }
@@ -232,17 +300,19 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
             }
         }
 
-    override suspend fun count(conceptType: String?, sourceId: String?): Int =
+    override suspend fun count(conceptType: String?, sourceId: String?, materialId: String?): Int =
         withContext(Dispatchers.IO) {
             db.useConnection { conn ->
                 val conditions = buildList {
                     if (sourceId != null) add("id IN (SELECT concept_id FROM weben_concept_source WHERE source_id = ?)")
-                    if (conceptType != null) add("concept_type = ?")
+                    if (materialId != null) add("material_id = ?")
+                    if (conceptType != null) add("INSTR(','||concept_type||',', ','||?||',') > 0")
                 }
                 val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
                 conn.prepareStatement("SELECT COUNT(*) FROM weben_concept $where").use { ps ->
                     var idx = 1
                     if (sourceId != null) ps.setString(idx++, sourceId)
+                    if (materialId != null) ps.setString(idx++, materialId)
                     if (conceptType != null) ps.setString(idx, conceptType)
                     ps.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
                 }
@@ -268,17 +338,6 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
                 ps.setLong(5, concept.lastSeenAt)
                 ps.setLong(6, concept.updatedAt)
                 ps.setString(7, concept.id)
-                ps.executeUpdate()
-            }
-        }
-        Unit
-    }
-
-    override suspend fun updateMastery(id: String, mastery: Double) = withContext(Dispatchers.IO) {
-        db.useConnection { conn ->
-            conn.prepareStatement("UPDATE weben_concept SET mastery = ? WHERE id = ?").use { ps ->
-                ps.setDouble(1, mastery)
-                ps.setString(2, id)
                 ps.executeUpdate()
             }
         }
@@ -353,12 +412,12 @@ class WebenConceptDb(private val db: Database) : WebenConceptRepo {
 
     private fun ResultSet.toConcept() = WebenConcept(
         id              = getString("id"),
+        materialId      = getString("material_id"),
         canonicalName   = getString("canonical_name"),
         conceptType     = getString("concept_type"),
         briefDefinition = getString("brief_definition"),
         metadataJson    = getString("metadata_json"),
         confidence      = getDouble("confidence"),
-        mastery         = getDouble("mastery"),
         firstSeenAt     = getLong("first_seen_at"),
         lastSeenAt      = getLong("last_seen_at"),
         createdAt       = getLong("created_at"),

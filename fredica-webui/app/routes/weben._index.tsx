@@ -1,93 +1,139 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
-import { Brain, BookOpen, RefreshCw, ArrowRight, Layers, Clock, ChevronRight } from "lucide-react";
+import { Brain, RefreshCw, ChevronRight, BookOpen, Layers } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import {
-    type WebenConcept, type WebenSource, type WebenReviewQueueResponse,
-    getAnalysisStatusInfo, masteryBarColor, masteryLabel, formatRelativeTime,
+    type WebenConcept, type WebenSourceListItem,
+    type WebenSourcePageResult,
+    getAnalysisStatusInfo, getConceptTypeInfo, formatRelativeTime,
 } from "~/util/weben";
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+// ─── Source row ────────────────────────────────────────────────────────────────
 
-function StatCard({ icon, label, value, sub, to, color }: {
-    icon: React.ReactNode; label: string; value: string | number;
-    sub?: string; to: string; color: string;
-}) {
+function SourceRow({ item }: { item: WebenSourceListItem }) {
+    const { source, concept_count } = item;
+    const status = getAnalysisStatusInfo(source.analysis_status);
+
     return (
-        <Link to={to} className="group bg-white rounded-xl border border-gray-200 p-5 hover:border-violet-300 hover:shadow-md transition-all">
-            <div className="flex items-start justify-between">
-                <div className={`p-2.5 rounded-lg ${color}`}>{icon}</div>
-                <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-violet-400 transition-colors mt-1" />
+        <Link
+            to={`/weben/sources/${source.id}`}
+            className="flex items-start gap-3 px-4 py-3 hover:bg-violet-50/40 transition-colors group"
+        >
+            <div className="flex-1 min-w-0 space-y-1">
+                <p className="text-sm font-medium text-gray-800 truncate group-hover:text-violet-700 transition-colors leading-snug">
+                    {source.title}
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${status.badge}`}>
+                        {status.label}
+                    </span>
+                    <span className="text-xs text-gray-400">{formatRelativeTime(source.created_at)}</span>
+                    {source.analysis_status === "completed" && concept_count > 0 && (
+                        <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                            <BookOpen className="w-3 h-3" />
+                            {concept_count}
+                        </span>
+                    )}
+                </div>
+                {source.analysis_status === "analyzing" && source.progress > 0 && (
+                    <div className="flex items-center gap-2 pt-0.5">
+                        <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-blue-400 rounded-full transition-all duration-500"
+                                style={{ width: `${source.progress}%` }}
+                            />
+                        </div>
+                        <span className="text-[10px] text-gray-400 tabular-nums flex-shrink-0">
+                            {source.progress}%
+                        </span>
+                    </div>
+                )}
             </div>
-            <div className="mt-3">
-                <div className="text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
-                <div className="text-sm text-gray-500 mt-0.5">{label}</div>
-                {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-            </div>
+            <ChevronRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-violet-400 flex-shrink-0 mt-1" />
         </Link>
     );
 }
 
-function SourceRow({ source }: { source: WebenSource }) {
-    const status = getAnalysisStatusInfo(source.analysis_status);
-    const workspaceUrl = source.material_id ? `/material/${source.material_id}/tasks` : null;
+// ─── Concept row ───────────────────────────────────────────────────────────────
 
-    const inner = (
-        <>
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${status.dot}`} />
-            <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{source.title}</p>
-                <p className="text-xs text-gray-400">{formatRelativeTime(source.created_at)}</p>
-            </div>
-            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${status.badge}`}>
-                {status.label}
-            </span>
-            {source.analysis_status === 'analyzing' && source.progress > 0 && (
-                <div
-                    className="absolute bottom-0 left-0 h-[1.5px] bg-blue-500 transition-all duration-500"
-                    style={{ width: `${source.progress}%` }}
-                />
-            )}
-        </>
-    );
-
-    if (workspaceUrl) {
-        return (
-            <Link to={workspaceUrl} className="relative flex items-center gap-3 px-4 py-3 overflow-hidden hover:bg-gray-50 transition-colors">
-                {inner}
-            </Link>
-        );
-    }
-    return (
-        <div className="relative flex items-center gap-3 px-4 py-3 overflow-hidden">
-            {inner}
-        </div>
-    );
-}
-
-function LowMasteryConceptRow({ concept }: { concept: WebenConcept }) {
+function ConceptRow({ concept }: { concept: WebenConcept }) {
+    const types = concept.concept_type.split(",").map(t => t.trim()).filter(Boolean);
     return (
         <Link
             to={`/weben/concepts/${concept.id}`}
-            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors group"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-violet-50/40 transition-colors group"
         >
             <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate group-hover:text-violet-600 transition-colors">
                     {concept.canonical_name}
                 </p>
-                <div className="flex items-center gap-2 mt-1">
-                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden max-w-24">
-                        <div
-                            className={`h-full rounded-full ${masteryBarColor(concept.mastery)}`}
-                            style={{ width: `${Math.max(4, concept.mastery * 100)}%` }}
-                        />
-                    </div>
-                    <span className="text-xs text-gray-400">{masteryLabel(concept.mastery)}</span>
-                </div>
+                {types.length > 0 && (
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{types.join(" · ")}</p>
+                )}
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-violet-400 flex-shrink-0" />
+            <ChevronRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-violet-400 flex-shrink-0" />
         </Link>
+    );
+}
+
+// ─── Panel skeleton ────────────────────────────────────────────────────────────
+
+function PanelSkeleton() {
+    return (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden animate-pulse">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <div className="h-4 bg-gray-200 rounded w-20" />
+                <div className="h-3 bg-gray-100 rounded w-12" />
+            </div>
+            {[0, 1, 2].map(i => (
+                <div key={i} className="px-4 py-3 border-b border-gray-50 last:border-0 space-y-1.5">
+                    <div className="h-3.5 bg-gray-100 rounded w-3/4" />
+                    <div className="h-3 bg-gray-50 rounded w-1/3" />
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ─── Section card wrapper ──────────────────────────────────────────────────────
+
+function SectionCard({
+    title,
+    allLabel,
+    allTo,
+    empty,
+    emptyText,
+    icon: Icon,
+    children,
+}: {
+    title: string;
+    allLabel?: string;
+    allTo?: string;
+    empty: boolean;
+    emptyText: string;
+    icon: React.FC<{ className?: string }>;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-1.5">
+                    <Icon className="w-3.5 h-3.5 text-gray-400" />
+                    <h2 className="text-sm font-semibold text-gray-700">{title}</h2>
+                </div>
+                {allTo && allLabel && (
+                    <Link to={allTo} className="text-xs text-violet-500 hover:text-violet-700 transition-colors">
+                        {allLabel}
+                    </Link>
+                )}
+            </div>
+            {empty ? (
+                <div className="px-4 py-10 text-center text-sm text-gray-400">{emptyText}</div>
+            ) : (
+                <div className="divide-y divide-gray-50">{children}</div>
+            )}
+        </div>
     );
 }
 
@@ -95,142 +141,100 @@ function LowMasteryConceptRow({ concept }: { concept: WebenConcept }) {
 
 export default function WebenIndexPage() {
     const [concepts,   setConcepts]   = useState<WebenConcept[]>([]);
-    const [sources,    setSources]    = useState<WebenSource[]>([]);
-    const [dueCount,   setDueCount]   = useState(0);
+    const [sources,    setSources]    = useState<WebenSourceListItem[]>([]);
+    const [totalC,     setTotalC]     = useState<number | null>(null);
+    const [totalS,     setTotalS]     = useState<number | null>(null);
+    const [loading,    setLoading]    = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
     const { apiFetch } = useAppFetch();
 
-    const refresh = useCallback(async () => {
-        const [conceptsRes, sourcesRes, reviewRes] = await Promise.allSettled([
-            apiFetch<WebenConcept[]>('/api/v1/WebenConceptListRoute?limit=10&offset=0', { method: 'GET' }, { silent: true }),
-            apiFetch<WebenSource[]>('/api/v1/WebenSourceListRoute',                    { method: 'GET' }, { silent: true }),
-            apiFetch<WebenReviewQueueResponse>('/api/v1/WebenReviewQueueRoute?limit=200',         { method: 'GET' }, { silent: true }),
+    const load = useCallback(async () => {
+        const [conceptsRes, sourcesRes] = await Promise.allSettled([
+            apiFetch('/api/v1/WebenConceptListRoute?limit=8&offset=0',  { method: 'GET' }, { silent: true }),
+            apiFetch('/api/v1/WebenSourceListRoute?limit=6&offset=0',   { method: 'GET' }, { silent: true }),
         ]);
 
         if (conceptsRes.status === 'fulfilled') {
-            const data = conceptsRes.value.data;
-            if (Array.isArray(data)) setConcepts(data);
+            const page = conceptsRes.value.data as { items?: WebenConcept[]; total?: number } | null;
+            if (page?.items) { setConcepts(page.items); setTotalC(page.total ?? null); }
         }
         if (sourcesRes.status === 'fulfilled') {
-            const data = sourcesRes.value.data;
-            if (Array.isArray(data)) setSources(data.slice(0, 8));
-        }
-        if (reviewRes.status === 'fulfilled') {
-            const data = reviewRes.value.data;
-            if (data?.flashcards) setDueCount(data.flashcards.length);
+            const page = sourcesRes.value.data as WebenSourcePageResult | null;
+            if (page?.items) { setSources(page.items); setTotalS(page.total ?? null); }
         }
     }, [apiFetch]);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    useEffect(() => {
+        load().finally(() => setLoading(false));
+    }, [load]);
 
     const handleRefresh = async () => {
         setRefreshing(true);
-        try { await refresh(); } finally { setRefreshing(false); }
+        try { await load(); } finally { setRefreshing(false); }
     };
-
-    const totalConcepts = concepts.length;
-    const activeSources = sources.filter(s => s.analysis_status !== 'failed').length;
-    const weakConcepts  = concepts.filter(c => c.mastery < 0.5).slice(0, 5);
 
     return (
         <SidebarLayout>
-            <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
+            <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-5">
 
                 {/* Header */}
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                <div className="flex items-start justify-between">
+                    <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
                             <Brain className="w-5 h-5 text-violet-500" />
-                            知识网络
-                        </h1>
-                        <p className="text-sm text-gray-400 mt-0.5">AI 提取的概念图谱与间隔复习</p>
+                            <h1 className="text-lg font-semibold text-gray-900">知识网络</h1>
+                        </div>
+                        {(totalC !== null || totalS !== null) && (
+                            <p className="text-xs text-gray-400 pl-7">
+                                {totalC !== null && <><span className="font-medium text-gray-600">{totalC}</span> 个概念</>}
+                                {totalC !== null && totalS !== null && <span className="mx-1.5 text-gray-200">·</span>}
+                                {totalS !== null && <><span className="font-medium text-gray-600">{totalS}</span> 个来源</>}
+                            </p>
+                        )}
                     </div>
                     <button
                         onClick={handleRefresh}
-                        disabled={refreshing}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                        disabled={refreshing || loading}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                     >
                         <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                     </button>
                 </div>
 
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-3">
-                    <StatCard
-                        icon={<Layers className="w-4 h-4 text-violet-600" />}
-                        label="个概念" value={totalConcepts}
-                        sub="掌握度低的优先"
-                        to="/weben/concepts"
-                        color="bg-violet-50"
-                    />
-                    <StatCard
-                        icon={<BookOpen className="w-4 h-4 text-amber-600" />}
-                        label="待复习" value={dueCount}
-                        sub={dueCount > 0 ? '立即开始' : '暂无待复习'}
-                        to="/weben/review"
-                        color="bg-amber-50"
-                    />
-                    <StatCard
-                        icon={<Clock className="w-4 h-4 text-blue-600" />}
-                        label="个来源" value={activeSources}
-                        sub="已分析的视频"
-                        to="/weben/concepts"
-                        color="bg-blue-50"
-                    />
-                </div>
+                {/* Panels */}
+                {loading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <PanelSkeleton />
+                        <PanelSkeleton />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-                {/* Quick actions */}
-                {dueCount > 0 && (
-                    <Link
-                        to="/weben/review"
-                        className="flex items-center justify-between w-full px-5 py-4 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-colors"
-                    >
-                        <div>
-                            <div className="font-semibold">开始今日复习</div>
-                            <div className="text-sm text-violet-200 mt-0.5">{dueCount} 张闪卡待复习</div>
-                        </div>
-                        <ArrowRight className="w-5 h-5 text-violet-300" />
-                    </Link>
+                        {/* Sources */}
+                        <SectionCard
+                            title="最近摄入"
+                            icon={Layers}
+                            empty={sources.length === 0}
+                            emptyText="暂无已分析来源"
+                        >
+                            {sources.map(item => <SourceRow key={item.source.id} item={item} />)}
+                        </SectionCard>
+
+                        {/* Concepts */}
+                        <SectionCard
+                            title="最近概念"
+                            allLabel="概念库"
+                            allTo="/weben/concepts"
+                            icon={BookOpen}
+                            empty={concepts.length === 0}
+                            emptyText="暂无概念数据"
+                        >
+                            {concepts.slice(0, 8).map(c => <ConceptRow key={c.id} concept={c} />)}
+                        </SectionCard>
+
+                    </div>
                 )}
-
-                {/* Bottom two columns */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                    {/* Recent sources */}
-                    <div className="bg-white rounded-xl border border-gray-200">
-                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                            <h2 className="text-sm font-semibold text-gray-700">最近来源</h2>
-                            <Link to="/weben/concepts" className="text-xs text-violet-500 hover:text-violet-700">查看全部</Link>
-                        </div>
-                        {sources.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-sm text-gray-400">暂无已分析来源</div>
-                        ) : (
-                            <div className="divide-y divide-gray-50">
-                                {sources.map(s => (
-                                    <SourceRow key={s.id} source={s} />
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Weak concepts */}
-                    <div className="bg-white rounded-xl border border-gray-200">
-                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                            <h2 className="text-sm font-semibold text-gray-700">待加强概念</h2>
-                            <Link to="/weben/concepts" className="text-xs text-violet-500 hover:text-violet-700">概念库</Link>
-                        </div>
-                        {weakConcepts.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-sm text-gray-400">
-                                {concepts.length === 0 ? '暂无概念数据' : '全部概念已掌握 🎉'}
-                            </div>
-                        ) : (
-                            <div className="divide-y divide-gray-50">
-                                {weakConcepts.map(c => <LowMasteryConceptRow key={c.id} concept={c} />)}
-                            </div>
-                        )}
-                    </div>
-                </div>
 
             </div>
         </SidebarLayout>

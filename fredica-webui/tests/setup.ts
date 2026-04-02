@@ -8,3 +8,6 @@ import { MockBroadcastChannel } from "./mocks/broadcastChannel";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).BroadcastChannel = MockBroadcastChannel;
+
+// scrollIntoView mock（JSDOM 不原生支持）
+window.HTMLElement.prototype.scrollIntoView = function () { /* no-op in test env */ };

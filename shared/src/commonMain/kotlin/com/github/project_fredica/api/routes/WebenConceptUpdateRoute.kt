@@ -16,7 +16,6 @@ import kotlinx.serialization.Serializable
  *
  * 说明：
  *   - 所有字段均为可选；传 null 则保留原值（PATCH 语义）
- *   - mastery 字段是 SM-2 算法维护的只读缓存，忽略客户端传入的任何值
  *   - canonical_name 不可通过此接口修改（影响去重逻辑）
  */
 object WebenConceptUpdateRoute : FredicaApi.Route {
