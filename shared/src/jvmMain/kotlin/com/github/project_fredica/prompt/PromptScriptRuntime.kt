@@ -27,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import org.graalvm.polyglot.Context
@@ -179,17 +180,21 @@ object PromptScriptRuntime {
         b.putMember("getVar", ProxyExecutable { args: Array<out Value> ->
             val key = args.getOrNull(0)?.asString() ?: ""
             logger.debug("[PromptScriptRuntime] JS 调用 getVar key=$key")
-            provider.getVar(key).also {
-                logger.debug("[PromptScriptRuntime] JS getVar 返回 key=$key isBlank=${it.isBlank()} length=${it.length}")
+            runBlocking(Dispatchers.IO) {
+                provider.getVar(key).also {
+                    logger.debug("[PromptScriptRuntime] JS getVar 返回 key=$key isBlank=${it.isBlank()} length=${it.length}")
+                }
             }
         })
         b.putMember("getSchemaHint", ProxyExecutable { args: Array<out Value> ->
             val key = args.getOrNull(0)?.asString() ?: ""
             logger.debug("[PromptScriptRuntime] JS 调用 getSchemaHint key=$key")
-            provider.getSchemaHint(key).also {
-                logger.debug(
-                    "[PromptScriptRuntime] JS getSchemaHint 返回 key=$key isBlank=${it.isBlank()} length=${it.length}",
-                )
+            runBlocking(Dispatchers.IO) {
+                provider.getSchemaHint(key).also {
+                    logger.debug(
+                        "[PromptScriptRuntime] JS getSchemaHint 返回 key=$key isBlank=${it.isBlank()} length=${it.length}",
+                    )
+                }
             }
         })
     }
@@ -236,9 +241,11 @@ object PromptScriptRuntime {
             !done -> PromptSandboxResult(
                 promptText = null, error = "脚本执行未完成", errorType = "incomplete", logs = logs,
             )
+
             error != null && !error.isNull -> PromptSandboxResult(
                 promptText = null, error = error.asString(), errorType = "script_error", logs = logs,
             )
+
             else -> PromptSandboxResult(
                 promptText = result?.takeIf { !it.isNull }?.asString(),
                 error = null, errorType = null, logs = logs,

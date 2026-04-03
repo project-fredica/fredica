@@ -59,7 +59,7 @@ object WebenTypeHintResourceLoader {
             .sorted()
     }
 
-    fun injectExamples(schemaJson: String, examples: List<String>): String {
+   fun injectExamples(schemaJson: String, examples: List<String>): String {
         if (examples.isEmpty()) return jsonCanonical(schemaJson)
         val root =
             AppUtil.GlobalVars.json.parseToJsonElement(schemaJson) as? JsonObject ?: return jsonCanonical(schemaJson)

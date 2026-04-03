@@ -1,4 +1,4 @@
-package com.github.project_fredica.prompt.schema
+package com.github.project_fredica.prompt.schema_hints
 
 import kotlinx.schema.Description
 import kotlinx.schema.Schema

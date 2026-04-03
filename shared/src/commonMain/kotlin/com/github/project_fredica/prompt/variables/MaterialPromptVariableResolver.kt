@@ -18,7 +18,7 @@ import com.github.project_fredica.db.MaterialVideoService
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 
-class MaterialPromptVariableResolver {
+class MaterialPromptVariableResolver : PromptVariableResolver {
     private val logger = createLogger { "MaterialPromptVariableResolver" }
 
     companion object {
@@ -31,61 +31,55 @@ class MaterialPromptVariableResolver {
      * 支持的 `subPath`：`title`、`description`、`subtitles/{language}`。
      * 未知路径或格式错误统一返回空串；预期失败打 warn，内部异常打 error。
      */
-    fun resolve(key: String): String {
+    override suspend fun resolve(key: String): String {
         logger.debug("[MaterialPromptVariableResolver] resolve start key=$key")
         val match = MATERIAL_PATH_REGEX.find(key)
         if (match != null) {
             val materialId = match.groupValues[1]
             val subPath = match.groupValues[2]
             val result = when {
-                subPath == "title" -> runBlocking {
-                    try {
-                        MaterialVideoService.repo.findById(materialId)?.title ?: ""
-                    } catch (e: Throwable) {
-                        logger.error("[MaterialPromptVariableResolver] title 读取失败 materialId=$materialId", e)
-                        ""
-                    }
+                subPath == "title" -> try {
+                    MaterialVideoService.repo.findById(materialId)?.title ?: ""
+                } catch (e: Throwable) {
+                    logger.error("[MaterialPromptVariableResolver] title 读取失败 materialId=$materialId", e)
+                    ""
                 }
 
-                subPath == "description" -> runBlocking {
-                    try {
-                        MaterialVideoService.repo.findById(materialId)?.description ?: ""
-                    } catch (e: Throwable) {
-                        logger.error("[MaterialPromptVariableResolver] description 读取失败 materialId=$materialId", e)
-                        ""
-                    }
+                subPath == "description" -> try {
+                    MaterialVideoService.repo.findById(materialId)?.description ?: ""
+                } catch (e: Throwable) {
+                    logger.error("[MaterialPromptVariableResolver] description 读取失败 materialId=$materialId", e)
+                    ""
                 }
 
                 subPath.startsWith("subtitles/") -> {
                     val lan = subPath.removePrefix("subtitles/").takeIf { it.isNotBlank() }.let {
                         if (it == "first") null else it
                     }
-                    runBlocking {
-                        try {
-                            val fromCache = BilibiliSubtitleUtil.fetchSubtitleTextFromCache(materialId, lan)
-                            if (fromCache != null) {
-                                logger.debug(
-                                    "[MaterialPromptVariableResolver] subtitle cache hit materialId=$materialId lan=$lan length=${fromCache.length}",
-                                )
-                                fromCache
-                            } else {
-                                logger.debug(
-                                    "[MaterialPromptVariableResolver] subtitle cache miss materialId=$materialId lan=$lan, fallback route",
-                                )
-                                fetchSubtitleText(materialId, lan)
-                                    ?: "".also {
-                                        logger.debug(
-                                            "[MaterialPromptVariableResolver] subtitle empty materialId=$materialId lan=$lan",
-                                        )
-                                    }
-                            }
-                        } catch (e: Throwable) {
-                            logger.error(
-                                "[MaterialPromptVariableResolver] subtitle 读取失败 materialId=$materialId lan=$lan",
-                                e,
+                    try {
+                        val fromCache = BilibiliSubtitleUtil.fetchSubtitleTextFromCache(materialId, lan)
+                        if (fromCache != null) {
+                            logger.debug(
+                                "[MaterialPromptVariableResolver] subtitle cache hit materialId=$materialId lan=$lan length=${fromCache.length}",
                             )
-                            ""
+                            fromCache
+                        } else {
+                            logger.debug(
+                                "[MaterialPromptVariableResolver] subtitle cache miss materialId=$materialId lan=$lan, fallback route",
+                            )
+                            fetchSubtitleText(materialId, lan)
+                                ?: "".also {
+                                    logger.debug(
+                                        "[MaterialPromptVariableResolver] subtitle empty materialId=$materialId lan=$lan",
+                                    )
+                                }
                         }
+                    } catch (e: Throwable) {
+                        logger.error(
+                            "[MaterialPromptVariableResolver] subtitle 读取失败 materialId=$materialId lan=$lan",
+                            e,
+                        )
+                        ""
                     }
                 }
 

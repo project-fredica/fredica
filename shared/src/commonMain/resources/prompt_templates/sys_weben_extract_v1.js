@@ -2,8 +2,18 @@ async function main() {
   // subtitles/{lan}：指定语言代码（如 ai-zh、zh），first 表示取首条
   const subtitle = await getVar("material/" + __materialId + "/subtitles/first")
   const schemaHint = await getSchemaHint("weben/summary")
+  const title = await getVar("material/" + __materialId + "/title")
+  const description = await getVar("material/" + __materialId + "/description")
 
   return `你是一位知识图谱构建专家。请根据以下信息，抽取结构化知识。
+
+<视频标题>
+${title}
+</视频标题>
+
+<视频描述>
+${description}
+</视频描述>
 
 <视频字幕内容>
 ${subtitle}

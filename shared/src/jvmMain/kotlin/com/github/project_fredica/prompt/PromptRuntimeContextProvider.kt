@@ -19,11 +19,14 @@ package com.github.project_fredica.prompt
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.prompt.schema_hints.PromptSchemaHintResolver
 import com.github.project_fredica.prompt.variables.MaterialPromptVariableResolver
+import com.github.project_fredica.prompt.variables.PromptVariableResolver
 
 class PromptRuntimeContextProvider {
     private val logger = createLogger { "PromptRuntimeContextProvider" }
     private var apiCallCount = 0
-    private val variableResolver = MaterialPromptVariableResolver()
+    private val variableResolvers: List<PromptVariableResolver> = listOf(
+        MaterialPromptVariableResolver()
+    )
     private val schemaHintResolver = PromptSchemaHintResolver()
 
     companion object {
@@ -42,10 +45,18 @@ class PromptRuntimeContextProvider {
      * 当前仅 `getVar()` 计入 API 调用配额；未知 key 由下游 resolver 自行记录日志并返回空串。
      * 返回值约定为纯文本字符串，调用方无需再做 JSON 解析。
      */
-    fun getVar(key: String): String {
+    suspend fun getVar(key: String): String {
         checkQuota()
         logger.debug("[PromptRuntimeContextProvider] getVar start key=$key apiCallCount=$apiCallCount")
-        val result = variableResolver.resolve(key)
+        var result = ""
+        for (variableResolver in variableResolvers) {
+            val res = variableResolver.resolve(key)
+            if (res.isNotBlank()) {
+                logger.debug("[PromptRuntimeContextProvider] getVar resolved key=$key resolver=$variableResolver result=$res")
+                result = res
+                break
+            }
+        }
         logger.debug(
             "[PromptRuntimeContextProvider] getVar done key=$key isBlank=${result.isBlank()} length=${result.length}",
         )
@@ -59,7 +70,7 @@ class PromptRuntimeContextProvider {
      * 与已有 WebenConcept.type distinct 值，并注入到 JSON Schema 的 example/examples 中。
      * 这些值仅用于提示 LLM，不构成允许列表；返回空串表示当前 key 没有对应 hint。
      */
-    fun getSchemaHint(key: String): String {
+    suspend fun getSchemaHint(key: String): String {
         logger.debug("[PromptRuntimeContextProvider] getSchemaHint start key=$key")
         val result = schemaHintResolver.resolve(key)
         logger.debug(
