@@ -5,386 +5,967 @@ order: 40
 
 # 任务模型
 
-本文介绍 Fredica 的异步任务系统，包括核心数据模型、状态机、DAG 调度机制、任务控制（取消/暂停/恢复）以及启动恢复流程。
+本文只描述**当前代码里已经落地的任务链路**：前端如何发起任务、Kotlin 如何创建/调度 `WorkflowRun + Task`、Python 长任务如何通过 WebSocket 被控制，以及状态如何回流到前端。
+
+为避免把设计稿和现状混在一起，文中默认都以“已实现”为准；尚未落地的能力统一收在文末“未来计划”一节，不作为当前行为说明。
+
+> 核心代码入口：`Task`、`WorkflowRun`、`CommonWorkflowService`、`MaterialWorkflowService`、`WorkerEngine`、`TaskExecutor`、`WebSocketTaskExecutor`、`PythonUtil.PyUtilServer.websocketTask()`、`TaskEndpoint`。
 
 ---
 
-## 概览
+## 1. 系统总览
 
-Fredica 的后台处理（下载、转码、字幕提取、AI 分析等）均通过**异步任务队列**驱动。整个系统由三层组成：
+Fredica 的下载、转码、字幕提取、ASR、知识提取等后台工作，统一走一套“**工作流容器 + 任务 DAG + Executor 执行器**”模型：
 
+```text
+WorkflowRun（一次业务流程）
+  └─ Task × N（具体工作单元，支持 depends_on DAG）
+       └─ TaskExecutor（Kotlin 执行器）
+            ├─ 纯 Kotlin / JVM 本地逻辑
+            └─ PythonUtil.websocketTask()/requestText() 调 Python 服务
 ```
-WorkflowRun（工作流运行实例）
-  └─ Task × N（具体工作单元，支持 DAG 依赖）
-       └─ TaskExecutor（执行逻辑，每种 type 对应一个实现）
-```
 
-- **`WorkflowRun`**：一次处理流程的容器，汇总所有子任务的整体状态和进度。
-- **`Task`**：最小工作单元，携带执行参数（`payload`）和前置依赖（`depends_on`）。
-- **`TaskExecutor`**：Kotlin 接口，每种任务类型对应一个实现，由 `WorkerEngine` 在运行时调用。
+核心分层：
+
+| 层 | 代码位置 | 职责 |
+|---|---|---|
+| 前端展示/控制 | `fredica-webui/app/` | 发起工作流、轮询任务、触发暂停/恢复/取消 |
+| HTTP 路由层 | `shared/src/commonMain/kotlin/.../api/routes/` | 暴露启动任务、查询任务、控制任务等 API |
+| 工作流业务层 | `MaterialWorkflowService.kt` / `CommonWorkflowService.kt` | 生成 `WorkflowRun` 与 `Task` |
+| 调度层 | `WorkerEngine.kt` | `claimNext()`、并发控制、重试、收尾、recalculate |
+| 执行层 | `worker/executors/` | 每种 `task.type` 对应一个 `TaskExecutor` |
+| Python 服务 | `fredica_pyutil_server/` | 承载长时间任务、子进程封装、主动上报进度/暂停请求 |
 
 ---
 
-## Task 数据模型
+## 2. 建议按什么顺序读代码
 
-定义位于 `shared/src/commonMain/kotlin/.../db/Task.kt`。
+如果你是第一次系统性看 Fredica 的任务系统，建议按下面顺序读；这样最容易把“数据模型 → 建流 → 调度 → 执行 → 前端展示”串起来。
 
-### 核心字段
+### 2.1 第一遍：先建立整体骨架
+
+1. `shared/src/commonMain/kotlin/com/github/project_fredica/db/Task.kt`
+   - 看 `Task` 数据结构
+   - 看 `TaskRepo` 提供哪些状态/调度能力
+2. `shared/src/commonMain/kotlin/com/github/project_fredica/db/WorkflowRun.kt`
+   - 看 `WorkflowRun` 是怎么汇总一组 Task 的
+3. `shared/src/commonMain/kotlin/com/github/project_fredica/worker/TaskExecutor.kt`
+   - 看任务执行的统一接口是什么
+4. `shared/src/commonMain/kotlin/com/github/project_fredica/worker/WorkerEngine.kt`
+   - 看系统如何 claim / dispatch / retry / recalculate
+
+这四个文件看完，基本就知道“任务系统是什么”。
+
+### 2.2 第二遍：看任务是怎么被创建的
+
+1. `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/MaterialWorkflowRoute.kt`
+   - 看前端 POST 进来后进入哪个业务入口
+2. `shared/src/commonMain/kotlin/com/github/project_fredica/db/MaterialWorkflowService.kt`
+   - 看某个模板如何拆成多个 Task
+3. `shared/src/commonMain/kotlin/com/github/project_fredica/db/CommonWorkflowService.kt`
+   - 看 `WorkflowRun + Task` 最终如何统一落库
+
+这一层解决的是“任务从哪里来”。
+
+### 2.3 第三遍：看运行中状态如何回流到前端
+
+1. `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/WorkerTaskListRoute.kt`
+   - 看前端轮询查的是什么
+2. `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskPauseRoute.kt`
+3. `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskResumeRoute.kt`
+4. `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskCancelRoute.kt`
+5. `fredica-webui/app/components/ui/WorkflowInfoPanel.tsx`
+   - 看前端如何把 Task 状态映射成 UI
+
+这一层解决的是“用户看到什么、按钮控制了什么”。
+
+### 2.4 第四遍：看 Python 长任务桥接
+
+1. `shared/src/jvmMain/kotlin/com/github/project_fredica/worker/WebSocketTaskExecutor.kt`
+   - 看取消/暂停/恢复信号是怎么统一注册的
+2. `shared/src/jvmMain/kotlin/com/github/project_fredica/python/PythonUtil.kt`
+   - 重点看 `PyUtilServer.websocketTask()`
+3. `desktop_assets/common/fredica-pyutil/fredica_pyutil_server/util/task_endpoint_util.py`
+   - 看 Python 端如何处理 `init_param_and_run / pause / resume / cancel`
+
+这一层解决的是“Kotlin 怎么驱动 Python 长任务”。
+
+### 2.5 最后：按具体 Executor 读业务链路
+
+当你已经明白骨架后，再去看具体任务类型，例如：
+
+- `DownloadBilibiliVideoExecutor`
+- `TranscodeMp4Executor`
+- `TranscribeExecutor`
+- `DownloadTorchExecutor`
+- `NetworkTestExecutor`
+
+建议方式：**先看 Task type 在哪里创建，再看对应 Executor。**
+
+---
+
+## 3. 从前端到 Python 的调用链
+
+### 3.1 启动一个工作流
+
+以“Bilibili 下载 + 转码”模板为例：
+
+```mermaid
+flowchart TD
+    A[React 页面/组件\nstartMaterialWorkflow()] --> B[MaterialWorkflowRoute]
+    B --> C[MaterialWorkflowService.startBilibiliDownloadTranscode()]
+    C --> D[CommonWorkflowService.createWorkflow()]
+    D --> E[写入 workflow_run]
+    D --> F[写入 task\nDOWNLOAD_BILIBILI_VIDEO]
+    D --> G[写入 task\nTRANSCODE_MP4\ndepends_on=DOWNLOAD_BILIBILI_VIDEO]
+    F --> H[WorkerEngine.claimNext()]
+    G --> H
+    H --> I[TaskExecutor.execute(task)]
+    I --> J[本地逻辑 / PythonUtil 调 Python]
+```
+
+对应函数：
+
+- 前端入口：`startMaterialWorkflow()` in `fredica-webui/app/util/materialWorkflowApi.ts`
+- 路由入口：`MaterialWorkflowRoute.handler()`
+- 模板构建：`MaterialWorkflowService.startBilibiliDownloadTranscode()`
+- 通用建流：`CommonWorkflowService.createWorkflow()`
+
+### 3.2 前端如何观察任务状态
+
+当前前端主要通过**轮询任务列表接口**观察任务进度，而不是直接订阅 Worker：
+
+```mermaid
+sequenceDiagram
+    participant UI as WorkflowInfoPanel
+    participant API as WorkerTaskListRoute.handler()
+    participant SVC as TaskStatusService.listAll()
+    participant DB as TaskRepo / workflow_run + task
+
+    UI->>API: GET WorkerTaskListRoute
+    API->>SVC: listAll(...)
+    SVC->>DB: 查询任务状态 / 必要时触发对账
+    DB-->>SVC: TaskListResult
+    SVC-->>API: items + total
+    API-->>UI: JSON
+    UI->>UI: 渲染状态并继续下一轮轮询
+```
+
+对应函数：
+
+- 前端轮询：`WorkflowInfoPanel()`
+- 后端查询入口：`WorkerTaskListRoute.handler()`
+- 查询服务：`TaskStatusService.listAll()`
+
+前端的几个关键点：
+
+- `WorkflowInfoPanel` 每 2 秒请求一次 `WorkerTaskListRoute`
+- 轮询条件可按 `workflow_run_id` 或 `material_id` 过滤
+- 所有任务进入终态后自动停止轮询
+- 暂停 / 恢复 / 取消按钮直接打 `TaskPauseRoute` / `TaskResumeRoute` / `TaskCancelRoute`
+
+---
+
+## 4. 任务模型：Task
+
+定义入口：`Task` data class in `Task.kt`。
+
+`Task` 是最小工作单元，每条记录对应一次可调度的执行动作，例如：
+
+- `DOWNLOAD_BILIBILI_VIDEO`
+- `TRANSCODE_MP4`
+- `FETCH_SUBTITLE`
+- `WEBEN_CONCEPT_EXTRACT`
+- `DOWNLOAD_TORCH`
+
+### 4.1 核心字段
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | String (UUID) | 任务唯一标识 |
-| `type` | String | 任务类型，对应一个 `TaskExecutor`，如 `DOWNLOAD_VIDEO`、`FETCH_SUBTITLE` |
-| `workflow_run_id` | String | 所属工作流运行实例 ID |
-| `material_id` | String | 关联素材 ID |
-| `status` | String | 当前状态（见状态机） |
-| `priority` | Int | 调度优先级，数字越大越优先；同优先级按 `created_at` 升序（FIFO） |
-| `depends_on` | String (JSON 数组) | 前置任务 ID 列表，全部 `completed` 才允许认领 |
-| `payload` | String (JSON) | 执行参数，由各 Executor 自定义格式 |
-| `result` | String? (JSON) | 执行结果，成功时由 Executor 写入，下游任务可读取 |
-| `error` | String? | 最后一次失败的错误信息（human-readable） |
-| `error_type` | String? | 错误类型标签，如 `TIMEOUT`、`IO_ERROR`，便于按类型统计 |
-| `idempotency_key` | String? | 幂等键；相同 key 的任务只插入一条（`ON CONFLICT DO NOTHING`） |
-| `retry_count` | Int | 已重试次数（首次执行不计入） |
-| `max_retries` | Int | 最大重试次数，超过后永久 `failed`；默认 0（不重试） |
-| `progress` | Int (0–100) | 执行进度，由 Executor 通过 `TaskRepo.updateProgress()` 实时写入 |
-| `is_paused` | Boolean | 是否处于暂停状态；仅在 `status=running` 时有意义 |
-| `is_pausable` | Boolean | 是否支持暂停；由 Python 端透传，`false` 时前端禁用暂停按钮 |
+|---|---|---|
+| `id` | String | 任务 ID（UUID） |
+| `type` | String | 任务类型，对应一个 `TaskExecutor` |
+| `workflow_run_id` | String | 所属工作流实例 |
+| `material_id` | String | 关联素材 |
+| `status` | String | `pending / claimed / running / completed / failed / cancelled` |
+| `depends_on` | String(JSON 数组) | 前置任务 ID 列表 |
+| `payload` | String(JSON) | 执行参数 |
+| `result` | String? | 成功结果 JSON |
+| `error` | String? | 失败信息 |
+| `error_type` | String? | 失败类型标签 |
+| `retry_count` / `max_retries` | Int | 重试控制 |
+| `progress` | Int | 0–100 进度 |
+| `status_text` | String? | 最近一条状态文本 |
+| `is_paused` | Boolean | 当前是否暂停 |
+| `is_pausable` | Boolean | 当前是否支持暂停 |
+| `idempotency_key` | String? | 幂等键 |
 
-### 时间戳字段
+### 4.2 当前前端真正用到的字段
+
+从 `WorkflowInfoPanel` 看，前端最关心这些字段：
+
+- `type`：映射为“下载视频 / 转码 MP4 / 获取字幕”等标签
+- `status`：决定展示“等待中 / 进行中 / 已完成 / 失败”
+- `progress`：绘制进度条
+- `status_text`：展示阶段文本
+- `error` + `error_type`：展示失败原因或“等待配置”态
+- `is_paused` + `is_pausable`：控制暂停/恢复按钮
+
+也就是说，`Task` 既是调度记录，也是前端任务 UI 的直接数据源。
+
+对应类 / 函数：
+
+- 数据模型：`Task`
+- 查询接口：`TaskRepo.listAll()`、`TaskRepo.listByWorkflowRun()`
+- 前端消费：`WorkflowInfoPanel()`
+
+---
+
+## 5. 工作流模型：WorkflowRun
+
+定义入口：`WorkflowRun` data class in `WorkflowRun.kt`。
+
+`WorkflowRun` 是一组 Task 的容器，表示一次完整处理流程。
+
+例如：
+
+- 一个 `bilibili_download_transcode` 工作流
+- 一个 `FETCH_SUBTITLE -> WEBEN_CONCEPT_EXTRACT` 工作流
+
+### 5.1 核心字段
 
 | 字段 | 说明 |
-|------|------|
-| `created_at` | 创建时间（Unix 秒） |
-| `claimed_at` | 被认领时间 |
-| `started_at` | 开始执行时间（进入 `running` 时记录） |
-| `completed_at` | 完成时间（进入 `completed`/`failed`/`cancelled` 时记录） |
-| `heartbeat_at` | Worker 最后心跳时间（预留，Phase 3 死亡检测用） |
+|---|---|
+| `id` | 工作流运行实例 ID |
+| `material_id` | 关联素材 ID |
+| `template` | 工作流模板名 |
+| `status` | 汇总状态 |
+| `total_tasks` | 子任务总数 |
+| `done_tasks` | 已完成任务数 |
+| `created_at` | 创建时间 |
+| `completed_at` | 完成时间 |
+
+### 5.2 与 Task 的关系
+
+```mermaid
+erDiagram
+    WorkflowRun ||--o{ Task : contains
+    WorkflowRun {
+        string id
+        string material_id
+        string template
+        string status
+        int total_tasks
+        int done_tasks
+    }
+    Task {
+        string id
+        string workflow_run_id
+        string type
+        string status
+        string depends_on
+        int progress
+    }
+```
+
+注意：
+
+- `WorkflowRun` **不直接保存任务列表**，需要通过 `TaskRepo.listByWorkflowRun()` 查询
+- `WorkflowRun.status / done_tasks / total_tasks` **不是调用方手动维护**，而是 `WorkflowRunRepo.recalculate()` 根据 task 表汇总计算
+
+对应类 / 函数：
+
+- 数据模型：`WorkflowRun`
+- 汇总入口：`WorkflowRunRepo.recalculate()` / `WorkflowRunDb.recalculate()`
+- 查询入口：`WorkflowRunRepo.listActiveByMaterial()`、`WorkflowRunRepo.listHistoryByMaterial()`
 
 ---
 
-## Task 状态机
+## 6. Task 状态机
+
+实际流转逻辑主要在 `WorkerEngine.dispatch()` 与 `TaskRepo.updateStatus()` 的配合里。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending : 创建
-    pending --> claimed : claimNext()（Worker 原子认领）
-    claimed --> running : Executor 开始执行
-    running --> completed : 执行成功
-    running --> failed : 执行失败且重试耗尽
-    failed --> pending : retry_count < max_retries（自动重新入队）
-    running --> cancelled : 用户取消（running 任务）
-    pending --> cancelled : 用户取消（级联取消）
-    claimed --> pending : 启动恢复（APP 重启后重新入队）
-    running --> failed : 启动恢复（APP 重启后标记失败）
+    [*] --> pending : create
+    pending --> claimed : claimNext()
+    claimed --> running : executor.execute()
+    running --> completed : success
+    running --> failed : failed and no retry
+    failed --> pending : retry_count < max_retries
+    pending --> cancelled : user cancel / blocked by failed dependency
+    claimed --> cancelled : workflow cancel
+    running --> cancelled : cancel signal -> CANCELLED
 ```
 
-### 状态说明
+### 6.1 各状态含义
 
-| 状态 | 含义 |
-|------|------|
-| `pending` | 等待被认领，满足依赖条件后可被 `claimNext()` 取走 |
-| `claimed` | 已被 Worker 认领，尚未开始执行（过渡态，通常极短暂） |
-| `running` | 正在执行中，可能处于暂停状态（`is_paused=true`） |
-| `completed` | 执行成功，`result` 字段含输出数据 |
-| `failed` | 执行失败且重试次数耗尽，永久终态 |
-| `cancelled` | 用户主动取消，永久终态 |
+| 状态 | 说明 |
+|---|---|
+| `pending` | 等待执行，且尚未被 Worker 认领 |
+| `claimed` | 已认领，等待进入执行逻辑 |
+| `running` | 正在执行 |
+| `completed` | 执行成功 |
+| `failed` | 执行失败且不可再重试 |
+| `cancelled` | 用户取消或依赖失败导致级联取消 |
 
-> `pending` 和 `claimed` 在前端统一展示为"等待中"；`running` 且 `is_paused=true` 展示为"已暂停"。
+### 6.2 前端展示口径
+
+前端并不 1:1 展示底层状态：
+
+- `pending + claimed`：都可视为“等待中 / 排队中”
+- `running + is_paused=true`：展示为“已暂停”
+- `completed + result.skipped=true`：展示为“已跳过”
+- `error_type = AWAITING_ASR_CONFIG`：展示为“等待配置”
+
+对应函数：
+
+- 核心流转：`WorkerEngine.dispatch()`
+- 前端状态映射：`getStatus()` in `WorkflowInfoPanel.tsx`
 
 ---
 
-## WorkflowRun 数据模型
+## 7. DAG 调度：depends_on 如何工作
 
-定义位于 `shared/src/commonMain/kotlin/.../db/WorkflowRun.kt`。
+Fredica 当前没有单独的工作流编排器；**任务 DAG 直接由 `Task.depends_on` + `claimNext()` 实现**。
 
-一次 `WorkflowRun` 代表对某个素材执行一次完整处理流程，是一组 `Task` 的容器。
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | String (UUID) | 运行实例唯一标识 |
-| `material_id` | String | 关联素材 ID |
-| `template` | String | 工作流模板标识，如 `manual_download_bilibili_video` |
-| `status` | String | 汇总状态（见下方状态机） |
-| `total_tasks` | Int | 子任务总数（由 `recalculate()` 维护） |
-| `done_tasks` | Int | 已完成子任务数（`completed` 状态的任务数） |
-| `created_at` | Long | 创建时间（Unix 秒） |
-| `completed_at` | Long? | 进入 `completed` 状态的时间 |
-
-### WorkflowRun 状态机
+### 7.1 典型例子
 
 ```mermaid
-stateDiagram-v2
-    [*] --> pending : 创建
-    pending --> running : 有任意 Task 开始执行
-    running --> completed : 所有 Task 均 completed
-    running --> failed : 任意 Task 永久 failed
-    running --> cancelled : 用户主动取消
+flowchart TD
+    A[DOWNLOAD_BILIBILI_VIDEO] --> B[TRANSCODE_MP4]
 ```
 
-`WorkflowRun` 的状态**不由调用方直接写入**，而是由 `WorkflowRunRepo.recalculate()` 根据子任务实际状态汇总计算，在每次 Task 状态变更后由 `WorkerEngine` 触发。
+或：
+
+```mermaid
+flowchart TD
+    A[FETCH_SUBTITLE] --> B[WEBEN_CONCEPT_EXTRACT]
+```
+
+### 7.2 调度规则
+
+`TaskRepo.claimNext()` 只认领同时满足下列条件的任务：
+
+1. `status = pending`
+2. `depends_on` 里的任务全部 `completed`
+3. 按 `priority DESC, created_at ASC` 取下一条
+
+这意味着：
+
+- 上游没完成，下游不会被执行
+- 上游失败后，下游 pending 任务会在后续 `recalculate()` 中被批量取消
+- 不需要额外 DAG 引擎，也能实现线性或树状流水线
+
+对应函数：
+
+- 任务认领：`TaskRepo.claimNext()`
+- 被阻塞任务取消：`TaskRepo.cancelBlockedTasks()`
+- 工作流汇总：`WorkflowRunDb.recalculate()`
 
 ---
 
-## DAG 调度
+## 8. 工作流是如何创建出来的
 
-`Task.depends_on` 是一个 JSON 数组，存放前置任务 ID：
+当前推荐路径不是直接手写 SQL / DB 操作，而是：
+
+```text
+Route -> xxxWorkflowService -> CommonWorkflowService.createWorkflow()
+```
+
+### 8.1 真实代码：Bilibili 下载 + 转码
+
+`MaterialWorkflowService.startBilibiliDownloadTranscode()` 会：
+
+1. 先检查当前素材是否已有活跃下载/转码任务
+2. 构造两个 `TaskDef`
+3. 声明 `TRANSCODE_MP4.dependsOnIds = [downloadTaskId]`
+4. 调 `CommonWorkflowService.createWorkflow()` 一次性写入 `workflow_run + task`
+
+```mermaid
+flowchart TD
+    A[startBilibiliDownloadTranscode()] --> B{已有活跃任务?}
+    B -- 是 --> C[返回 AlreadyActive]
+    B -- 否 --> D[生成 downloadTaskId / transcodeTaskId]
+    D --> E[构造 payload]
+    E --> F[createWorkflow()]
+    F --> G[create WorkflowRun]
+    F --> H[create DOWNLOAD_BILIBILI_VIDEO]
+    F --> I[create TRANSCODE_MP4\ndependsOnIds=[downloadTaskId]]
+```
+
+对应函数：
+
+- 模板入口：`MaterialWorkflowService.startBilibiliDownloadTranscode()`
+- 通用创建：`CommonWorkflowService.createWorkflow()`
+
+### 8.2 CommonWorkflowService 的职责
+
+`CommonWorkflowService.createWorkflow()` 负责：
+
+- 生成 `workflowRunId`
+- 插入 `WorkflowRun`
+- 将 `TaskDef.dependsOnIds` 序列化为 `depends_on` JSON 数组
+- 批量插入所有 Task
+
+对应函数：`CommonWorkflowService.createWorkflow()`
+
+---
+
+## 9. WorkerEngine：调度与执行中枢
+
+定义入口：`WorkerEngine` object。
+
+`WorkerEngine` 是整个任务系统的核心：
+
+- 轮询队列
+- 原子认领任务
+- 控制最大并发
+- 调用对应 `TaskExecutor`
+- 处理成功 / 失败 / 重试 / 取消
+- 触发 `WorkflowRun.recalculate()`
+
+### 9.1 主循环结构
+
+```mermaid
+flowchart TD
+    A[start()] --> B[runStartupRecovery()]
+    B --> C[claimNext(WORKER_ID)]
+    C -->|无任务| D[退避轮询]
+    C -->|有任务| E[Semaphore 限流]
+    E --> F[dispatch(task)]
+    F --> G{找到 executor?}
+    G -- 否 --> H[finishFailed()]
+    G -- 是 --> I{check_skip && canSkip?}
+    I -- 是 --> J[completed skipped]
+    I -- 否 --> K[updateStatus(running)]
+    K --> L[executor.execute(task)]
+    L --> M{结果}
+    M -- success --> N[completed]
+    M -- cancelled --> O[cancelled]
+    M -- retry --> P[pending + retry_count+1]
+    M -- final fail --> Q[failed]
+    N --> R[afterTaskFinished()]
+    O --> R
+    P --> R
+    Q --> R
+```
+
+### 9.2 关键实现点
+
+#### claim + dispatch
+
+- `start()` 中每轮调用 `TaskService.repo.claimNext(WORKER_ID)`
+- 认领后使用 `Semaphore(maxWorkers)` 控制并发
+- 真正执行逻辑在 `dispatch(task)`
+
+对应函数：`WorkerEngine.start()`、`WorkerEngine.dispatch()`
+
+#### check_skip
+
+如果 `payload.check_skip = true` 且 `executor.canSkip(task)` 返回真，则：
+
+- 不进入 `running`
+- 直接标记 `completed`
+- `result = {"skipped": true}`
+
+对应函数：`WorkerEngine.dispatch()`、`TaskExecutor.canSkip()`
+
+#### 重试策略
+
+失败后是否重试取决于：
+
+- `task.retryCount < task.maxRetries`
+- `errorType != AWAITING_CREDENTIAL`
+
+可重试时会：
+
+- `incrementRetry(task.id)`
+- `updateStatus(..., status="pending")`
+- 等下一轮重新 claim
+
+对应函数：`WorkerEngine.dispatch()`、`TaskRepo.incrementRetry()`、`TaskRepo.updateStatus()`
+
+---
+
+## 10. Kotlin Executor 与 Python 长任务的衔接
+
+很多任务不是在 Kotlin 里直接算完，而是由 Kotlin Executor 调 Python 服务执行。
+
+典型桥接点是：`PythonUtil.Py314Embed.PyUtilServer.websocketTask()`。
+
+### 10.1 调用关系
+
+当前已实现的 Kotlin 执行器分两类：
+
+```mermaid
+flowchart TD
+    A[WorkerEngine.dispatch()] --> B[TaskExecutor.execute(task)]
+    B --> C[纯 Kotlin / JVM 本地逻辑]
+    B --> D[WebSocketTaskExecutor.execute()]
+    D --> E[注册 cancelSignal / pauseResumeChannels]
+    E --> F[executeWithSignals()]
+    F --> G[PythonUtil.PyUtilServer.websocketTask()]
+    G --> H[Python TaskEndpoint]
+```
+
+其中：
+
+- `TaskExecutor` 定义统一执行接口
+- `WebSocketTaskExecutor` 负责自动注册/注销取消与暂停信号
+- 只有需要 Python 长任务协议的 Executor 才会走 `websocketTask()` 这条链
+
+对应类 / 函数：
+
+- 接口：`TaskExecutor`
+- 基类：`WebSocketTaskExecutor.execute()`、`WebSocketTaskExecutor.executeWithSignals()`
+- Python 桥：`PythonUtil.PyUtilServer.websocketTask()`
+
+### 10.2 Python WebSocket 协议
+
+Kotlin 发送给 Python 的控制命令：
 
 ```json
-["task-uuid-a", "task-uuid-b"]
+{"command":"init_param_and_run","data":{}}
+{"command":"pause"}
+{"command":"resume"}
+{"command":"cancel"}
+{"command":"status"}
 ```
 
-`TaskRepo.claimNext()` 只会认领满足以下条件的任务：
-
-1. `status = 'pending'`
-2. `depends_on` 中所有任务均已 `completed`
-3. 按 `priority DESC`、`created_at ASC` 取第一条（原子操作，防并发重复认领）
-
-这样，一个 `WorkflowRun` 下的多个 `Task` 自然形成有向无环图（DAG），无需额外调度器。
-
-### 典型流水线示例
-
-```
-FETCH_SUBTITLE ──→ WEBEN_CONCEPT_EXTRACT
-```
-
-```
-DOWNLOAD_VIDEO ──→ TRANSCODE_MP4
-```
-
----
-
-## TaskExecutor 接口
-
-定义位于 `shared/src/commonMain/kotlin/.../worker/TaskExecutor.kt`。
-
-```kotlin
-interface TaskExecutor {
-    val taskType: String          // 与 task.type 对应，如 "DOWNLOAD_VIDEO"
-
-    suspend fun execute(task: Task): ExecuteResult
-
-    fun canSkip(task: Task): Boolean = false   // 前置结果已存在时跳过
-
-    suspend fun onTaskFailed(task: Task, result: ExecuteResult) {}  // 失败/取消回调
-}
-```
-
-### ExecuteResult
-
-```kotlin
-data class ExecuteResult(
-    val result: String = "{}",    // 成功时写入 task.result 的 JSON
-    val error: String? = null,    // 失败时的错误信息
-    val errorType: String? = null // 错误类型标签
-)
-```
-
-`error == null` 表示成功，否则失败。`errorType` 特殊值：
-
-| errorType | 含义 |
-|-----------|------|
-| `CANCELLED` | 用户主动取消，不触发重试 |
-| `AWAITING_CREDENTIAL` | 等待用户配置凭据，不自动重试 |
-| `PAYLOAD_ERROR` | payload 解析失败，不重试 |
-| 其他 | 可重试（受 `max_retries` 限制） |
-
-### onTaskFailed 回调
-
-当任务永久失败或被取消时，`WorkerEngine` 会调用 `executor.onTaskFailed()`，供 Executor 处理业务副作用（如将关联的 `WebenSource.analysisStatus` 重置为 `"failed"`）。
-
-默认空实现，不需要副作用的 Executor 无需覆写。
-
----
-
-## WorkerEngine 调度引擎
-
-定义位于 `shared/src/commonMain/kotlin/.../worker/WorkerEngine.kt`。
-
-```
-启动
-  └─ runStartupRecovery()（同步，见下文）
-      └─ 主轮询协程（每 1s 尝试 claimNext）
-           └─ 认领成功 → launch 独立协程 → Semaphore(maxWorkers) 限并发
-                └─ dispatch(task)
-                     ├─ canSkip? → completed（跳过）
-                     ├─ running → execute()
-                     ├─ 成功 → completed → recalculate()
-                     ├─ 失败可重试 → pending（retry_count++）
-                     └─ 失败不可重试 → failed → onTaskFailed() → recalculate()
-```
-
-队列为空时自动退避到 5s 轮询间隔，减少空轮询开销。
-
----
-
-## 任务控制：取消 / 暂停 / 恢复
-
-### 取消
-
-- **pending/claimed 任务**：直接更新 DB 状态为 `cancelled`（`TaskRepo.cancelPendingTasksByWorkflowRun()`）
-- **running 任务**：通过 `TaskCancelService` 向 Executor 发送 `CompletableDeferred<Unit>` 取消信号；Executor 检测到信号后返回 `ExecuteResult(errorType="CANCELLED")`
-
-```kotlin
-// Executor 内部检测取消
-if (cancelSignal.isCompleted) return@withContext null
-```
-
-### 暂停 / 恢复
-
-通过 `TaskPauseResumeService` 管理每个运行中任务的 Channel 对：
-
-```kotlin
-data class TaskPauseResumeChannels(
-    val pause: Channel<Unit>,
-    val resume: Channel<Unit>,
-)
-```
-
-Executor 在长任务循环中监听 `pauseChannel`，收到信号后挂起等待 `resumeChannel`。
-
-### Python 主动发起暂停（pause_request / resume_request）
-
-上述暂停/恢复信号均由**外部（前端/Kotlin）主动下发**给 Python。但某些场景下 Python 需要反向通知 Kotlin，例如：
-
-- GPU 显存不足，需要等待资源释放后再继续
-- 子进程检测到外部依赖未就绪，主动挂起等待
-
-为此，WebSocket 协议新增两种**服务端推送消息**（Python → Kotlin）：
+Python 发回 Kotlin 的关键消息：
 
 ```json
-{"type": "pause_request", "reason": "gpu_oom"}
-{"type": "resume_request"}
+{"type":"progress","percent":35,"statusText":"正在下载...","pausable":true}
+{"type":"pause_request","reason":"gpu_oom"}
+{"type":"resume_request"}
+{"type":"done", ...}
+{"type":"error","message":"..."}
 ```
 
-#### 信号流
+### 10.3 Kotlin 侧如何消费这些消息
 
-**EventLoop 版**（`TaskEndpointInEventLoopThread`）：
+`websocketTask()` 会把 Python 消息映射成回调：
 
-```
-_run() 调 await self.request_pause(reason)
-  → send_json({"type":"pause_request", "reason":...})  → Kotlin onPauseRequest 回调
-  → wait_if_paused()  ← 挂起，等 Kotlin 回发 resume 命令（用户手动恢复）
-```
+| Python 消息 | Kotlin 回调 | 常见用途 |
+|---|---|---|
+| `progress.percent` | `onProgress(Int)` | 更新 `task.progress` |
+| `progress.statusText` | `onProgressLine(String)` | 更新 `task.status_text` |
+| `progress.pausable` | `onPausable(Boolean)` | 更新 `task.is_pausable` |
+| `pause_request` | `onPauseRequest(reason)` | 更新 `task.is_paused=true` |
+| `resume_request` | `onResumeRequest()` | 更新 `task.is_paused=false` |
+| `done` | 返回结果字符串 | 作为 `ExecuteResult.result` |
+| `error` | 抛异常 | 进入失败处理 |
 
-**SubProcess 版**（`TaskEndpointInSubProcess`）：
+对应函数：`PythonUtil.PyUtilServer.websocketTask()`
 
-```
-子进程调 subprocess_request_pause(status_queue, resume_event, reason)
-  → resume_event.clear()（子进程自己先清，确保后续 wait() 会阻塞）
-  → status_queue.put({"type":"pause_request", "reason":...})
-      ↓
-父进程 _on_subprocess_message 识别特殊消息
-  → send_json({"type":"pause_request"})  → Kotlin onPauseRequest 回调
-  → 同步 _is_pause 标志位
-      ↓
-子进程 resume_event.wait()  ← 挂起
-  ← 用户手动恢复 → Kotlin 发 resume 命令 → call_resume() set resume_event → 子进程解除
-```
+---
 
-> 子进程版本的关键时序：**先 `clear` 再 `put` 再 `wait`**，避免父进程还未处理消息时子进程的 `wait()` 因 event 仍为 set 而直接返回。
+## 11. Python 任务封装：TaskEndpoint
 
-#### Kotlin 侧（websocketTask 新增参数）
+Python 端不是裸写 WebSocket，而是统一继承 `TaskEndpoint` 基类。
 
-```kotlin
-suspend fun websocketTask(
-    // ...原有参数...
-    onPauseRequest: (suspend (reason: String) -> Unit)? = null,
-    onResumeRequest: (suspend () -> Unit)? = null,
-): String?
+定义入口：`TaskEndpoint` in `task_endpoint_util.py`。
+
+### 11.1 两种运行形态
+
+```mermaid
+flowchart TD
+    A[TaskEndpoint] --> B[TaskEndpointInEventLoopThread]
+    A --> C[TaskEndpointInSubProcess]
+    B --> D[_run(param)]
+    C --> E[spawn 子进程]
+    E --> F[status_queue / cancel_event / resume_event]
 ```
 
-#### Executor 使用示例
+#### TaskEndpointInEventLoopThread
 
-```kotlin
-val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
-    pth = "/asr/transcribe",
-    paramJson = "...",
-    onProgress = { pct -> TaskService.repo.updateProgress(task.id, pct) },
-    onPauseRequest = { reason ->
-        TaskService.repo.updatePaused(task.id, true)
-        logger.info("Task ${task.id} self-paused by Python: $reason")
-    },
-    onResumeRequest = {
-        TaskService.repo.updatePaused(task.id, false)
-    },
-    cancelSignal = cancelSignal,
-    pauseChannel = channels.pause,
-    resumeChannel = channels.resume,
-)
+适合：
+
+- 直接在 asyncio 事件循环中跑的协程任务
+- 需要在协程里频繁 `await wait_if_paused()` 的场景
+
+关键 API：
+
+- `report_progress(percent)`
+- `report_status(data)`
+- `request_pause(reason)`
+- `request_resume()`
+
+对应类 / 函数：`TaskEndpointInEventLoopThread`、`wait_if_paused()`、`request_pause()`、`request_resume()`
+
+#### TaskEndpointInSubProcess
+
+适合：
+
+- CPU/GPU 重任务
+- 需要独立 Python 子进程的任务
+- 使用 `multiprocessing.Queue/Event` 与父进程通信
+
+关键机制：
+
+- `status_queue`：子进程上报状态
+- `cancel_event`：父进程通知取消
+- `resume_event`：父进程控制暂停/恢复
+
+对应类 / 函数：`TaskEndpointInSubProcess`、`_run_queue_reader()`、`subprocess_request_pause()`
+
+### 11.2 为什么前端能看到“可暂停 / 已暂停”
+
+因为 Python 端点会在 progress 消息里透传“当前能不能暂停”，Kotlin 再写回 task 表：
+
+```text
+Python _does_support_pause()
+  -> progress.pausable
+  -> Kotlin onPausable(Boolean)
+  -> task.is_pausable
+  -> WorkerTaskListRoute
+  -> WorkflowInfoPanel 按钮可用性
 ```
 
-#### 两种子场景
+对应函数：`TaskEndpoint._does_support_pause()`、`PythonUtil.PyUtilServer.websocketTask()`、`TaskRepo.updatePausable()`
 
-| 场景 | Python 行为 | Kotlin 回调职责 |
-|------|------------|----------------|
-| 主动暂停，等用户手动恢复 | 发 `pause_request` + `wait_if_paused()` | `onPauseRequest` 更新 `is_paused=true`；用户点恢复后正常走 `TaskPauseResumeService.resume()` |
-| 自行暂停又自行恢复（等资源） | 发 `pause_request` + `wait`，资源就绪后发 `resume_request` | `onPauseRequest`/`onResumeRequest` 仅同步 `is_paused` 状态，无需用户介入 |
+---
 
-### 信号注册生命周期
+## 12. 取消 / 暂停 / 恢复 的真实链路
 
-`WebSocketTaskExecutor` 基类统一管理信号的注册与注销，Executor 子类无需手动处理：
+### 12.1 用户点击“暂停”
 
-```kotlin
-// 基类 execute() 内部
-val cancelSignal = TaskCancelService.register(task.id)
-val channels = TaskPauseResumeService.register(task.id)
-try {
-    return executeWithSignals(task, cancelSignal, channels)
-} finally {
-    TaskCancelService.unregister(task.id)
-    TaskPauseResumeService.unregister(task.id)
-}
+```mermaid
+sequenceDiagram
+    participant UI as WorkflowInfoPanel
+    participant API as TaskPauseRoute.handler()
+    participant PR as TaskPauseResumeService
+    participant EX as WebSocketTaskExecutor
+    participant KT as websocketTask()
+    participant PY as TaskEndpoint
+
+    UI->>API: POST TaskPauseRoute
+    API->>PR: pause(taskId)
+    API->>API: updatePaused(true)
+    PR-->>EX: pauseChannel 收到信号
+    EX->>KT: 传入 pauseChannel
+    KT->>PY: send pause
+    PY->>PY: call_pause()
+```
+
+对应函数：
+
+- 前端触发：`handlePause()` in `WorkflowInfoPanel.tsx`
+- 路由：`TaskPauseRoute.handler()`
+- Python 桥：`PythonUtil.PyUtilServer.websocketTask()`
+- Python 处理：`TaskEndpoint.call_pause()`
+
+### 12.2 用户点击“恢复”
+
+```mermaid
+sequenceDiagram
+    participant UI as WorkflowInfoPanel
+    participant API as TaskResumeRoute.handler()
+    participant PR as TaskPauseResumeService
+    participant EX as WebSocketTaskExecutor
+    participant KT as websocketTask()
+    participant PY as TaskEndpoint
+
+    UI->>API: POST TaskResumeRoute
+    API->>PR: resume(taskId)
+    API->>API: updatePaused(false)
+    PR-->>EX: resumeChannel 收到信号
+    EX->>KT: 传入 resumeChannel
+    KT->>PY: send resume
+    PY->>PY: call_resume()
+```
+
+对应函数：
+
+- 前端触发：`handleResume()` in `WorkflowInfoPanel.tsx`
+- 路由：`TaskResumeRoute.handler()`
+- Python 桥：`PythonUtil.PyUtilServer.websocketTask()`
+- Python 处理：`TaskEndpoint.call_resume()`
+
+### 12.3 用户点击“取消”
+
+```mermaid
+sequenceDiagram
+    participant UI as WorkflowInfoPanel
+    participant API as TaskCancelRoute.handler()
+    participant CS as TaskCancelService
+    participant EX as WebSocketTaskExecutor
+    participant KT as websocketTask()
+    participant WE as WorkerEngine.dispatch()
+
+    UI->>API: POST TaskCancelRoute
+    API->>API: 查找同一 WorkflowRun 活跃任务
+    API->>CS: cancel(task.id)
+    CS-->>EX: cancelSignal 完成
+    EX->>KT: 传入 cancelSignal
+    KT-->>EX: 返回 cancelled / null
+    EX-->>WE: ExecuteResult(errorType=CANCELLED)
+    WE->>WE: updateStatus(cancelled)
+```
+
+如果目标任务还处于 `pending / claimed`，还没有注册信号，`TaskCancelRoute` 会直接把 DB 状态改成 `cancelled`。
+
+对应函数：
+
+- 前端触发：`handleCancel()` in `WorkflowInfoPanel.tsx`
+- 路由：`TaskCancelRoute.handler()`
+- 取消信号：`TaskCancelService.cancel()`
+- 执行收尾：`WorkerEngine.dispatch()`
+
+### 12.4 Python 主动请求暂停
+
+这是当前架构里非常值得说明的一点：暂停不总是前端主动发起，Python 也可以主动要求 Kotlin 把任务标记为暂停。
+
+```mermaid
+sequenceDiagram
+    participant PY as Python worker
+    participant EP as TaskEndpoint
+    participant KT as websocketTask()
+    participant EX as Executor callback
+    participant DB as TaskRepo
+    participant UI as WorkflowInfoPanel
+
+    PY->>EP: request_pause()
+    EP->>KT: pause_request
+    KT->>EX: onPauseRequest(reason)
+    EX->>DB: updatePaused(true)
+    UI->>DB: 下次轮询读取任务
+    DB-->>UI: is_paused=true
+```
+
+对应函数：
+
+- Python 发起：`TaskEndpointInEventLoopThread.request_pause()`、`subprocess_request_pause()`
+- Kotlin 消费：`PythonUtil.PyUtilServer.websocketTask()`
+- Executor 回调：各 Executor 传入的 `onPauseRequest`
+
+---
+
+## 13. WorkflowRun 汇总状态如何计算
+
+`WorkflowRun` 的状态并不是前端、路由或 Executor 手动写进去的，而是由 `WorkflowRunRepo.recalculate()` 汇总 Task 状态后得到。
+
+### 13.1 触发时机
+
+`WorkerEngine.afterTaskFinished()` 会在每次任务状态发生关键变化后调用：
+
+- completed
+- failed
+- cancelled
+- retry 回到 pending
+- skipped completed
+
+对应函数：`WorkerEngine.afterTaskFinished()`、`WorkflowRunDb.recalculate()`
+
+### 13.2 汇总语义
+
+`WorkflowRunDb.recalculate()` 的优先级大致是：
+
+- 有任何 failed Task → `failed`
+- 全部 completed → `completed`
+- 有 running / claimed / pending → `running`
+- 全部 cancelled → `cancelled`
+- 否则 → `pending`
+
+同时还会维护：
+
+- `total_tasks`
+- `done_tasks`
+- `completed_at`
+
+### 13.3 一个重要的边界：阻塞任务取消
+
+如果上游任务失败，则下游 pending 任务永远无法满足 DAG 条件。为了避免整个工作流卡死：
+
+- `WorkflowRunDb.recalculate()` 会先调用 `TaskRepo.cancelBlockedTasks()`
+- 把“依赖了 failed/cancelled 上游”的 pending 任务批量标记为 `cancelled`
+- 再进行状态汇总
+
+对应函数：`WorkflowRunDb.recalculate()`、`TaskRepo.cancelBlockedTasks()`
+
+---
+
+## 14. 启动恢复：为什么 APP 重启后任务不会乱掉
+
+`WorkerEngine.start()` 返回前，会先同步执行 `runStartupRecovery()`：
+
+```mermaid
+flowchart TD
+    A[WorkerEngine.start()] --> B[snapshotNonTerminalTasks()]
+    B --> C[resetStaleTasks()]
+    C --> D[recordRestartSession()]
+    D --> E[failOrphanedTasks()]
+    E --> F[reconcileNonTerminal()]
+    F --> G[开始正常轮询]
+```
+
+当前恢复步骤：
+
+| 步骤 | 操作 |
+|---|---|
+| 1 | 快照所有非终态任务，用于重启日志 |
+| 2 | 重置僵尸任务 |
+| 3 | 记录 `restart_task_log` |
+| 4 | 清理孤立任务 |
+| 5 | 对账所有非终态 `WorkflowRun` |
+
+对应函数：`WorkerEngine.runStartupRecovery()`、`TaskRepo.resetStaleTasks()`、`TaskRepo.failOrphanedTasks()`、`WorkflowRunRepo.reconcileNonTerminal()`
+
+这一步很关键，因为 Fredica 是桌面应用，强退 / 崩溃 / 热重启都比较常见。
+
+---
+
+## 15. 真实页面里的组件封装关系
+
+如果要从前端理解任务模型，建议从这几个组件/工具文件入手：
+
+```mermaid
+flowchart TD
+    A[具体页面 / 业务组件] --> B[startMaterialWorkflow()]
+    A --> C[WorkflowInfoPanel]
+    B --> D[MaterialWorkflowRoute]
+    C --> E[WorkerTaskListRoute]
+    C --> F[TaskPauseRoute / TaskResumeRoute / TaskCancelRoute]
+```
+
+### 15.1 `materialWorkflowApi.ts`
+
+职责：
+
+- 封装 `MaterialWorkflowRoute`
+- 封装 `MaterialWorkflowStatusRoute`
+- 为页面提供 `startMaterialWorkflow()`、`fetchActiveWorkflows()`
+
+对应函数：`startMaterialWorkflow()`、`fetchActiveWorkflows()`、`findActiveEncodeWorkflowRunId()`
+
+### 15.2 `WorkflowInfoPanel.tsx`
+
+职责：
+
+- 查询任务列表
+- 计算当前活跃任务状态
+- 展示每步任务卡片
+- 提供暂停 / 恢复 / 取消按钮
+- 识别 `skipped`、`AWAITING_ASR_CONFIG`、`is_paused` 等 UI 特殊态
+
+对应函数：`WorkflowInfoPanel()`、`TaskList()`、`deriveActiveState()`、`getStatus()`
+
+这意味着：**当前任务系统的前端主视图是“Task 列表视图”，不是 Workflow 图视图**。所以文档和调试时都应优先围绕 `Task` 状态来理解问题。
+
+---
+
+## 16. 职责边界
+
+这是代码里反复强调的一组边界，文档里也建议牢记：
+
+| 类/模块 | 只负责什么 | 不负责什么 |
+|---|---|---|
+| `TaskDb` / `TaskRepo` | task 表 CRUD、claim、progress、pause 等 | `WorkflowRun` 汇总 |
+| `WorkflowRunDb` / `WorkflowRunRepo` | workflow_run 表、`recalculate()` | 单个 Task 状态流转 |
+| `CommonWorkflowService` | 批量创建 `WorkflowRun + Task` | 执行任务 |
+| `MaterialWorkflowService` | 业务模板、payload、幂等检查 | HTTP 解析 |
+| `WorkerEngine` | 调度、执行、重试、收尾、触发 recalculate | 具体业务逻辑 |
+| `TaskExecutor` | 单个任务的业务执行 | 全局调度 |
+| `PythonUtil.PyUtilServer.websocketTask()` | Kotlin 与 Python 长任务桥接 | 任务创建 / 状态汇总 |
+| `TaskEndpoint` | Python 侧 WebSocket 控制协议封装 | Kotlin 侧数据库更新 |
+
+---
+
+## 17. 调试建议：遇到任务问题时先看哪里
+
+### 17.1 启动了但没执行
+
+优先检查：
+
+1. `MaterialWorkflowRoute.handler()` 是否真正创建了任务
+2. `MaterialWorkflowService` 生成的 `dependsOnIds` 是否正确
+3. `TaskRepo.claimNext()` 是否能认领到任务
+4. `WorkerEngine.start()` 是否已注册对应 `TaskExecutor`
+
+### 17.2 前端显示一直卡住
+
+优先检查：
+
+1. `WorkerTaskListRoute.handler()` 返回的 `status / progress / is_paused / status_text`
+2. Executor 是否调用了 `TaskRepo.updateProgress()` / `TaskRepo.updatePaused()` / `TaskRepo.updateStatusText()`
+3. Python progress 帧是否包含 `percent`、`statusText`、`pausable`
+
+### 17.3 暂停/恢复无效
+
+优先检查：
+
+1. 任务是否走 `WebSocketTaskExecutor`
+2. Executor 是否把 `pauseChannel` / `resumeChannel` 传给 `websocketTask()`
+3. Python 端点是否实现 `call_pause()` / `call_resume()` 或 `resume_event.wait()`
+4. 前端按钮是否被 `is_pausable=false` 禁用
+
+---
+
+## 18. 当前模型的定位
+
+当前 Fredica 的任务系统本质上是：
+
+- **数据模型上**：`WorkflowRun` + `Task`
+- **调度上**：`depends_on` 驱动的轻量 DAG
+- **执行上**：Kotlin `TaskExecutor` 统一入口
+- **长任务桥接上**：Kotlin `websocketTask()` ↔ Python `TaskEndpoint`
+- **前端展示上**：轮询 `Task` 列表并映射到 UI 状态
+
+这也是为什么很多问题都能沿着下面这条链定位：
+
+```text
+前端按钮/面板
+  -> Kotlin Route
+  -> WorkflowService / TaskRepo
+  -> WorkerEngine
+  -> TaskExecutor
+  -> PythonUtil.websocketTask
+  -> Python TaskEndpoint / subprocess
+  -> progress/error/done 回流
+  -> task 表
+  -> WorkerTaskListRoute
+  -> 前端轮询展示
 ```
 
 ---
 
-## 启动恢复
+## 19. 相关代码入口
 
-APP 强杀后重启时，`WorkerEngine.start()` 在启动轮询前同步执行四道恢复保护：
+### Kotlin
 
-| 步骤 | 操作 | 原因 |
-|------|------|------|
-| 1. 快照 | 记录所有非终态任务 | 为重启日志提供原始状态 |
-| 2. 重置僵尸任务 | `running → failed`，`claimed → pending` | 执行结果不确定，`running` 标记失败；`claimed` 可安全重新入队 |
-| 3. 写重启日志 | 写入 `restart_task_log` 表 | 可追溯哪些任务被中断 |
-| 4. 孤立任务对账 | 无对应 `WorkflowRun` 的非终态任务 → `failed` | 防止僵尸任务永远占用队列 |
-| 5. WorkflowRun 对账 | `reconcileNonTerminal()` 批量修正汇总状态 | 补偿上次会话中 `recalculate()` 失败遗留的落后状态 |
+- `shared/src/commonMain/kotlin/com/github/project_fredica/db/Task.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/db/WorkflowRun.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/db/CommonWorkflowService.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/db/MaterialWorkflowService.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/worker/TaskExecutor.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/worker/WorkerEngine.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/MaterialWorkflowRoute.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/WorkerTaskListRoute.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskPauseRoute.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskResumeRoute.kt`
+- `shared/src/commonMain/kotlin/com/github/project_fredica/api/routes/TaskCancelRoute.kt`
+- `shared/src/jvmMain/kotlin/com/github/project_fredica/worker/WebSocketTaskExecutor.kt`
+- `shared/src/jvmMain/kotlin/com/github/project_fredica/python/PythonUtil.kt`
 
-恢复步骤**同步完成后** `start()` 才返回，确保调用方在此后插入的新任务不会被误取消。
+### Frontend
 
----
+- `fredica-webui/app/util/materialWorkflowApi.ts`
+- `fredica-webui/app/components/ui/WorkflowInfoPanel.tsx`
 
-## 幂等键
+### Python
 
-`Task.idempotency_key` 防止并发重复提交相同任务。
-
-### 语义：只对活跃任务去重
-
-幂等键仅对**非终态**任务（`pending` / `claimed` / `running`）生效。已进入终态（`completed` / `failed` / `cancelled`）的任务不会阻塞相同 key 的新任务创建。
-
-```
-插入新任务时：
-  idempotency_key 有值
-    → 查询是否存在相同 key 且 status NOT IN (completed, failed, cancelled) 的任务
-    → 存在 → 跳过插入，logger.info 提示
-    → 不存在 → 正常插入
-  idempotency_key 为 null → 不做去重，直接插入
-```
-
-典型用法：以 `"${materialId}:DOWNLOAD_VIDEO"` 作为幂等键，确保同一素材的下载任务不会并发重复入队。任务完成后，相同 key 可以重新触发（例如用户手动重新处理）。
-
-> 已完成资源的跳过逻辑由 `TaskExecutor.canSkip()` 负责，不依赖幂等键。
+- `desktop_assets/common/fredica-pyutil/fredica_pyutil_server/util/task_endpoint_util.py`
 
 ---
 
-## 职责边界
+## 20. 未来计划
 
-| 类 | 职责 |
-|----|------|
-| `TaskDb` | 只操作 `task` 表，**不含** `recalculate()` |
-| `WorkflowRunDb` | 管理 `workflow_run` 表，含 `recalculate()` |
-| `WorkerEngine` | 任务完成后调用 `WorkflowRunService.repo.recalculate()`，**不是** `TaskService` |
-| `TaskCancelService` | 运行中任务取消信号注册表（`commonMain`） |
-| `TaskPauseResumeService` | 暂停/恢复 Channel 注册表（`commonMain`） |
-| `WebSocketTaskExecutor` | 信号注册/注销生命周期基类，Executor 子类继承后只需实现 `executeWithSignals()` |
+以下内容目前更适合视为**未来演进方向**，而不是当前已实现能力：
+
+- `WorkflowDefinition + WorkflowNodeRun`：把当前 `WorkflowRun + Task` 的轻量模型演进为更完整的图运行模型
+- 更细粒度的节点级运行信息、条件分支、中间节点停止能力
+- 多节点 / 节点亲和性 / 心跳与死亡检测等预留字段的真正启用
+
+这些方向在当前代码中已有部分注释或预留字段，但本文前面的链路说明都不依赖这些未来能力。
+
+其中最明确的一处代码说明见：`WorkflowRun.kt` 对 Phase 1.5 演进方向的注释。
