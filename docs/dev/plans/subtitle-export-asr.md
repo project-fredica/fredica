@@ -135,13 +135,118 @@ import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 
 | 文件 | 改动 |
 |------|------|
-| `fredica-webui/app/util/subtitleExport.ts` | **新建**：SRT 转换 + 下载工具函数 |
-| `fredica-webui/app/components/bilibili/BilibiliSubtitlePanel.tsx` | 新增"导出 SRT"按钮 |
+| `fredica-webui/app/util/subtitleExport.ts` | **新建**：SRT 转换 + 下载工具函数 ✅ |
+| `fredica-webui/app/components/bilibili/BilibiliSubtitlePanel.tsx` | 新增"导出 SRT"按钮 ✅ |
 | `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | 可选：纯文本导出入口 |
 
 ---
 
 ## 二、Faster-Whisper ASR 任务全流程设计
+
+### 2.0 前置条件：faster-whisper 自动安装
+
+#### 2.0.1 依赖关系澄清
+
+`faster-whisper` **不依赖 PyTorch**。其完整依赖树为：
+
+```
+faster-whisper
+├── ctranslate2>=4.0,<5   （依赖 setuptools / numpy / pyyaml，无 torch）
+├── huggingface_hub>=0.23
+├── tokenizers>=0.13,<1
+├── onnxruntime>=1.14,<2
+├── av>=11
+└── tqdm
+```
+
+GPU 推理依赖的是系统级 **cuBLAS 12 + cuDNN 9**（NVIDIA 驱动随附或单独安装），与 PyTorch 无关。`app-desktop-setting-torch-config.tsx` 页面管理的 Torch 环境是为其他功能准备的，ASR 不依赖它。
+
+因此：
+- **CPU 模式**：无任何前置条件，直接可用
+- **GPU 模式**：需要系统已装 cuBLAS 12 + cuDNN 9（不通过 pip 安装，属于驱动层）
+
+#### 2.0.2 自动安装 faster-whisper
+
+`faster-whisper` 属于懒安装：不加入 `requirements.txt`（避免每次启动都安装），而是在首次启动 ASR 工作流时由 Kotlin 端按需安装。
+
+**调用时机**：`ensureInstalled()` 必须在 **Executor 层**（`DOWNLOAD_WHISPER_MODEL` 或 `EXTRACT_AUDIO`）调用，而不是在 `MaterialWorkflowRoute` 的 HTTP handler 里调用。pip install 可能耗时数分钟，在 Route 层阻塞会导致前端请求超时。
+
+**重启行为**：`@Volatile installed` flag 仅在进程内有效，重启后会重新执行一次 `pip install`。这是有意为之——pip 会检测已安装版本并快速跳过，相当于每次启动做一次轻量验证，无需额外持久化状态。
+
+**安装机制**：`PythonUtil.Py314Embed` 已有 `runPythonSubprocess` + `pipLibDir` 的完整 pip 安装基础设施，只需在其上暴露一个公共的 `installPackage` 方法。并发安全由 `installPackage` 内部的 `Mutex` 负责，调用方无需自行加锁：
+
+```kotlin
+// PythonUtil.Py314Embed 新增公共方法
+// Mutex 在此作用域内，确保并发调用时 pip install 串行执行
+private val pipInstallMutex = Mutex()
+
+suspend fun installPackage(packageSpec: String) {
+    pipInstallMutex.withLock {
+        runPythonSubprocess(
+            listOf("-m", "pip", "install", "--no-input", "--target",
+                   AppUtil.Paths.pipLibDir.absolutePath, packageSpec)
+        ).await()
+    }
+}
+```
+
+**实现注意**：`runPythonSubprocess` 内部已用 `withContext(Dispatchers.IO) + async` 启动子进程，外层 `withLock` 包裹 `.await()` 是正确的——锁保证串行，`await()` 等待子进程退出。`runPythonSubprocess` 在以下情况会抛出异常（均会被 `FasterWhisperInstallService` 的 catch 块捕获并记录）：
+- `IllegalStateException`：pip 进程 exit code 非 0（如网络错误、包名不存在）
+- `TimeoutException`：超过 `timeoutMs` 仍未退出（默认无超时，建议调用时传合理上限）
+
+**`FasterWhisperInstallService`（jvmMain 新建）**：
+
+只持有进程内 `@Volatile` flag 用于快速跳过，并发控制完全委托给 `installPackage`：
+
+```kotlin
+object FasterWhisperInstallService {
+    private val logger = createLogger("FasterWhisperInstallService")
+
+    // 进程内 flag，避免重复安装检查（重启后重新检查一次即可）
+    // 并发安全由 PythonUtil.Py314Embed.installPackage 内部的 Mutex 保证
+    @Volatile private var installed = false
+
+    /**
+     * 确保 faster-whisper 已安装。
+     * - 已安装（内存 flag）：直接返回 null（快速路径，无锁）
+     * - 未安装：调用 installPackage（内部串行），成功后置 flag
+     * @return null 表示成功，非 null 为错误信息（已记录日志，调用方直接透传给前端即可）
+     */
+    suspend fun ensureInstalled(): String? {
+        if (installed) return null
+        return try {
+            PythonUtil.Py314Embed.installPackage("faster-whisper==1.2.1")
+            installed = true
+            null
+        } catch (e: CancellationException) {
+            throw e  // 取消信号必须透传，不能吞掉
+        } catch (e: Throwable) {
+            logger.error("[FasterWhisperInstallService] pip install failed", e)
+            e.message ?: "安装失败"
+        }
+    }
+}
+```
+
+固定版本 `faster-whisper==1.2.1`，避免 `ctranslate2` 的 CUDA 版本兼容性问题。
+
+**Task statusText 更新**：
+
+`DOWNLOAD_WHISPER_MODEL` Task 在 `ensureInstalled()` 执行期间，通过 `TaskService.repo.updateStatusText(taskId, "正在安装 faster-whisper...")` 更新状态文本。若该 Task 不存在（已跳过），则在 `EXTRACT_AUDIO` 开始前完成安装，statusText 写在 `EXTRACT_AUDIO` 上。
+
+**安装失败时**：`ensureInstalled()` 返回非 null 错误信息，Executor 应将 Task 标记为 failed 并把错误信息写入 `task.errorMessage`，前端通过 `WorkflowInfoPanel` 展示失败原因并 toast 提示。注意：失败不应在 `MaterialWorkflowRoute` 层处理——Route 层只负责创建工作流，安装失败发生在 Executor 执行阶段。
+
+#### 2.0.3 改动文件清单（前置条件部分）
+
+| 文件 | 改动 |
+|------|------|
+| `shared/src/jvmMain/.../python/PythonUtil.kt` | `Py314Embed` 新增公共 `installPackage(packageSpec)` 方法 |
+| `shared/src/jvmMain/.../python/FasterWhisperInstallService.kt` | **新建**：进程内 `@Volatile` flag（并发锁由 `installPackage` 负责） |
+| `shared/src/commonMain/.../db/MaterialWorkflowService.kt` | `startWhisperTranscribe()` 最小线性工作流（EXTRACT_AUDIO → TRANSCRIBE） ✅ |
+| `shared/src/commonMain/.../api/routes/MaterialWorkflowRoute.kt` | `whisper_transcribe` 模板分发 ✅ |
+| `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | ASR 方案入口接入工作流，启动后展示 `WorkflowInfoPanel` ✅ |
+
+---
 
 ### 2.1 需求概述
 
@@ -575,6 +680,18 @@ Response（前置缺失）: { "error": "素材尚未完成下载/转码..." }
 - 保留：`log` / `progress` / `done` / `error`
 - `done` 只需返回简短摘要（如 `language`、`segment_count`、`output_path`）
 - 不再要求把全部 `segments` 通过 WebSocket 回传给 Kotlin
+
+**单 chunk 进度分配**：
+
+每个 chunk 的 `progress` 值（0–100）按以下方式分配：
+
+| 阶段 | 进度范围 | 说明 |
+|------|----------|------|
+| 模型加载 | 0 → 15 | `WhisperModel(...)` 完成后推送 `{"type":"progress","progress":15}` |
+| 转录 | 15 → 100 | 按 `seg.end / duration` 线性映射到 15–100 |
+
+模型加载阶段若触发在线下载（`allow_download=True`），进度在 0 停留直到下载完成，随后跳至 15。
+Kotlin 侧直接将 Python 推送的 `progress` 值写入 `task.progress`，无需额外换算。
 
 **崩溃检测要求**：
 - 若子进程异常退出、被底层 C++ 崩溃带走、或因 GPU / DLL 冲突直接退出，父进程必须把它统一转为 `error` 消息
@@ -1023,13 +1140,145 @@ export async function reimportAsrResult(resultId: string) {
 
 ---
 
+### 2.8 ASR 配置页 UX 改进（Phase 1.5 补充）
+
+本节记录对 Phase 1.5 已有 ASR 入口的 5 项 UX 与功能改进，均集中在 `material.$materialId.subtitle.tsx` 及相关后端。
+
+#### 2.8.1 模态框高度溢出（Issue 1）
+
+**问题**：17 个模型选项撑破屏幕，无法滚动。
+
+**方案**：
+- 模型列表区域改为固定高度 + 滚动容器：`<div className="max-h-48 overflow-y-auto space-y-1 pr-1">`
+- 整个 modal 内容区加 `overflow-y-auto max-h-[80vh]`，防止极小屏幕下其他区域也溢出
+
+#### 2.8.2 torch 未安装时的行为修正（Issue 2）
+
+**问题**：torch 未安装时仍显示"推荐"tag、默认选中 `small`，且后端不校验空 model。
+
+**前端改动**：
+1. `parseCompatJson`：`torch_missing` 时 `recommended` 改为 `undefined`（不再返回 `"small"`）
+2. `AsrSchemeDetail`：`model` 初始值改为 `""`（`useState("")`）
+3. `openModal`：加载 compat 后，只有 `parsed.recommended_model` 非空时才 `setModel`
+4. `AsrModelPickerModal` footer 的"开始识别"按钮：`disabled={!model}` 时禁用并加 `title="请先选择模型"`
+5. `AsrModelPickerModal` 中 `isRecommended` 判断：`torch_missing` 时不渲染"推荐"tag（`!compat.torch_missing && isRecommended`）
+
+**后端校验**（`MaterialWorkflowRoute.kt`）：
+
+```kotlin
+// whisper_transcribe 分支，在调用 startWhisperTranscribe 前
+if (p.model.isNullOrBlank()) return buildValidJson { kv("error", "MODEL_REQUIRED") }
+```
+
+#### 2.8.3 LLM 语言猜测（Issue 3）
+
+**目标**：页面加载时用 LLM 根据素材标题/简介猜测视频语言，自动填入语言下拉框。
+
+**后端：新建 `MaterialLanguageGuessRoute.kt`**（commonMain）
+
+- GET `/api/v1/MaterialLanguageGuessRoute?material_id=...`
+- 从 `AppConfigService.repo.getConfig()` 取 `llmModelsJson`，找第一个可用模型（`models.firstOrNull()`）
+- 若无模型配置，返回 `{"language": null}`
+- 构造 prompt：用 material 的 `title` + `description`（截断到 500 字）请求 LLM 猜测语言
+  - prompt：`"以下是一个视频的标题和简介，请判断视频的主要语言，只返回 ISO 639-1 语言代码（如 zh、en、ja），不要解释。\n标题：{title}\n简介：{description}"`
+- 调用 `LlmRequestServiceHolder.instance.streamRequest(...)` 收集完整输出
+- 解析输出，提取 2 字母语言代码（`Regex("[a-z]{2}")`）
+- 结果缓存：`ConcurrentHashMap<String, String?>` 进程级内存缓存（重启清空）
+- 返回 `{"language": "zh"}` 或 `{"language": null}`
+
+**注册**：在 `all_routes.kt` 字母序位置（`MaterialGetRoute` 后、`MaterialListRoute` 前）加入。
+
+**前端：`AsrSchemeDetail` 加语言猜测**
+
+新增状态：
+
+```ts
+const [langGuessState, setLangGuessState] = useState<
+  "idle" | "loading" | { lang: string; label: string } | "failed"
+>("idle");
+```
+
+mount 时调用（`useEffect`）：
+
+```ts
+apiFetch<{ language: string | null }>(
+  `/api/v1/MaterialLanguageGuessRoute?material_id=${encodeURIComponent(materialId)}`,
+  { method: "GET" }, { silent: true }
+).then(({ data }) => {
+  if (!data?.language) { setLangGuessState("failed"); return; }
+  const label = WHISPER_LANGUAGES.find(l => l.value === data.language)?.label ?? data.language;
+  setLangGuessState({ lang: data.language, label });
+  if (!language) setLanguage(data.language);  // 只在当前为空时自动设置
+});
+```
+
+语言下拉框旁展示提示：
+- `loading`：`<Loader className="animate-spin" /> LLM 正在猜测语言…`
+- `{ lang, label }`：`✓ LLM 猜测为「{label}」`（灰色小字）
+- `failed` / `idle`：不显示
+
+#### 2.8.4 语言检测后自动选择模型（Issue 4）
+
+**逻辑**：语言猜测完成后，若 `model === ""`（当前未选），调用 `pickDefaultModel(lang, compat)` 自动选模型。
+
+`pickDefaultModel(lang, compat)` 规则（封装在 `asrConfig.ts`）：
+- `torch_missing`：
+  - 非英语 → `"large-v2"`
+  - 英语 → `"distil-large-v2"`
+- torch 正常：
+  - 非英语 → `compat.models.filter(m => m.ok && !m.isEnOnly).at(-1)?.name ?? "large-v2"`
+  - 英语 → `compat.models.filter(m => m.ok).at(-1)?.name ?? "distil-large-v2"`
+
+在 `AsrSchemeDetail` 中，语言猜测完成后：
+
+```ts
+if (!model && compatInfo) {
+  const compat = parseCompatJson(compatInfo.compat_json);
+  const picked = pickDefaultModel(detectedLang, compat);
+  if (picked) setModel(picked);
+}
+```
+
+#### 2.8.5 业务逻辑封装到工具函数（Issue 5）
+
+**新建文件**：`fredica-webui/app/util/asrConfig.ts`
+
+从 `subtitle.tsx` 中抽出以下内容：
+
+```ts
+// 常量
+export const ALL_WHISPER_MODELS: WhisperModelInfo[]
+export const WHISPER_MODEL_VRAM_HINT: Record<string, string>
+export const WHISPER_LANGUAGES: { value: string; label: string }[]
+
+// 工具函数
+export function isEnglishLang(lang: string): boolean
+export function parseCompatJson(compatJson: string): WhisperCompatParsed
+export function pickDefaultModel(lang: string, compat: WhisperCompatParsed): string | null
+```
+
+`subtitle.tsx` 改为从 `~/util/asrConfig` import 这些函数和常量。
+
+#### 2.8.6 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | Issues 1-4 前端部分 |
+| `fredica-webui/app/util/asrConfig.ts` | **新建**：常量 + 工具函数（Issue 5） |
+| `shared/src/commonMain/.../api/routes/MaterialLanguageGuessRoute.kt` | **新建**（Issue 3 后端） |
+| `shared/src/commonMain/.../api/routes/all_routes.kt` | 注册 `MaterialLanguageGuessRoute` |
+| `shared/src/commonMain/.../api/routes/MaterialWorkflowRoute.kt` | 空 model 校验（Issue 2 后端） |
+
+---
+
 ## 三、实施顺序总览
 
 这一章只保留**实现阶段、依赖关系与交付边界**；测试范围总览见 **第五章**，详细 TDD 样例统一放到 **第九章《阶段开发与测试》**。
 
 | Phase | 目标 | 关键产物 | 依赖 | 本阶段边界 |
 |------|------|---------|------|-----------|
-| 1 | 字幕导出 | `subtitleExport.ts` + Bilibili 字幕页导出按钮 | 无 | 只做前端 SRT 转换与下载，不引入后端改动 |
+| 1 | 字幕导出 | `subtitleExport.ts` + Bilibili 字幕页导出按钮 | 无 | 只做前端 SRT 转换与下载，不引入后端改动 ✅ |
+| 1.5 | ASR 工作流最小闭环 + UX 改进 | `MaterialWorkflowService.startWhisperTranscribe()` + `MaterialWorkflowRoute` whisper_transcribe 模板 + `material.$materialId.subtitle.tsx` ASR 入口；`asrConfig.ts` + `MaterialLanguageGuessRoute` + 模态框滚动 + torch 缺失行为修正 + LLM 语言猜测 + 自动选模型 | 1 | 最小线性流程：EXTRACT_AUDIO → TRANSCRIBE（仅 chunk_0000.m4a）；前端可启动并展示进度 ✅；UX 改进见 §2.8（进行中） |
 | 2 | 基础设施 | `AppUtil.Paths.asrOutputDir()`、锁文件路径、`file_lock_util.py`、`TranscodeMp4Service` | 无 | 先把路径、锁、转码复用层稳定下来 |
 | 3 | Python 子进程与模型检查 | `transcribe.py` 落盘语义、下载 hook、`asr_model_check.py` | 2 | 先解决模型加载、下载补全、进度 hook |
 | 4 | 队列编排 | `AsrSpawnChunksExecutor` + `AsrTranscribeQueueExecutor` | 2,3 | 落地顺序转录、chunk 级缓存、暂停/恢复/取消 |
@@ -1039,7 +1288,8 @@ export async function reimportAsrResult(resultId: string) {
 | 8 | 本地资源管理页 | `local-resources*` + jsBridge handlers | 5,6,7 | **最后开发**，集中处理跨素材与 bridge 文件系统能力 |
 
 **并行建议**：
-- Phase 1 可与 Phase 2 并行
+- Phase 1 / Phase 1.5 已完成
+- Phase 1.5 可与 Phase 2 并行（已完成）
 - Phase 3 依赖 Phase 2
 - Phase 4 依赖 Phase 2/3
 - Phase 5 依赖 Phase 4
@@ -2359,6 +2609,67 @@ cd fredica-webui && npx vitest run tests/util/subtitleExport.test.ts
 
 ---
 
+### 9.1.5 Phase 1.5 — ASR 工作流最小闭环（Kotlin 侧）✅
+
+#### 9.1.5.1 测试目标
+
+验证以下两个层次的正确性：
+
+1. **`PythonUtil.Py314Embed.installPackage` + `FasterWhisperInstallService`**：pip 安装基础设施的并发安全、快速路径跳过、异常处理
+2. **`MaterialWorkflowService.startWhisperTranscribe`**：最小线性工作流（EXTRACT_AUDIO → TRANSCRIBE）的 payload 路径衔接与幂等性
+
+#### 9.1.5.2 测试文件 A：安装服务
+
+`shared/src/jvmTest/kotlin/com/github/project_fredica/python/FasterWhisperInstallServiceTest.kt`
+
+```kotlin
+// =============================================================================
+// FasterWhisperInstallServiceTest
+// =============================================================================
+//
+// 测试矩阵：
+//   I1. 首次调用 ensureInstalled()：installed flag 为 false，执行 installPackage，成功后 flag 变 true
+//   I2. 第二次调用 ensureInstalled()：installed flag 已为 true，直接返回 null（快速路径，不再调 pip）
+//   I3. installPackage 抛出非 CancellationException 时：ensureInstalled() 返回非 null 错误信息，flag 保持 false
+//   I4. installPackage 抛出 CancellationException 时：异常向上传播，不被吞掉
+//   I5. 并发调用 ensureInstalled()：多个协程同时调用，pip install 只执行一次（Mutex 串行化）
+// =============================================================================
+
+// 注意：I1/I2/I3/I4 需要对 PythonUtil.Py314Embed.installPackage 进行 mock/stub，
+// 或通过反射重置 FasterWhisperInstallService.installed flag。
+// I5 可通过计数器验证 installPackage 调用次数。
+```
+
+#### 9.1.5.3 测试文件 B：工作流 payload 路径衔接
+
+`shared/src/jvmTest/kotlin/com/github/project_fredica/db/MaterialWorkflowServiceAsrPayloadTest.kt` ✅
+
+已实现，测试矩阵：
+
+| 编号 | 测试内容 |
+|------|---------|
+| P1 | TRANSCRIBE `audio_path` 指向 `chunk_0000.m4a`（FFmpeg segment 实际产出的文件名） |
+| P2 | TRANSCRIBE `audio_path` 与 EXTRACT_AUDIO `output_dir` 在同一目录下（路径衔接正确） |
+| P3 | EXTRACT_AUDIO `output_dir`（`asr_audio/`）与 TRANSCRIBE `output_path` 的父目录（`asr_result/`）不同 |
+| P4 | 幂等检查：已有活跃任务时返回 `AlreadyActive`，不重复创建 |
+
+**运行命令**：
+```shell
+./gradlew :shared:jvmTest --tests "com.github.project_fredica.db.MaterialWorkflowServiceAsrPayloadTest"
+```
+
+#### 9.1.5.4 关键设计说明
+
+**`installPackage` 的 Mutex 位置**：Mutex 在 `PythonUtil.Py314Embed` 内部，而不是在 `FasterWhisperInstallService` 内部。这样多个不同的 `InstallService`（未来可能有其他包）共享同一个 pip 安装队列，避免并发 pip 进程互相干扰。
+
+**`@Volatile installed` flag**：进程级内存标志，重启后重置。pip 会检测已安装版本并快速跳过，相当于每次启动做一次轻量验证，无需额外持久化。
+
+**`CancellationException` 必须重抛**：协程取消信号不能被 `catch (e: Throwable)` 吞掉，必须在 catch 块最前面显式 `catch (e: CancellationException) { throw e }`。
+
+**调用层次**：`ensureInstalled()` 在 Executor 层调用（`DOWNLOAD_WHISPER_MODEL` 或 `EXTRACT_AUDIO`），不在 Route HTTP handler 里调用，避免前端请求超时。
+
+---
+
 ### 9.2 Phase 2 — Python 文件锁工具（`file_lock_util.py`）
 
 **在开发任何依赖锁的 Executor 之前**完成，因为 Python `transcribe.py` 和 `audio.py` 都需要它。
@@ -3411,5 +3722,52 @@ cd fredica-webui && npx vitest run tests/routes/local-resources.test.tsx tests/r
 
 ⑤ commit（wip 或 feat）
 ```
+
+---
+
+## 附录 B、自定义模型搜索目录
+
+> 本节为服主（服务器管理员）提供的配置参考，当前版本无需开发，记录备用。
+
+### 背景
+
+faster-whisper 默认将模型缓存在 HuggingFace 标准目录（`~/.cache/huggingface/hub/`）。
+若服主希望将模型存放在其他位置（如外置硬盘、共享 NAS、或统一的模型仓库目录），可通过以下方式配置。
+
+### 方案一：环境变量（推荐，无需改代码）
+
+在启动 Python 服务前设置以下任一环境变量：
+
+```shell
+# 方式 A：HuggingFace 全局缓存根目录
+set HF_HOME=D:\models\huggingface
+
+# 方式 B：仅覆盖 hub 缓存目录
+set HUGGINGFACE_HUB_CACHE=D:\models\huggingface\hub
+```
+
+faster-whisper 内部使用 `huggingface_hub` 下载模型，会自动读取上述环境变量。
+设置后，模型将下载到 `%HF_HOME%\hub\` 或 `%HUGGINGFACE_HUB_CACHE%\` 下，
+`WhisperModel` 加载时也会优先从该目录查找。
+
+### 方案二：`download_root` 参数（需改代码）
+
+`WhisperModel` 构造函数支持 `download_root` 参数，可直接指定模型目录：
+
+```python
+model = WhisperModel(model_name, device=device, compute_type=compute_type,
+                     download_root="/path/to/custom/models")
+```
+
+若未来需要在前端或服务器设置页面暴露此选项，可在 `_faster_whisper_worker` 的 `param` 中增加
+`models_dir` 字段，并在 `WhisperModel(...)` 调用时传入 `download_root=models_dir`。
+对应的 Kotlin payload、路由参数、前端表单均需同步扩展（参考 `allow_download` 的透传方式）。
+
+### 注意事项
+
+- 模型目录结构由 `huggingface_hub` 管理，格式为 `models--Systran--faster-whisper-{name}/`，
+  不要手动移动或重命名目录内的文件。
+- 若同时设置了 `HF_HOME` 和 `download_root`，`download_root` 优先级更高。
+- `local_files_only=True` 时，faster-whisper 只在上述目录中查找，不会发起网络请求。
 
 > **跨 Phase 依赖提示**：Phase 4 先解决 `AsrSpawnChunksExecutor` 的队列生成；Phase 5 再围绕 `AsrTranscribeQueueExecutor` 落地顺序转录、暂停/恢复/取消；Phase 6 依赖前两个阶段稳定输出 `chunk_XXXX.json/.done` 后再做合并写库。**本地资源管理模块（Phase 8 / §2.7 / §9.9.3）建议最后开发**：它横跨全局导航、bridge 文件系统访问、跨素材遍历、结果详情页与删除/重导入动作，最容易受到前面目录结构和结果元信息变动影响。等前面的 ASR 主链稳定后再做，返工成本最低。

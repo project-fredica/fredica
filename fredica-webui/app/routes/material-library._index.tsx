@@ -2,11 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
-import { startMaterialWorkflow, type WorkflowTemplate } from "~/util/materialWorkflowApi";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
-import { BilibiliSubtitleModal } from "~/components/bilibili/BilibiliSubtitleModal";
 import {
     type MaterialVideo, type MaterialCategory, type MaterialTask,
     POLL_INTERVAL_MS, PAGE_SIZE,
@@ -35,10 +33,6 @@ export default function LibraryPage() {
 
     const [actionTarget, setActionTarget] = useState<MaterialVideo | null>(null);
     const [aiConclusionTarget, setAiConclusionTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
-    const [subtitleTarget, setSubtitleTarget] = useState<{ bvid: string; pageIndex: number } | null>(null);
-    const [actionTab, setActionTab] = useState<'workflow' | 'info'>('workflow');
-    const [runningTaskType, setRunningTaskType] = useState<string | null>(null);
-
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
 
@@ -157,37 +151,10 @@ export default function LibraryPage() {
 
     const handleOpenAction = (video: MaterialVideo) => {
         setActionTarget(video);
-        setRunningTaskType(null);
     };
 
     const handleCloseAction = () => {
         setActionTarget(null);
-        setActionTab('workflow');
-        setRunningTaskType(null);
-    };
-
-    const handleRunTask = async (taskType: string) => {
-        if (!actionTarget || runningTaskType) return;
-        setRunningTaskType(taskType);
-        const routeMap: Record<string, string> = {
-            'DOWNLOAD_BILIBILI_VIDEO': '/api/v1/BilibiliVideoDownloadRoute',
-            'TRANSCODE_MP4': '/api/v1/BilibiliVideoMaterialTranscodeMp4Route',
-        };
-        const route = routeMap[taskType];
-        if (!route) { setRunningTaskType(null); return; }
-        try {
-            const { resp } = await apiFetch(route, { method: 'POST', body: JSON.stringify({ material_id: actionTarget.id }) });
-            if (!resp.ok) reportHttpError('提交任务失败', resp);
-        } finally { setRunningTaskType(null); }
-    };
-
-    const handleStartWorkflow = async (template: WorkflowTemplate) => {
-        if (!actionTarget || runningTaskType) return;
-        setRunningTaskType(template);
-        try {
-            const { resp } = await startMaterialWorkflow(apiFetch, actionTarget.id, template);
-            if (!resp.ok) reportHttpError('启动工作流失败', resp);
-        } finally { setRunningTaskType(null); }
     };
 
     // ── Filtering & pagination ────────────────────────────────────────────────
@@ -218,29 +185,15 @@ export default function LibraryPage() {
                     onClose={() => setAiConclusionTarget(null)}
                 />
             )}
-            {subtitleTarget && (
-                <BilibiliSubtitleModal
-                    bvid={subtitleTarget.bvid}
-                    pageIndex={subtitleTarget.pageIndex}
-                    onClose={() => setSubtitleTarget(null)}
-                />
-            )}
+
             {actionTarget && (
                 <MaterialActionModal
                     actionTarget={actionTarget}
-                    actionTab={actionTab}
-                    onTabChange={setActionTab}
+                    categories={categories}
                     onClose={handleCloseAction}
-                    workflow={{
-                        materialId: actionTarget.id,
-                        runningTaskType,
-                        deletingVideoIds,
-                        onStartWorkflow: (type) => handleStartWorkflow(type as WorkflowTemplate),
-                        onRunTask: handleRunTask,
-                        onDeleteVideo: handleDeleteVideo,
-                    }}
+                    deletingVideoIds={deletingVideoIds}
+                    onDeleteVideo={handleDeleteVideo}
                     onOpenAiConclusion={(bvid) => setAiConclusionTarget({ bvid, pageIndex: 0 })}
-                    onOpenSubtitle={(bvid) => setSubtitleTarget({ bvid, pageIndex: 0 })}
                 />
             )}
 

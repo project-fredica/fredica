@@ -1,5 +1,6 @@
 package com.github.project_fredica.worker.executors
 
+import com.github.project_fredica.api.routes.NETWORK_TEST_DEFAULT_URLS
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
@@ -39,12 +40,7 @@ object NetworkTestExecutor : TaskExecutor {
 
     @Serializable
     private data class Payload(
-        val urls: List<String> = listOf(
-            "https://www.baidu.com",
-            "https://www.google.com",
-            "https://github.com",
-            "https://api.openai.com",
-        ),
+        val urls: List<String> = NETWORK_TEST_DEFAULT_URLS,
         @SerialName("timeout_ms") val timeoutMs: Int = 5_000,
     )
 

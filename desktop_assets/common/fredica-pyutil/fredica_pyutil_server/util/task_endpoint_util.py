@@ -493,6 +493,10 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
         """
         后台协程：持续从 status_queue 读取子进程消息并调用 _on_subprocess_message()。
         子进程退出且队列排空后自动结束。
+
+        异常退出兜底：若子进程以非零 exitcode 退出（崩溃），主动向 WebSocket 发送
+        {"type": "error"} 消息，打断 start_and_wait 主循环中阻塞在 _read_command()
+        的等待，避免任务状态永久卡住。
         """
         loop = asyncio.get_running_loop()
         while True:
@@ -506,6 +510,16 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
             except Exception:
                 # queue.Empty（超时）或其他异常：若进程已死则退出循环
                 if process_dead:
+                    exitcode = self._process.exitcode if self._process is not None else None
+                    if exitcode is not None and exitcode != 0:
+                        # 子进程异常崩溃：主动推送 error 消息，让 Kotlin 侧关闭 WebSocket，
+                        # 从而打断主循环中 _read_command() 的阻塞等待。
+                        error_msg = f"subprocess exited with code {exitcode}"
+                        logger.error("[{}] {}", self.tag, error_msg)
+                        try:
+                            await self.send_json({"type": "error", "error": error_msg})
+                        except Exception as send_err:
+                            logger.debug("[{}] failed to send subprocess error: {}", self.tag, send_err)
                     break
         logger.debug("[{}] queue reader stopped", self.tag)
 

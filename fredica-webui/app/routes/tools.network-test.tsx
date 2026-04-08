@@ -6,7 +6,7 @@ import {
 import { Link } from "react-router";
 import { useAppFetch } from "~/util/app_fetch";
 import { json_parse } from "~/util/json";
-import { reportHttpError } from "~/util/error_handler";
+import { print_error, reportHttpError } from "~/util/error_handler";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,13 +41,6 @@ interface NetworkTestTask {
 type TestPhase = "idle" | "creating" | "waiting" | "done" | "failed";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const DEFAULT_URLS = [
-    "https://www.baidu.com",
-    "https://www.google.com",
-    "https://github.com",
-    "https://api.openai.com",
-];
 
 const POLL_INTERVAL_MS = 1_000;
 /** 持续测试：上次完成后等待多久自动发起下一轮（ms） */
@@ -113,10 +106,20 @@ export default function NetworkTestPage() {
     const [pipelineId, setPipelineId] = useState<string | null>(null);
     const [continuous, setContinuous] = useState(false);
     const [round, setRound] = useState(0);
+    const [configUrls, setConfigUrls] = useState<string[]>([]);
 
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const retriggerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { apiFetch } = useAppFetch();
+
+    useEffect(() => {
+        apiFetch<{ urls: string[] }>("/api/v1/NetworkTestConfigRoute", { method: "GET" })
+            .then(({ resp, data }) => {
+                if (!resp.ok) { reportHttpError("加载测试目标列表失败", resp); return; }
+                if (data?.urls) setConfigUrls(data.urls);
+            })
+            .catch(e => { print_error({ reason: "加载测试目标列表异常", err: e }); });
+    }, []);
 
     const stopPolling = () => {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -245,7 +248,7 @@ export default function NetworkTestPage() {
                         <div>
                             <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">测试目标</p>
                             <div className="space-y-1">
-                                {DEFAULT_URLS.map(url => (
+                                {configUrls.map(url => (
                                     <div key={url} className="flex items-center gap-2 text-xs text-gray-500 font-mono">
                                         <span className="w-1.5 h-1.5 rounded-full bg-gray-200 flex-shrink-0" />
                                         {url}

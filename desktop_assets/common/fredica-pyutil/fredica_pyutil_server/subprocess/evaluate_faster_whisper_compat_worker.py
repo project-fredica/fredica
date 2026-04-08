@@ -75,7 +75,6 @@ def evaluate_faster_whisper_compat_worker(param: dict, status_queue, cancel_even
 
     def _try_load_whisper(model_name, device, compute_type) -> tuple:
         try:
-            import torch
             from faster_whisper import WhisperModel
 
             kwargs = {"device": device, "compute_type": compute_type}
@@ -83,14 +82,22 @@ def evaluate_faster_whisper_compat_worker(param: dict, status_queue, cancel_even
                 kwargs["download_root"] = models_dir
             _model = WhisperModel(model_name, **kwargs)
             _vram_mb = 0
-            if torch.cuda.is_available():
-                _vram_mb = int(torch.cuda.memory_allocated() / 1024 / 1024)
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    _vram_mb = int(torch.cuda.memory_allocated() / 1024 / 1024)
+            except ImportError:
+                pass
             del _model
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
             return True, "", _vram_mb
-        except Exception:
+        except Exception as e:
             logger.exception("error on try load whisper")
             gc.collect()
             try:
@@ -98,7 +105,7 @@ def evaluate_faster_whisper_compat_worker(param: dict, status_queue, cancel_even
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except Exception:
-                logger.exception("error on torch.cuda.empty_cache()")
+                pass
             return False, str(e), 0
 
     def _check_download_reachable() -> bool:

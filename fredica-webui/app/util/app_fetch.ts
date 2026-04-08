@@ -5,6 +5,27 @@ import { json_parse, type JsonValue } from "~/util/json";
 
 export const DEFAULT_SERVER_PORT = "7631";
 
+// ─── FredicaFixBugAdvice ──────────────────────────────────────────────────────
+// 后端在捕获到特定异常时，会在 JSON 响应中附加 FredicaFixBugAdvice 字段，
+// 前端检测到该字段后弹出 toast 提示用户修复建议。
+// 目前已知场景：Clash HTTP 代理模式下 LLM 调用失败，建议切换为 PAC 模式。
+// 根本原因与诊断过程见后端 LlmProxyDebugTest。
+
+const FIX_ADVICE_MESSAGES: Record<string, string> = {
+    OpenClashPAC: "检测到系统代理，若 LLM 调用失败，请让服主将 Clash 代理模式切换为 PAC 模式",
+};
+
+function checkFixBugAdvice(data: unknown) {
+    if (data == null || typeof data !== "object") return;
+    const advice = (data as Record<string, unknown>)["FredicaFixBugAdvice"];
+    if (typeof advice !== "string") return;
+    const msg = FIX_ADVICE_MESSAGES[advice];
+    if (!msg) return;
+    import("react-toastify").then((m) =>
+        m.toast.warn(`💡 ${msg}`, { autoClose: 8000, position: "top-right" })
+    ).catch(() => {});
+}
+
 // ─── 内部工具函数 ──────────────────────────────────────────────────────────────
 
 function getAppHost(
@@ -265,13 +286,15 @@ export function useAppFetch<J = JsonValue>(param?: {
                 setResponse(resp);
                 if (!resp.ok && !allowNot2XX) {
                     reportHttpError(`HTTP 请求失败 : ${appPath}`, resp);
+                    try { checkFixBugAdvice(json_parse(await resp.text())); } catch {}
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    setData(jsonTypeCheck
+                    const parsed = jsonTypeCheck
                         ? json_parse(await resp.text(), jsonTypeCheck)
-                        : json_parse<J>(await resp.text())
-                    );
+                        : json_parse<J>(await resp.text());
+                    checkFixBugAdvice(parsed);
+                    setData(parsed);
                 }
                 setError(null);
             } catch (err) {
@@ -349,15 +372,15 @@ export function useAppFetch<J = JsonValue>(param?: {
                     if (!silent) {
                         reportHttpError(`HTTP 请求失败 : ${path}`, resp);
                     }
+                    try { checkFixBugAdvice(json_parse(await resp.text())); } catch {}
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 if (parseJson) {
-                    return {
-                        resp,
-                        data: typeCheck
-                            ? json_parse(await resp.text(), typeCheck)
-                            : json_parse<J2>(await resp.text()),
-                    };
+                    const parsed = typeCheck
+                        ? json_parse(await resp.text(), typeCheck)
+                        : json_parse<J2>(await resp.text());
+                    checkFixBugAdvice(parsed);
+                    return { resp, data: parsed };
                 }
                 return { resp, data: null };
             } catch (err) {

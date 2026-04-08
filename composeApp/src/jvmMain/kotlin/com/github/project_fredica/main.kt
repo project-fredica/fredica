@@ -45,7 +45,10 @@ import kotlin.system.exitProcess
 
 fun main() {
     val appStartTime = AppUtil.Times.now()
-    System.setProperty("java.net.useSystemProxies", "true");
+    System.setProperty("java.net.useSystemProxies", "true")
+    // 修复通过代理时 TLS renegotiation 导致的 SocketException
+    System.setProperty("jdk.tls.allowLegacyResumption", "true")
+    System.setProperty("jdk.tls.useExtendedMasterSecret", "false")
     println("初始化中...")
     val logger = createLogger()
     logger.debug("初始化中...")

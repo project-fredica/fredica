@@ -63,6 +63,7 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
     TRANSCRIBE:              '语音识别',
     DOWNLOAD_WHISPER_MODEL:  '下载 ASR 模型',
     DOWNLOAD_TORCH:          '下载 PyTorch',
+    SUBTITLE_EXPORT_ASR:     '生成 ASR 字幕',
 };
 
 const TASK_STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; color: string; bg: string }> = {

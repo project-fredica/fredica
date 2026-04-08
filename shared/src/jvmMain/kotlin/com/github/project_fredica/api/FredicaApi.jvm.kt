@@ -3,6 +3,7 @@ package com.github.project_fredica.api
 import com.github.project_fredica.api.FredicaApiJvmService.init
 import com.github.project_fredica.api.routes.*
 import com.github.project_fredica.apputil.*
+import com.github.project_fredica.apputil.readNetworkProxy
 import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.llm.LlmRequestServiceHolder
@@ -344,7 +345,21 @@ object FredicaApiJvmService {
                 }
             } catch (err: Throwable) {
                 logger.error("Failed in route ${route.name}", err)
-                call.respond(HttpStatusCode.InternalServerError)
+                // 检测 SocketException + 系统代理组合，附加修复建议字段供前端 toast 提示。
+                // 根本原因：Clash HTTP 模式下 OkHttp 发送 CONNECT 隧道请求被中止（WSAECONNABORTED）。
+                // 详细诊断过程与修复方案见 LlmProxyDebugTest。
+                val hasProxy = AppUtil.readNetworkProxy() != null
+                val fixAdvice = if (hasProxy &&
+                    (err.message?.contains("中止了一个已建立的连接") == true ||
+                     err.message?.contains("connection aborted", ignoreCase = true) == true ||
+                     err.message?.contains("WSAECONNABORTED", ignoreCase = true) == true ||
+                     err.cause?.message?.contains("中止了一个已建立的连接") == true)
+                ) "OpenClashPAC" else null
+                val errorJson = buildValidJson {
+                    kv("error", err.message ?: err::class.simpleName ?: "unknown")
+                    if (fixAdvice != null) kv("FredicaFixBugAdvice", fixAdvice)
+                }
+                call.respondText(errorJson.str, ContentType.Application.Json, HttpStatusCode.InternalServerError)
             }
         }
 

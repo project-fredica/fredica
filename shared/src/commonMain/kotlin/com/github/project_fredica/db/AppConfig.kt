@@ -1,6 +1,10 @@
 package com.github.project_fredica.db
 
 import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
+import com.github.project_fredica.llm.LlmDefaultRoles
+import com.github.project_fredica.llm.LlmModelConfig
+import com.github.project_fredica.llm.LlmTestConfig
+import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -26,10 +30,10 @@ data class AppConfig(
     // LLM 模型配置
     @SerialName("llm_models_json") val llmModelsJson: String = "[]",
     @SerialName("llm_default_roles_json") val llmDefaultRolesJson: String = "{}",
-    // LLM 测试令牌（仅用于开发阶段验证 SSE 客户端）
-    @SerialName("llm_test_api_key") val llmTestApiKey: String = "",
-    @SerialName("llm_test_base_url") val llmTestBaseUrl: String = "",
-    @SerialName("llm_test_model") val llmTestModel: String = "",
+    // LLM 测试令牌（已废弃，由计算属性从 llmModelsJson + llmDefaultRolesJson 派生）
+    @SerialName("llm_test_api_key") val llmTestApiKeyLegacy: String = "",
+    @SerialName("llm_test_base_url") val llmTestBaseUrlLegacy: String = "",
+    @SerialName("llm_test_model") val llmTestModelLegacy: String = "",
     // faster-whisper 本地语音识别配置
     @SerialName("faster_whisper_model") val fasterWhisperModel: String = "",
     @SerialName("faster_whisper_compute_type") val fasterWhisperComputeType: String = "auto",
@@ -60,11 +64,24 @@ data class AppConfig(
     @SerialName("bilibili_ac_time_value") override val bilibiliAcTimeValue: String = "",
     @SerialName("bilibili_buvid4") override val bilibiliBuvid4: String = "",
     @SerialName("bilibili_proxy") override val bilibiliProxy: String = "",
-) : BilibiliApiPythonCredentialConfig
+) : BilibiliApiPythonCredentialConfig, LlmTestConfig {
+    // 从 llmDefaultRolesJson 中取 devTestModelId，再从 llmModelsJson 中查找对应模型
+    private val devTestModel: LlmModelConfig? get() {
+        val roles = llmDefaultRolesJson.loadJsonModel<LlmDefaultRoles>().getOrNull() ?: return null
+        val modelId = roles.devTestModelId.takeIf { it.isNotBlank() } ?: return null
+        val models = llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrNull() ?: return null
+        return models.firstOrNull { it.id == modelId }
+    }
+
+    override val llmTestApiKey: String get() = devTestModel?.apiKey ?: ""
+    override val llmTestBaseUrl: String get() = devTestModel?.baseUrl ?: ""
+    override val llmTestModel: String get() = devTestModel?.model ?: ""
+}
 
 interface AppConfigRepo {
     suspend fun getConfig(): AppConfig
     suspend fun updateConfig(config: AppConfig)
+    suspend fun updateConfigPartial(kvPatch: Map<String, String>)
 }
 
 object AppConfigService {

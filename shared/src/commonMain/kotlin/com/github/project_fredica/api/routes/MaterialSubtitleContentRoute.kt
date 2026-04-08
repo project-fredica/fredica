@@ -46,6 +46,7 @@ object MaterialSubtitleContentRoute : FredicaApi.Route {
 
             val response = when (p.source) {
                 "", "bilibili_platform" -> buildBilibiliSubtitleContentResponse(p)
+                "asr" -> buildAsrSubtitleContentResponse(p)
                 else -> {
                     logger.debug("MaterialSubtitleContentRoute: 暂不支持的字幕来源 source=${p.source}，返回空正文")
                     MaterialSubtitleContentResponse(
@@ -66,6 +67,22 @@ object MaterialSubtitleContentRoute : FredicaApi.Route {
             logger.warn("[MaterialSubtitleContentRoute] 获取素材字幕正文失败", isHappensFrequently = false, err = e)
             buildValidJson { kv("error", e.message ?: "unknown") }
         }
+    }
+
+    private suspend fun buildAsrSubtitleContentResponse(
+        param: MaterialSubtitleContentParam,
+    ): MaterialSubtitleContentResponse {
+        // subtitleUrl holds the absolute path to transcript.srt
+        val srtFile = java.io.File(param.subtitleUrl)
+        val text = if (srtFile.exists()) srtFile.readText() else ""
+        val lines = text.lines().filter { it.isNotEmpty() }
+        return MaterialSubtitleContentResponse(
+            text = text,
+            wordCount = text.length,
+            segmentCount = lines.size,
+            source = "asr",
+            subtitleUrl = param.subtitleUrl,
+        )
     }
 
     private suspend fun buildBilibiliSubtitleContentResponse(

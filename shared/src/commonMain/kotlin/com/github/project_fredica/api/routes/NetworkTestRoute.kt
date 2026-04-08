@@ -27,22 +27,15 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.util.UUID
 
-/**
- * POST /api/v1/NetworkTestRoute
- *
- * 请求体（全部可选，省略时使用默认值）：
- * ```json
- * {
- *   "urls": ["https://www.baidu.com", ...],
- *   "timeout_ms": 5000
- * }
- * ```
- *
- * 响应：
- * ```json
- * {"workflow_run_id": "uuid", "task_id": "uuid"}
- * ```
- */
+/** 默认测试目标，NetworkTestRoute 和 NetworkTestConfigRoute 共用同一份。 */
+val NETWORK_TEST_DEFAULT_URLS = listOf(
+    "https://www.baidu.com",
+    "https://www.google.com",
+    "https://github.com",
+    "https://api.openai.com",
+    "https://api.deepseek.com",
+)
+
 object NetworkTestRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "触发网速和延迟测试（创建 NETWORK_TEST 流水线）"
@@ -50,12 +43,7 @@ object NetworkTestRoute : FredicaApi.Route {
     /** 与 NetworkTestExecutor.Payload 结构相同，用于从请求体反序列化参数。 */
     @Serializable
     data class Param(
-        val urls: List<String> = listOf(
-            "https://www.baidu.com",
-            "https://www.google.com",
-            "https://github.com",
-            "https://api.openai.com",
-        ),
+        val urls: List<String> = NETWORK_TEST_DEFAULT_URLS,
         @SerialName("timeout_ms") val timeoutMs: Int = 5_000,
     )
 

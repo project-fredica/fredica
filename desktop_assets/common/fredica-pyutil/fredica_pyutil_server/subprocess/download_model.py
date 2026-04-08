@@ -46,12 +46,15 @@ def download_model_worker(param: dict, status_queue, cancel_event, resume_event)
         # 拦截每个文件的下载流，通过包装 temp_file.write 计算进度
         import huggingface_hub.file_download as _fd
         _orig_http_get = _fd.http_get
+        _log("info", f"[asr-download] monkey-patch 挂载: huggingface_hub.file_download.http_get id={id(_orig_http_get)}")
 
         def _patched_http_get(url, temp_file, *, proxies=None, resume_size=0,
                               headers=None, expected_size=None, filename=None,
                               displayed_filename=None, **kwargs):
+            _log("info", f"[asr-download] [patch] 拦截到下载请求 url={url!r} expected_size={expected_size} resume_size={resume_size}")
             downloaded = [resume_size or 0]
             orig_write = temp_file.write
+            _last_log_pct = [-1]
 
             def _write(data):
                 if cancel_event.is_set():
@@ -63,6 +66,10 @@ def download_model_worker(param: dict, status_queue, cancel_event, resume_event)
                 if expected_size and expected_size > 0:
                     pct = min(99, int(downloaded[0] / expected_size * 100))
                     status_queue.put({"type": "progress", "percent": pct})
+                    # 每 10% 打一条日志，避免刷屏
+                    if pct // 10 > _last_log_pct[0] // 10:
+                        _log("info", f"[asr-download] [patch] 写入进度 {pct}%  ({downloaded[0]}/{expected_size} bytes)")
+                        _last_log_pct[0] = pct
                 return orig_write(data)
 
             temp_file.write = _write
@@ -72,6 +79,7 @@ def download_model_worker(param: dict, status_queue, cancel_event, resume_event)
                                   displayed_filename=displayed_filename, **kwargs)
 
         _fd.http_get = _patched_http_get
+        _log("info", f"[asr-download] monkey-patch 已生效: _fd.http_get id={id(_fd.http_get)}")
 
         status_queue.put({"type": "progress", "percent": 0})
 

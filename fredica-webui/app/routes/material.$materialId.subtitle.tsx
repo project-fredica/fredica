@@ -1,12 +1,20 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { useState, useEffect, useRef } from "react";
 import {
     Subtitles, Mic, ScanText, FileVideo2,
     CheckCircle, ChevronRight, ChevronDown, Clock,
-    ExternalLink, Loader, RefreshCw,
+    ExternalLink, Loader, RefreshCw, AlertCircle, X,
 } from "lucide-react";
+import { Link } from "react-router";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { useAppFetch } from "~/util/app_fetch";
+import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
+import { startMaterialWorkflow } from "~/util/materialWorkflowApi";
+import { reportHttpError, print_error } from "~/util/error_handler";
+import {
+    ALL_WHISPER_MODELS, WHISPER_MODEL_VRAM_HINT, WHISPER_LANGUAGES,
+    parseCompatJson, pickDefaultModel,
+    type WhisperModelCompat, type WhisperCompatParsed,
+} from "~/util/asrConfig";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,7 +67,7 @@ interface SchemeConfig {
 const SCHEMES: SchemeConfig[] = [
     { id: 'platform', label: '平台字幕',           desc: '下载 Bilibili / YouTube 等平台提供的 CC / AI 字幕',  icon: <Subtitles className="w-4 h-4" /> },
     { id: 'embedded', label: '内嵌字幕轨',          desc: '从 MKV / MP4 中提取封装的 SRT / ASS 字幕轨道',      icon: <FileVideo2 className="w-4 h-4" />, disabled: true },
-    { id: 'asr',      label: '语音识别（Whisper）', desc: '使用本地 Faster-Whisper 模型将音频转换为文字',        icon: <Mic className="w-4 h-4" />,       disabled: true },
+    { id: 'asr',      label: '语音识别（Whisper）', desc: '使用本地 Faster-Whisper 模型将音频转换为文字',        icon: <Mic className="w-4 h-4" /> },
     { id: 'ocr',      label: 'OCR 硬字幕识别',      desc: '从视频帧中识别烧录在画面上的字幕（适合老片）',        icon: <ScanText className="w-4 h-4" />,  disabled: true },
 ];
 
@@ -96,6 +104,395 @@ function SchemeCard({ scheme, selected, onSelect }: { scheme: SchemeConfig; sele
             </div>
             {selected && !scheme.disabled && <CheckCircle className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />}
         </button>
+    );
+}
+
+// ─── ASR scheme detail ────────────────────────────────────────────────────────
+
+// ─── Whisper compat info types ────────────────────────────────────────────────
+
+interface WhisperCompatInfo {
+    model: string;
+    compute_type: string;
+    device: string;
+    compat_json: string;  // JSON string from EvaluateFasterWhisperCompatExecutor
+}
+
+// ─── ASR model picker modal ───────────────────────────────────────────────────
+
+function AsrModelPickerModal({
+    compatInfo,
+    compatLoading,
+    selectedModel,
+    selectedLanguage,
+    selectedAllowDownload,
+    langGuessState,
+    onSelect,
+    onClose,
+}: {
+    compatInfo: WhisperCompatInfo | null;
+    compatLoading: boolean;
+    selectedModel: string;
+    selectedLanguage: string;
+    selectedAllowDownload: boolean;
+    langGuessState: "idle" | "loading" | { lang: string; label: string } | "failed";
+    onSelect: (model: string, language: string, allowDownload: boolean) => void;
+    onClose: () => void;
+}) {
+    const [model, setModel] = useState(selectedModel);
+    const [language, setLanguage] = useState(selectedLanguage);
+    const [allowDownload, setAllowDownload] = useState(selectedAllowDownload);
+    const [langHighlight, setLangHighlight] = useState(false);
+    const overlayRef = useRef<HTMLDivElement>(null);
+    const modelListRef = useRef<HTMLDivElement>(null);
+
+    // 模型切换时（含代码触发）自动滚动到选中项
+    useEffect(() => {
+        if (!model || !modelListRef.current) return;
+        const btn = modelListRef.current.querySelector(`[data-model="${model}"]`);
+        btn?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, [model]);
+
+    // 语言变化时触发边框高亮动画
+    const isFirstLangRender = useRef(true);
+    useEffect(() => {
+        if (isFirstLangRender.current) { isFirstLangRender.current = false; return; }
+        setLangHighlight(true);
+        const t = setTimeout(() => setLangHighlight(false), 1500);
+        return () => clearTimeout(t);
+    }, [language]);
+
+    // LLM 猜测完成后自动设置语言，并联动更新模型
+    useEffect(() => {
+        if (typeof langGuessState !== "object") return;
+        const detectedLang = langGuessState.lang;
+        setLanguage(detectedLang);
+        if (!compatInfo) return;
+        const parsed = parseCompatJson(compatInfo.compat_json ?? "{}");
+        const picked = pickDefaultModel(detectedLang, parsed);
+        if (picked) setModel(picked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [langGuessState]);
+
+    const compat = parseCompatJson(compatInfo?.compat_json ?? "{}");
+    const recommended = compat.recommended_model;
+    const vramGb = compat.vram_gb;
+    const modelCompat: Record<string, WhisperModelCompat> = {};
+    compat.models.forEach(m => { modelCompat[m.name] = m; });
+
+    return (
+        <div
+            ref={overlayRef}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={e => { if (e.target === overlayRef.current) onClose(); }}
+        >
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-gray-800">语音识别配置</h3>
+                        {vramGb != null && (
+                            <span className="text-xs text-gray-400">显存 {vramGb} GB</span>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <a
+                            href="https://github.com/SYSTRAN/faster-whisper#benchmark"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded hover:bg-gray-100 transition-colors"
+                            title="查看模型显存参考数据"
+                        >
+                            <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                        </a>
+                        <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 transition-colors">
+                            <X className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="px-4 py-3 space-y-3">
+                    {/* Model list */}
+                    <div>
+                        <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">模型</p>
+                        {compatLoading ? (
+                            <div className="flex items-center gap-2 py-2 text-xs text-gray-400">
+                                <Loader className="w-3.5 h-3.5 animate-spin" />
+                                <span>加载兼容性信息…</span>
+                            </div>
+                        ) : (
+                            <div ref={modelListRef} className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-100 rounded-lg p-1">
+                                {ALL_WHISPER_MODELS.map(m => {
+                                    const mc = modelCompat[m];
+                                    const isRecommended = !compat.torch_missing && m === recommended;
+                                    const isOom = mc != null && !mc.ok;
+                                    const isSelected = model === m;
+                                    return (
+                                        <button
+                                            key={m}
+                                            data-model={m}
+                                            onClick={() => setModel(m)}
+                                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-colors ${
+                                                isSelected
+                                                    ? "border-violet-400 bg-violet-50"
+                                                    : isOom
+                                                        ? "border-gray-100 bg-gray-50 opacity-50"
+                                                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                                            }`}
+                                        >
+                                            <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                                                isSelected ? "border-violet-500 bg-violet-500" : "border-gray-300"
+                                            }`} />
+                                            <span className={`text-xs font-medium flex-1 ${isSelected ? "text-violet-800" : "text-gray-700"}`}>{m}</span>
+                                            <div className="flex items-center gap-1">
+                                                {isRecommended && <span className="text-[10px] px-1 py-0.5 bg-violet-100 text-violet-600 rounded">推荐</span>}
+                                                {mc?.isEnOnly && <span className="text-[10px] px-1 py-0.5 bg-blue-50 text-blue-500 rounded">仅英语</span>}
+                                                {mc?.vram_required != null && mc.vram_required > 0 && <span className="text-[10px] text-gray-400">{mc.vram_required}GB</span>}
+                                                {isOom && <span className="text-[10px] px-1 py-0.5 bg-amber-50 text-amber-600 rounded">显存不足</span>}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Selected model hint */}
+                    {!compatLoading && (() => {
+                        if (compat.torch_missing) return (
+                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                                ⚠ 服主尚未安装 PyTorch，暂时无法评估哪个模型适合服务器设备。<br />
+                                服主可前往<span className="font-medium">桌面服务器设置 → PyTorch 环境</span>完成安装。PyTorch 未安装不影响 faster-whisper 的正常使用，可直接选择模型开始识别。
+                            </p>
+                        );
+                        const mc = modelCompat[model];
+                        if (mc != null && !mc.ok) return (
+                            <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                ⚠ 当前显存（{vramGb != null ? `${vramGb} GB` : "未知"}）可能不足以运行 {model}，建议选择推荐模型。
+                            </p>
+                        );
+                        if (model === recommended) return (
+                            <p className="text-[11px] text-violet-600 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">
+                                ✓ {model} 是当前设备的推荐模型。
+                            </p>
+                        );
+                        return null;
+                    })()}
+
+                    {/* Language */}
+                    <div>
+                        <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">语言</p>
+                        <select
+                            id="asr-language-select"
+                            value={language}
+                            onChange={e => setLanguage(e.target.value)}
+                            className={`w-full text-xs border rounded-lg px-2.5 py-1.5 bg-white focus:outline-none transition-all duration-300 ${
+                                langHighlight
+                                    ? "border-violet-400 ring-2 ring-violet-200"
+                                    : "border-gray-200 focus:border-violet-400"
+                            }`}
+                        >
+                            {WHISPER_LANGUAGES.map(l => (
+                                <option key={l.value} value={l.value}>{l.label}</option>
+                            ))}
+                        </select>
+                        {typeof langGuessState === "object" && (
+                            <p className="text-[11px] text-gray-400 mt-1">
+                                LLM 猜测语言为「{langGuessState.label}」，如与实际不符可在此修改。
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Allow download */}
+                    <label className="flex items-start gap-2 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={allowDownload}
+                            onChange={e => setAllowDownload(e.target.checked)}
+                            className="mt-0.5 accent-violet-600"
+                        />
+                        <span className="text-[11px] text-gray-600 leading-relaxed">
+                            允许在线下载模型
+                            <span className="block text-gray-400">若本地无缓存，将从 HuggingFace 下载所选模型。未勾选时仅使用本地已有模型。</span>
+                        </span>
+                    </label>
+                </div>
+
+                {/* Footer */}
+                <div className="px-4 py-3 border-t border-gray-100 flex justify-end gap-2">
+                    <button onClick={onClose} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors">
+                        取消
+                    </button>
+                    <button
+                        onClick={() => { onSelect(model, language, allowDownload); onClose(); }}
+                        disabled={!model}
+                        title={!model ? "请先选择模型" : undefined}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
+                    >
+                        <Mic className="w-3 h-3" />
+                        开始识别
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── ASR scheme detail ────────────────────────────────────────────────────────
+
+function AsrSchemeDetail({ materialId }: { materialId: string }) {
+    const { apiFetch } = useAppFetch();
+    const [model, setModel] = useState("");
+    const [language, setLanguage] = useState("auto");
+    const [allowDownload, setAllowDownload] = useState(true);
+    const [showModal, setShowModal] = useState(false);
+    const [compatInfo, setCompatInfo] = useState<WhisperCompatInfo | null>(null);
+    const [compatLoading, setCompatLoading] = useState(false);
+    const [starting, setStarting] = useState(false);
+    const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
+    const [startError, setStartError] = useState<string | null>(null);
+    const [recovering, setRecovering] = useState(true);
+    const [langGuessState, setLangGuessState] = useState<
+        "idle" | "loading" | { lang: string; label: string } | "failed"
+    >("idle");
+
+    // On mount: LLM language guess
+    useEffect(() => {
+        let cancelled = false;
+        setLangGuessState("loading");
+        apiFetch<{ language: string | null }>(
+            `/api/v1/MaterialLanguageGuessRoute?material_id=${encodeURIComponent(materialId)}`,
+            { method: "GET" },
+            { silent: true },
+        ).then(({ data }) => {
+            if (cancelled) return;
+            if (!data?.language) { setLangGuessState("failed"); return; }
+            const detectedLang = data.language;
+            const label = WHISPER_LANGUAGES.find(l => l.value === detectedLang)?.label ?? detectedLang;
+            setLangGuessState({ lang: detectedLang, label });
+            // 不自动覆盖语言下拉框，猜测结果仅在模态框内作为提示展示
+        }).catch(e => { if (!cancelled) { print_error({ reason: "语言猜测失败", err: e }); setLangGuessState("failed"); } });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [materialId]);
+
+    // On mount: recover active ASR workflow run if any
+    useEffect(() => {
+        let cancelled = false;
+        apiFetch<{ workflow_runs: Array<{ workflow_run: { id: string; status: string; template: string }; tasks: Array<{ status: string }> }> }>(
+            `/api/v1/MaterialWorkflowStatusRoute?material_id=${encodeURIComponent(materialId)}`,
+            { method: "GET" },
+            { silent: true },
+        ).then(({ data }) => {
+            if (cancelled || !data) return;
+            const active = data.workflow_runs.find(
+                e => e.workflow_run.template === "whisper_transcribe" &&
+                     !["completed", "failed", "cancelled"].includes(e.workflow_run.status)
+            );
+            if (active) setWorkflowRunId(active.workflow_run.id);
+        }).catch(e => { print_error({ reason: "查询 ASR 工作流状态失败", err: e }); }).finally(() => { if (!cancelled) setRecovering(false); });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [materialId]);
+
+    const openModal = () => {
+        if (compatInfo) { setShowModal(true); return; }
+        if (compatLoading) return;
+        setCompatLoading(true);
+        apiFetch<WhisperCompatInfo>("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true })
+            .then(({ data }) => { if (data) setCompatInfo(data); })
+            .catch(e => { print_error({ reason: "加载 ASR 兼容性信息失败", err: e }); })
+            .finally(() => { setCompatLoading(false); setShowModal(true); });
+    };
+
+    // 每次渲染时计算模态框的初始模型（避免 setModel 异步更新导致模态框拿到旧值）
+    const modalInitialModel = (() => {
+        if (!compatInfo) return model;
+        const parsed = parseCompatJson(compatInfo.compat_json ?? "{}");
+        const guessedLang = typeof langGuessState === "object" ? langGuessState.lang : language;
+        return pickDefaultModel(guessedLang, parsed) ?? model;
+    })();
+
+    const handleStart = async (chosenModel: string, chosenLanguage: string, chosenAllowDownload: boolean) => {
+        setModel(chosenModel);
+        setLanguage(chosenLanguage);
+        setAllowDownload(chosenAllowDownload);
+        setStarting(true);
+        setStartError(null);
+        try {
+            const { resp, data } = await startMaterialWorkflow(apiFetch, materialId, "whisper_transcribe", {
+                model: chosenModel,
+                language: chosenLanguage,
+                allow_download: chosenAllowDownload,
+            }).then(r => r as unknown as { resp: Response; data: unknown });
+            if (!resp.ok) { reportHttpError("启动 ASR 工作流失败", resp); return; }
+            const result = data as { workflow_run_id?: string; error?: string } | null;
+            if (result?.error === "TASK_ALREADY_ACTIVE") {
+                setStartError("已有 ASR 任务正在运行，请等待完成后再试。");
+                return;
+            }
+            if (result?.workflow_run_id) setWorkflowRunId(result.workflow_run_id);
+        } catch {
+            setStartError("启动失败，请检查服务器连接。");
+        } finally {
+            setStarting(false);
+        }
+    };
+
+    if (recovering) {
+        return (
+            <div className="flex items-center gap-2 py-3 text-gray-400">
+                <Loader className="w-4 h-4 animate-spin" />
+                <span className="text-sm">检查任务状态…</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-3 pt-1">
+            <div className="p-3 bg-violet-50 rounded-lg border border-violet-200">
+                <p className="text-sm text-violet-700">
+                    使用本地 Faster-Whisper 模型对视频音频进行语音识别，生成 SRT 字幕文件。
+                </p>
+            </div>
+            {langGuessState === "loading" && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                    <Loader className="w-3 h-3 animate-spin" />
+                    <span>LLM 正在猜测语言…</span>
+                </div>
+            )}
+            {startError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-700">{startError}</p>
+                </div>
+            )}
+            {workflowRunId ? (
+                <WorkflowInfoPanel workflowRunId={workflowRunId} active defaultExpanded />
+            ) : (
+                <button
+                    onClick={openModal}
+                    disabled={starting || compatLoading}
+                    className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                    {(starting || compatLoading) ? <Loader className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
+                    {starting ? "启动中…" : compatLoading ? "加载配置…" : "配置并开始语音识别"}
+                </button>
+            )}
+            <p className="text-xs text-gray-400">识别完成后可在「已有字幕」中查看结果</p>
+            {showModal && (
+                <AsrModelPickerModal
+                    compatInfo={compatInfo}
+                    compatLoading={compatLoading}
+                    selectedModel={modalInitialModel}
+                    selectedLanguage={language}
+                    selectedAllowDownload={allowDownload}
+                    langGuessState={langGuessState}
+                    onSelect={handleStart}
+                    onClose={() => setShowModal(false)}
+                />
+            )}
+        </div>
     );
 }
 
@@ -208,9 +605,10 @@ export default function SubtitlePage() {
                                 <SchemeCard key={s.id} scheme={s} selected={selectedScheme === s.id} onSelect={() => setSelectedScheme(s.id)} />
                             ))}
                         </div>
-                        {/* Scheme detail — only platform is currently active */}
+                        {/* Scheme detail */}
                         <div className="bg-white rounded-xl border border-gray-200 p-4">
                             {selectedScheme === 'platform' && <PlatformSchemeDetail isBilibili={isBilibili} />}
+                            {selectedScheme === 'asr' && <AsrSchemeDetail materialId={material.id} />}
                         </div>
                     </div>
                 )}

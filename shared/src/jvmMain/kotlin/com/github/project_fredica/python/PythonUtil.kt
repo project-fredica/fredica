@@ -186,6 +186,21 @@ object PythonUtil {
             }
         }
 
+        private val pipInstallMutex = Mutex()
+
+        /** 按需安装 pip 包到 [AppUtil.Paths.pipLibDir]，并发调用时串行执行。 */
+        suspend fun installPackage(packageSpec: String) {
+            pipInstallMutex.withLock {
+                runPythonSubprocess(
+                    listOf(
+                        "-m", "pip", "install", "--no-input",
+                        "--target", AppUtil.Paths.pipLibDir.absolutePath,
+                        packageSpec,
+                    )
+                ).await()
+            }
+        }
+
         object PyUtilServer {
             private val logger = createLogger()
             private val port get() = FredicaApi.DEFAULT_PYUTIL_SERVER_PORT
@@ -343,6 +358,8 @@ object PythonUtil {
                 onPausable: (suspend (Boolean) -> Unit)? = null,
                 onPauseRequest: (suspend (reason: String) -> Unit)? = null,
                 onResumeRequest: (suspend () -> Unit)? = null,
+                /** 收到框架未处理的消息类型时调用（如 "segment"），参数为原始 JSON 字符串 */
+                onRawMessage: (suspend (String) -> Unit)? = null,
                 cancelSignal: Deferred<Unit>? = null,
                 pauseChannel: ReceiveChannel<Unit>? = null,
                 resumeChannel: ReceiveChannel<Unit>? = null,
@@ -478,19 +495,16 @@ object PythonUtil {
                                 }
 
                                 "error" -> {
-                                    errorMsg = json["message"]?.jsonPrimitive?.content ?: "unknown error"
+                                    errorMsg = (json["error"] ?: json["message"])?.jsonPrimitive?.content ?: "unknown error"
                                     logger.debug("websocketTask error $pth : $errorMsg")
                                     break
                                 }
 
                                 else -> {
-                                    // check_result / download_start 是 torch 下载任务的中间状态消息，
-                                    // websocketTask 框架不需要处理，静默忽略即可
-                                    if (json["type"]?.jsonPrimitive?.content !in setOf(
-                                            "check_result",
-                                            "download_start"
-                                        )
-                                    ) {
+                                    val msgType = json["type"]?.jsonPrimitive?.content
+                                    if (onRawMessage != null) {
+                                        onRawMessage(text)
+                                    } else if (msgType !in setOf("check_result", "download_start", "segment")) {
                                         logger.warn("unexpected frame text in websocketTask : text is $text")
                                     }
                                 }

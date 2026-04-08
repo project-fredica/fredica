@@ -2,7 +2,6 @@
 
 package com.github.project_fredica.apputil
 
-import com.google.common.base.CaseFormat
 import io.ktor.client.engine.ProxyConfig
 import io.netty.util.internal.shaded.org.jctools.util.UnsafeAccess
 import kotlinx.coroutines.CompletableDeferred
@@ -13,8 +12,10 @@ import kotlinx.coroutines.withContext
 import org.burningwave.core.assembler.StaticComponentContainer
 import sun.misc.Unsafe
 import java.io.File
+import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
+import java.net.Socket
 import java.net.URI
 
 actual fun AppUtil.readNetworkProxy(): ProxyConfig? {
@@ -46,29 +47,50 @@ actual fun AppUtil.readNetworkProxyUrl(): String {
 }
 
 private fun AppUtil.readNetworkProxy0(): ProxyConfig? {
-//    val logger = createLogger()
-    val availableProxies = mutableListOf<ProxyConfig>()
     val targetURI = URI("https://www.google.com")
-
-    // Get the list of proxies applicable for the given URI
     val proxies: MutableList<Proxy?>? = ProxySelector.getDefault().select(targetURI)
 
-    if (proxies !== null) {
-        for (proxy in proxies) {
-            if (proxy.isDirect()) {
-//                logger.debug("skip direct proxy : $proxy")
-                continue
-            }
-//            logger.debug("available proxy : $proxy")
-            availableProxies.add(proxy)
+    val proxy = proxies
+        ?.filterNotNull()
+        ?.firstOrNull { !it.isDirect() }
+        ?: return null
+
+    // 当 JVM 报告 HTTP 类型时，探测端口是否实际支持 SOCKS5。
+    // 背景：Clash 在 HTTP 模式下，Windows 系统代理注册为 http=127.0.0.1:7890，
+    // JVM ProxySelector 返回 Proxy.Type.HTTP，OkHttp 随即对 HTTPS 请求发送
+    // "CONNECT host:443 HTTP/1.1" 隧道请求，Clash 对此处理异常导致 WSAECONNABORTED。
+    // 若端口实际是 SOCKS5（Clash mixed port 同时支持 HTTP 和 SOCKS5），
+    // 强制返回 SOCKS 类型，OkHttp 将改用 SOCKS5 协议，绕过 HTTP CONNECT 问题。
+    if (proxy.type() == Proxy.Type.HTTP) {
+        val addr = proxy.address() as? InetSocketAddress
+        if (addr != null && probeIsSocks5(addr)) {
+            return Proxy(Proxy.Type.SOCKS, addr)
         }
     }
 
-    if (availableProxies.isEmpty()) {
-        return null
-    }
+    return proxy
+}
 
-    return availableProxies.first()
+/**
+ * 向代理端口发送 SOCKS5 握手包，判断是否为 SOCKS5 代理。
+ *
+ * SOCKS5 握手：Client → 0x05 0x01 0x00；Server → 0x05 0x?? 表示 SOCKS5。
+ * 超时 1s，失败静默返回 false，不影响正常代理流程。
+ */
+private fun probeIsSocks5(addr: InetSocketAddress): Boolean {
+    return try {
+        Socket().use { s ->
+            s.connect(addr, 1_000)
+            s.soTimeout = 1_000
+            s.getOutputStream().write(byteArrayOf(0x05, 0x01, 0x00))
+            s.getOutputStream().flush()
+            val resp = ByteArray(2)
+            val n = s.getInputStream().read(resp)
+            n >= 2 && (resp[0].toInt() and 0xFF) == 5
+        }
+    } catch (_: Throwable) {
+        false
+    }
 }
 
 fun AppUtil.MonkeyPatch.burningwaveExportAllModule() {

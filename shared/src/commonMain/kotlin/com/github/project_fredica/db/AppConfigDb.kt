@@ -36,9 +36,6 @@ private val defaultKv: Map<String, String> = mapOf(
     "ffmpeg_probe_json" to "",
     "llm_models_json" to "[]",
     "llm_default_roles_json" to "{}",
-    "llm_test_api_key" to "",
-    "llm_test_base_url" to "",
-    "llm_test_model" to "",
     "faster_whisper_model" to "",
     "faster_whisper_compute_type" to "auto",
     "faster_whisper_device" to "auto",
@@ -72,9 +69,6 @@ private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
     "ffmpeg_probe_json" to ffmpegProbeJson,
     "llm_models_json" to llmModelsJson,
     "llm_default_roles_json" to llmDefaultRolesJson,
-    "llm_test_api_key" to llmTestApiKey,
-    "llm_test_base_url" to llmTestBaseUrl,
-    "llm_test_model" to llmTestModel,
     "faster_whisper_model" to fasterWhisperModel,
     "faster_whisper_compute_type" to fasterWhisperComputeType,
     "faster_whisper_device" to fasterWhisperDevice,
@@ -108,9 +102,6 @@ private fun Map<String, String>.toAppConfig() = AppConfig(
     ffmpegProbeJson = get("ffmpeg_probe_json") ?: "",
     llmModelsJson = get("llm_models_json") ?: "[]",
     llmDefaultRolesJson = get("llm_default_roles_json") ?: "{}",
-    llmTestApiKey = get("llm_test_api_key") ?: "",
-    llmTestBaseUrl = get("llm_test_base_url") ?: "",
-    llmTestModel = get("llm_test_model") ?: "",
     fasterWhisperModel = get("faster_whisper_model") ?: "",
     fasterWhisperComputeType = get("faster_whisper_compute_type") ?: "auto",
     fasterWhisperDevice = get("faster_whisper_device") ?: "auto",
@@ -168,6 +159,19 @@ class AppConfigDb(private val db: Database) : AppConfigRepo {
         db.useConnection { conn ->
             conn.prepareStatement("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)").use { ps ->
                 for ((k, v) in config.toKvMap()) {
+                    ps.setString(1, k)
+                    ps.setString(2, v)
+                    ps.executeUpdate()
+                }
+            }
+        }
+    }
+
+    override suspend fun updateConfigPartial(kvPatch: Map<String, String>): Unit = withContext(Dispatchers.IO) {
+        if (kvPatch.isEmpty()) return@withContext
+        db.useConnection { conn ->
+            conn.prepareStatement("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)").use { ps ->
+                for ((k, v) in kvPatch) {
                     ps.setString(1, k)
                     ps.setString(2, v)
                     ps.executeUpdate()

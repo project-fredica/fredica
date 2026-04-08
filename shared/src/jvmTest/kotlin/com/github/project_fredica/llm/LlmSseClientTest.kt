@@ -1,7 +1,6 @@
 package com.github.project_fredica.llm
 
-import com.github.project_fredica.db.AppConfigDb
-import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.testutil.TestAppConfig
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -11,8 +10,6 @@ import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.ktorm.database.Database
-import java.io.File
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +17,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 
 class LlmSseClientTest {
@@ -29,27 +25,18 @@ class LlmSseClientTest {
     private lateinit var modelConfig: LlmModelConfig
 
     @BeforeTest
-    fun setup() = runBlocking {
-        val tmpFile = File.createTempFile("llmtest_", ".db").also { it.deleteOnExit() }
-        val db = Database.connect(
-            url = "jdbc:sqlite:${tmpFile.absolutePath}",
-            driver = "org.sqlite.JDBC",
-        )
-        val configDb = AppConfigDb(db)
-        configDb.initialize()
-        AppConfigService.initialize(configDb)
-
-        val config = AppConfigService.repo.getConfig()
-        if (config.llmTestApiKey.isBlank() || config.llmTestBaseUrl.isBlank() || config.llmTestModel.isBlank()) {
+    fun setup() {
+        val cfg = TestAppConfig.loadLlmConfig()
+        if (cfg == null || !cfg.llmTestIsConfigured) {
             skipTest = true
-            return@runBlocking
+            return
         }
         modelConfig = LlmModelConfig(
             id = "test",
             name = "Test Model",
-            baseUrl = config.llmTestBaseUrl,
-            apiKey = config.llmTestApiKey,
-            model = config.llmTestModel,
+            baseUrl = cfg.llmTestBaseUrl,
+            apiKey = cfg.llmTestApiKey,
+            model = cfg.llmTestModel,
             capabilities = setOf(LlmCapability.STREAMING),
         )
     }

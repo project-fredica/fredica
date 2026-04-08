@@ -168,22 +168,28 @@ def _extract_split_audio_worker(param: dict, status_queue, cancel_event, resume_
 
 
 def _probe_duration(ffmpeg_path: str, video_path: str) -> float:
-    """用 ffmpeg -i 探测视频时长（秒）。"""
+    """用 ffmpeg -i 探测视频时长（秒）。
+
+    使用 ffmpeg -i 而非 -f null -，因为后者需要完整解码整个文件，
+    对大视频耗时极长甚至超时；-i 只读取容器头部即可获取 Duration。
+    ffmpeg -i 在无输出文件时会以非零退出码退出，这是正常行为，不视为错误。
+    """
     try:
         result = subprocess.run(
-            [ffmpeg_path, "-i", video_path, "-f", "null", "-"],
+            [ffmpeg_path, "-i", video_path],
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=15,
         )
         m = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d+)", result.stderr)
         if m:
             h, mn, s, cs = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
             return h * 3600 + mn * 60 + s + cs / 100.0
+        logger.warning("[audio] probe_duration: Duration not found in ffmpeg output for {!r}", video_path)
     except Exception as e:
-        logger.debug("[audio] probe_duration failed for {!r}: {}", video_path, e)
+        logger.warning("[audio] probe_duration failed for {!r}: {}", video_path, e)
     return 0.0
 
 

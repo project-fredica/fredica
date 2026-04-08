@@ -5,6 +5,7 @@ import type { Route } from "./+types/app-desktop-setting-asr-config";
 import { useAppFetch } from "~/util/app_fetch";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
 import { json_parse } from "~/util/json";
+import { reportHttpError, print_error } from "~/util/error_handler";
 
 export function meta({ }: Route.MetaArgs) {
     return [{ title: "ASR 语音识别配置 - Fredica" }];
@@ -102,7 +103,7 @@ export default function AsrConfigPage() {
         setSaving(true);
         setSaveOk(false);
         try {
-            await apiFetch("/api/v1/AppConfigSaveRoute", {
+            const { resp } = await apiFetch("/api/v1/AppConfigSaveRoute", {
                 method: "POST",
                 body: JSON.stringify({
                     faster_whisper_model: cfg.model,
@@ -111,9 +112,11 @@ export default function AsrConfigPage() {
                     faster_whisper_models_dir: cfg.models_dir,
                 }),
             });
+            if (!resp.ok) { reportHttpError("保存 ASR 配置失败", resp); return; }
             setSaveOk(true);
             setTimeout(() => setSaveOk(false), 2000);
-        } catch {
+        } catch (e) {
+            print_error({ reason: "保存 ASR 配置失败", err: e });
         } finally {
             setSaving(false);
         }

@@ -16,6 +16,7 @@ import kotlinx.serialization.Serializable
  *
  * 当前支持模板：
  *   - `bilibili_download_transcode`：bilibili 下载 + 转码两步流水线
+ *   - `whisper_transcribe`：下载 Whisper 模型（可选）+ 提取音频 + 语音识别
  */
 object MaterialWorkflowRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
@@ -34,8 +35,21 @@ object MaterialWorkflowRoute : FredicaApi.Route {
                     is MaterialWorkflowService.StartResult.Started ->
                         buildValidJson {
                             kv("workflow_run_id",   r.workflowRunId)
-                            kv("download_task_id",  r.downloadTaskId)
-                            kv("transcode_task_id", r.transcodeTaskId)
+                            if (r.downloadTaskId != null) kv("download_task_id",  r.downloadTaskId)
+                            if (r.transcodeTaskId != null) kv("transcode_task_id", r.transcodeTaskId)
+                        }
+                }
+            }
+            "whisper_transcribe" -> {
+                if (p.model.isNullOrBlank()) return buildValidJson { kv("error", "MODEL_REQUIRED") }
+                when (val r = MaterialWorkflowService.startWhisperTranscribe(material, model = p.model, language = p.language, allowDownload = p.allowDownload)) {
+                    is MaterialWorkflowService.StartResult.AlreadyActive ->
+                        buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
+                    is MaterialWorkflowService.StartResult.Started ->
+                        buildValidJson {
+                            kv("workflow_run_id", r.workflowRunId)
+                            if (r.extractAudioTaskId != null) kv("extract_audio_task_id", r.extractAudioTaskId)
+                            if (r.transcribeTaskId != null) kv("transcribe_task_id", r.transcribeTaskId)
                         }
                 }
             }
@@ -48,4 +62,10 @@ object MaterialWorkflowRoute : FredicaApi.Route {
 data class MaterialWorkflowParam(
     @SerialName("material_id") val materialId: String,
     val template: String,
+    /** whisper_transcribe 专用：模型名称，为空时使用 "large-v3" */
+    val model: String? = null,
+    /** whisper_transcribe 专用：语言代码，为空时 Whisper 自动检测 */
+    val language: String? = null,
+    /** whisper_transcribe 专用：是否允许在线下载模型（默认 false，仅使用本地缓存） */
+    @SerialName("allow_download") val allowDownload: Boolean = false,
 )

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader, Captions, RefreshCw, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { Loader, Captions, RefreshCw, ChevronDown, ChevronUp, AlertCircle, Download } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { CommonSubtitlePanel, type CommonSubtitleItem } from "~/components/subtitle/CommonSubtitlePanel";
 import { usePlaybackTime } from "~/hooks/usePlaybackTime";
+import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,9 @@ interface SubtitleBodyResult {
 
 // ─── SubtitleBodyPanel ────────────────────────────────────────────────────────
 
-function SubtitleBodyPanel({ metaItem, isUpdate, currentTime, onSeek }: {
+function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, currentTime, onSeek }: {
+    materialId?: string;
+    selectedLan?: string | null;
     metaItem: SubtitleMetaItem;
     isUpdate: boolean;
     currentTime: number;
@@ -87,7 +90,23 @@ function SubtitleBodyPanel({ metaItem, isUpdate, currentTime, onSeek }: {
     );
 
     const items: CommonSubtitleItem[] = result.body;
-    return <CommonSubtitlePanel items={items} currentTime={currentTime} onSeek={onSeek} />;
+    const downloadFilename = `${materialId ?? "subtitle"}_${selectedLan ?? metaItem.lan}.srt`;
+
+    return (
+        <div className="flex flex-col min-h-0 flex-1 gap-3">
+            <div className="flex items-center justify-end">
+                <button
+                    onClick={() => downloadSrt(convertToSrt(result.body ?? []), downloadFilename)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                    title="导出当前字幕轨为 SRT"
+                >
+                    <Download className="w-3.5 h-3.5" />
+                    导出 SRT
+                </button>
+            </div>
+            <CommonSubtitlePanel items={items} currentTime={currentTime} onSeek={onSeek} />
+        </div>
+    );
 }
 
 // ─── BilibiliSubtitlePanel ────────────────────────────────────────────────────
@@ -213,6 +232,8 @@ export function BilibiliSubtitlePanel({
             {!metaLoading && currentTrack && (
                 <SubtitleBodyPanel
                     key={currentTrack.lan}
+                    materialId={materialId}
+                    selectedLan={selectedLan}
                     metaItem={currentTrack}
                     isUpdate={isUpdate}
                     currentTime={currentTime}

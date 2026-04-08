@@ -15,17 +15,16 @@ export function BilibiliAiConclusionButton({
 }) {
     const { hasSuccess, setRef } = useAiConclusionStatus(bvid, pageIndex);
 
+    if (!hasSuccess) return <span ref={setRef as React.RefCallback<HTMLSpanElement>} />;
+
     return (
-        <span ref={setRef as React.RefCallback<HTMLSpanElement>}>
-            {hasSuccess && (
-                <button
-                    onClick={onClick}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors whitespace-nowrap"
-                >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    B站AI总结
-                </button>
-            )}
-        </span>
+        <button
+            ref={setRef as React.RefCallback<HTMLButtonElement>}
+            onClick={onClick}
+            className="w-[72px] flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+        >
+            <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+            AI总结
+        </button>
     );
 }

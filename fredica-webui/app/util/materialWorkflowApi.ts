@@ -13,12 +13,14 @@ export const MATERIAL_WORKFLOW_API_PATH = "/api/v1/MaterialWorkflowRoute";
 /** GET 查询工作流状态路由的相对路径。 */
 export const MATERIAL_WORKFLOW_STATUS_API_PATH = "/api/v1/MaterialWorkflowStatusRoute";
 
-export type WorkflowTemplate = "bilibili_download_transcode";
+export type WorkflowTemplate = "bilibili_download_transcode" | "whisper_transcribe";
 
 export interface StartWorkflowResult {
     workflow_run_id?: string;
     download_task_id?: string;
     transcode_task_id?: string;
+    extract_audio_task_id?: string;
+    transcribe_task_id?: string;
     error?: string;
 }
 
@@ -66,10 +68,11 @@ export async function startMaterialWorkflow(
     apiFetch: (path: string, init?: RequestInit) => Promise<{ resp: Response }>,
     materialId: string,
     template: WorkflowTemplate,
+    extra?: Record<string, unknown>,
 ): Promise<{ resp: Response }> {
     return apiFetch(MATERIAL_WORKFLOW_API_PATH, {
         method: "POST",
-        body: JSON.stringify({ material_id: materialId, template }),
+        body: JSON.stringify({ material_id: materialId, template, ...extra }),
     });
 }
 
