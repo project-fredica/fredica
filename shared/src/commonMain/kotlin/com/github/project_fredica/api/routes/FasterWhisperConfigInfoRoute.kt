@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.db.AppConfigService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * GET /api/v1/FasterWhisperConfigInfoRoute
@@ -28,13 +30,13 @@ object FasterWhisperConfigInfoRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val cfg = AppConfigService.repo.getConfig()
-        return buildValidJson {
-            kv("model", cfg.fasterWhisperModel)
-            kv("compute_type", cfg.fasterWhisperComputeType)
-            kv("device", cfg.fasterWhisperDevice)
+        return buildJsonObject {
+            put("model", cfg.fasterWhisperModel)
+            put("compute_type", cfg.fasterWhisperComputeType)
+            put("device", cfg.fasterWhisperDevice)
             // routeApi 用户侧不应该知晓模型的存储目录。
-            // kv("models_dir", cfg.fasterWhisperModelsDir)
-            kv("compat_json", cfg.fasterWhisperCompatJson)
-        }
+            // put("models_dir", cfg.fasterWhisperModelsDir)
+            put("compat_json", cfg.fasterWhisperCompatJson)
+        }.toValidJson()
     }
 }

@@ -1,7 +1,5 @@
 package com.github.project_fredica.api.routes
 
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.json
@@ -26,6 +24,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /**
  * LLM 代理聊天路由（SSE 流式转发）。
@@ -71,7 +70,7 @@ object LlmProxyChatRoute {
             call.respondBytesWriter(ContentType.Text.EventStream) {
                 writeStringUtf8(
                     "event: llm_error\n" +
-                    "data: ${buildValidJson { kv("error_type", "MODEL_NOT_FOUND"); kv("message", "未找到模型配置") }.str}\n\n"
+                    "data: ${buildJsonObject { put("error_type", "MODEL_NOT_FOUND"); put("message", "未找到模型配置") }}\n\n"
                 )
                 flush()
             }
@@ -94,16 +93,14 @@ object LlmProxyChatRoute {
                     val resp = LlmRequestServiceHolder.instance.streamRequest(
                         req = llmReq,
                         onChunk = { chunk ->
-                            val chunkJson = createJson {
-                                obj {
-                                    kv("choices", buildJsonArray {
-                                        add(buildJsonObject {
-                                            put("delta", buildJsonObject {
-                                                put("content", JsonPrimitive(chunk))
-                                            })
+                            val chunkJson = buildJsonObject {
+                                put("choices", buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("delta", buildJsonObject {
+                                            put("content", JsonPrimitive(chunk))
                                         })
                                     })
-                                }
+                                })
                             }
                             writeStringUtf8("data: ${AppUtil.GlobalVars.json.encodeToString(chunkJson)}\n\n")
                             flush()
@@ -112,7 +109,7 @@ object LlmProxyChatRoute {
                     // 尾部 source 元数据事件，供前端展示缓存状态
                     writeStringUtf8(
                         "event: llm_source\n" +
-                        "data: ${buildValidJson { kv("source", resp.source.name); kv("key_hash", resp.keyHash) }.str}\n\n"
+                        "data: ${buildJsonObject { put("source", resp.source.name); put("key_hash", resp.keyHash) }}\n\n"
                     )
                     writeStringUtf8("data: [DONE]\n\n")
                     flush()
@@ -120,7 +117,7 @@ object LlmProxyChatRoute {
                     logger.warn("LlmProxyChatRoute: provider error type=${e.type} status=${e.httpStatus}", isHappensFrequently = false, err = e)
                     writeStringUtf8(
                         "event: llm_error\n" +
-                        "data: ${buildValidJson { kv("error_type", e.type.name); kv("message", e.providerMessage) }.str}\n\n"
+                        "data: ${buildJsonObject { put("error_type", e.type.name); put("message", e.providerMessage) }}\n\n"
                     )
                     flush()
                 }

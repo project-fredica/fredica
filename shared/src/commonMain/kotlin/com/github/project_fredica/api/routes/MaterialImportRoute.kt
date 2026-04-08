@@ -2,8 +2,9 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.apputil.createJson
+import com.github.project_fredica.apputil.toValidJson
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialCategoryService
 import com.github.project_fredica.db.MaterialType
 import com.github.project_fredica.db.MaterialVideo
@@ -37,18 +38,16 @@ object MaterialImportRoute : FredicaApi.Route {
         val nowSec = System.currentTimeMillis() / 1000L
 
         val materials = p.videos.map { video ->
-            val extraJson = createJson {
-                obj {
-                    kv("upper_name", video.upper.name)
-                    kv("upper_face_url", video.upper.face)
-                    kv("upper_mid", video.upper.mid)
-                    kv("cnt_play", video.cntInfo.play)
-                    kv("cnt_collect", video.cntInfo.collect)
-                    kv("cnt_danmaku", video.cntInfo.danmaku)
-                    kv("fav_time", video.favTime)
-                    kv("source_fid", p.sourceFid)
-                    kv("bvid", video.bvid)
-                }
+            val extraJson = buildJsonObject {
+                put("upper_name", video.upper.name)
+                put("upper_face_url", video.upper.face)
+                put("upper_mid", video.upper.mid)
+                put("cnt_play", video.cntInfo.play)
+                put("cnt_collect", video.cntInfo.collect)
+                put("cnt_danmaku", video.cntInfo.danmaku)
+                put("fav_time", video.favTime)
+                put("source_fid", p.sourceFid)
+                put("bvid", video.bvid)
             }.toString()
 
             MaterialVideo(
@@ -78,10 +77,10 @@ object MaterialImportRoute : FredicaApi.Route {
             MaterialCategoryService.repo.linkMaterials(materialIds, p.categoryIds)
         }
 
-        return buildValidJson {
-            kv("inserted", inserted)
-            kv("total", materials.size)
-        }
+        return buildJsonObject {
+            put("inserted", inserted)
+            put("total", materials.size)
+        }.toValidJson()
     }
 }
 

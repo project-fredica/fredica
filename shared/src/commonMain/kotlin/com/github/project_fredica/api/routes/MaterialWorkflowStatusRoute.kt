@@ -3,9 +3,11 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialWorkflowService
 import kotlinx.serialization.encodeToString
 
@@ -33,7 +35,7 @@ object MaterialWorkflowStatusRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val query      = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
-            ?: return buildValidJson { kv("error", "MISSING_MATERIAL_ID") }
+            ?: return buildJsonObject { put("error", "MISSING_MATERIAL_ID") }.toValidJson()
         val queryMode  = query["mode"]?.firstOrNull() ?: "active"
 
         return when (queryMode) {
@@ -47,7 +49,7 @@ object MaterialWorkflowStatusRoute : FredicaApi.Route {
                 val result   = MaterialWorkflowService.queryHistory(materialId, page, pageSize)
                 ValidJsonString(AppUtil.GlobalVars.json.encodeToString(result))
             }
-            else -> buildValidJson { kv("error", "UNKNOWN_MODE") }
+            else -> buildJsonObject { put("error", "UNKNOWN_MODE") }.toValidJson()
         }
     }
 }

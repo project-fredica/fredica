@@ -3,7 +3,6 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.apputil.loadJsonModel

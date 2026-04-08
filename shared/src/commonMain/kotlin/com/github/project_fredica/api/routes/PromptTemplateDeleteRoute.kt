@@ -14,10 +14,12 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.PromptTemplateService
 import kotlinx.serialization.Serializable
 
@@ -40,23 +42,23 @@ object PromptTemplateDeleteRoute : FredicaApi.Route {
                     "[PromptTemplateDeleteRoute] 拒绝删除系统模板 id=${p.id}",
                     isHappensFrequently = false, err = null
                 )
-                return buildValidJson { kv("error", "系统模板不可删除") }
+                return buildJsonObject { put("error", "系统模板不可删除") }.toValidJson()
             }
 
             val deleted = PromptTemplateService.repo.delete(p.id)
             if (!deleted) {
                 logger.debug("PromptTemplateDeleteRoute: id=${p.id} 不存在或不可删除")
-                return buildValidJson { kv("error", "模板不存在或不可删除: ${p.id}") }
+                return buildJsonObject { put("error", "模板不存在或不可删除: ${p.id}") }.toValidJson()
             }
 
             logger.info("PromptTemplateDeleteRoute: 已删除 id=${p.id}")
-            buildValidJson {
-                kv("ok", true)
-                kv("deleted_id", p.id)
-            }
+            buildJsonObject {
+                put("ok", true)
+                put("deleted_id", p.id)
+            }.toValidJson()
         } catch (e: Throwable) {
             logger.warn("[PromptTemplateDeleteRoute] 删除模板失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 }

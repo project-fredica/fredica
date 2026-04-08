@@ -7,7 +7,8 @@ import com.github.project_fredica.api.routes.MaterialSubtitleItem
 import com.github.project_fredica.api.routes.MaterialSubtitleListRoute
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.BilibiliSubtitleUtil
-import com.github.project_fredica.apputil.buildValidJson
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.error
@@ -111,9 +112,9 @@ class MaterialPromptVariableResolver : PromptVariableResolver {
     }
 
     private suspend fun fetchSubtitleText(materialId: String, language: String?): String? {
-        val queryParam = buildValidJson {
-            kv("material_id", listOf(JsonPrimitive(materialId)).toJsonArray())
-        }.str
+        val queryParam = buildJsonObject {
+            put("material_id", listOf(JsonPrimitive(materialId)).toJsonArray())
+        }.toString()
         val items = MaterialSubtitleListRoute.handler(queryParam).str
             .loadJsonModel<List<MaterialSubtitleItem>>().getOrElse { return null }
         if (items.isEmpty()) return null

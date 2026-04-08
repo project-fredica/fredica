@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.worker.TaskCancelService
 import kotlinx.serialization.SerialName
@@ -33,7 +35,7 @@ object TaskCancelRoute : FredicaApi.Route {
 
         // 查找目标任务，获取 workflowRunId 以便级联取消；首次访问时对父 WorkflowRun 进行对账
         val targetTask = TaskStatusService.findById(p.taskId)
-            ?: return buildValidJson { kv("signalled", false); kv("cancelled_count", 0) }
+            ?: return buildJsonObject { put("signalled", false); put("cancelled_count", 0) }.toValidJson()
 
         // 收集同一 WorkflowRun 内所有活跃任务（含目标任务本身）；首次访问时对该 WorkflowRun 进行对账
         val siblings = TaskStatusService.listByWorkflowRun(targetTask.workflowRunId)
@@ -53,10 +55,10 @@ object TaskCancelRoute : FredicaApi.Route {
             }
         }
 
-        return buildValidJson {
-            kv("signalled", signalled)
-            kv("cancelled_count", cancelledCount)
-        }
+        return buildJsonObject {
+            put("signalled", signalled)
+            put("cancelled_count", cancelledCount)
+        }.toValidJson()
     }
 }
 

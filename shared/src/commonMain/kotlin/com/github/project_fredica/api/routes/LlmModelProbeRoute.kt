@@ -3,11 +3,11 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.llm.LlmCapability
 import io.ktor.client.request.get
@@ -17,10 +17,12 @@ import io.ktor.http.HttpHeaders
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 object LlmModelProbeRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
@@ -92,7 +94,7 @@ object LlmModelProbeRoute : FredicaApi.Route {
             AppUtil.dumpJsonStr(resp).getOrThrow()
         } catch (e: Throwable) {
             logger.warn("[probe] failed", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "probe failed") }
+            buildJsonObject { put("error", e.message ?: "probe failed") }.toValidJson()
         }
     }
 

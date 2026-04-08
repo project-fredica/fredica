@@ -3,8 +3,10 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.get
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.TorchMirrorCacheService
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -49,7 +51,7 @@ class GetTorchAllMirrorVariantsJsMessageHandler : MyJsMessageHandler() {
             TorchMirrorCacheService.getOrFetch { FredicaApi.PyUtil.get(path) }
         } catch (e: Throwable) {
             logger.warn("[GetTorchAllMirrorVariantsJsMessageHandler] fetch failed", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown error") }.str
+            buildJsonObject { put("error", e.message ?: "unknown error") }.toString()
         }
         callback(result)
     }

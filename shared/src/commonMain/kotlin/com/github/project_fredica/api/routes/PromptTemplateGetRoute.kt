@@ -14,12 +14,14 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.PromptTemplateService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 object PromptTemplateGetRoute : FredicaApi.Route {
     private val logger = createLogger { "PromptTemplateGetRoute" }
@@ -32,7 +34,7 @@ object PromptTemplateGetRoute : FredicaApi.Route {
             // GET 路由参数格式为 Map<String, List<String>>，取首元素
             val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
             val id = query["id"]?.firstOrNull()
-                ?: return buildValidJson { kv("error", "缺少参数 id") }
+                ?: return buildJsonObject { put("error", "缺少参数 id") }.toValidJson()
             logger.debug("PromptTemplateGetRoute: id=$id")
 
             // 先查系统模板（内存），再查用户模板（DB）
@@ -41,13 +43,13 @@ object PromptTemplateGetRoute : FredicaApi.Route {
 
             if (template == null) {
                 logger.debug("PromptTemplateGetRoute: id=$id 不存在")
-                return buildValidJson { kv("error", "模板不存在: $id") }
+                return buildJsonObject { put("error", "模板不存在: $id") }.toValidJson()
             }
 
             AppUtil.dumpJsonStr(template).getOrThrow()
         } catch (e: Throwable) {
             logger.warn("[PromptTemplateGetRoute] 查询模板失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 }

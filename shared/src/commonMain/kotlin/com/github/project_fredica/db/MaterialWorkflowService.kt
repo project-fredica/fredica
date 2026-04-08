@@ -1,9 +1,10 @@
 package com.github.project_fredica.db
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.createJson
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 素材工作流业务服务，封装各模板的类型化参数构建、幂等检查和工作流查询。
@@ -85,20 +86,20 @@ object MaterialWorkflowService {
         val downloadTaskId  = TaskId.random()
         val transcodeTaskId = TaskId.random()
 
-        val downloadPayload = createJson { obj {
-            kv("bvid",        material.sourceId)
-            kv("page",        1)
-            kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
-            kv("check_skip",  true)
-        } }.toString()
+        val downloadPayload = buildJsonObject {
+            put("bvid",        material.sourceId)
+            put("page",        1)
+            put("output_path", mediaDir.resolve("video.mp4").absolutePath)
+            put("check_skip",  true)
+        }.toString()
 
-        val transcodePayload = createJson { obj {
-            kv("mode",        "from_bilibili_download")
-            kv("output_dir",  mediaDir.absolutePath)
-            kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
-            kv("hw_accel",    "auto")
-            kv("check_skip",  true)
-        } }.toString()
+        val transcodePayload = buildJsonObject {
+            put("mode",        "from_bilibili_download")
+            put("output_dir",  mediaDir.absolutePath)
+            put("output_path", mediaDir.resolve("video.mp4").absolutePath)
+            put("hw_accel",    "auto")
+            put("check_skip",  true)
+        }.toString()
 
         val workflowRunId = CommonWorkflowService.createWorkflow(
             template   = "bilibili_download_transcode",
@@ -162,19 +163,19 @@ object MaterialWorkflowService {
         val extractAudioTaskId = TaskId.random()
         val transcribeTaskId = TaskId.random()
 
-        val extractAudioPayload = createJson { obj {
-            kv("input_video_path", inputVideoPath)
-            kv("output_dir", audioDir.absolutePath)
-            kv("chunk_duration_sec", 300)  // 5分钟/段
-        } }.toString()
+        val extractAudioPayload = buildJsonObject {
+            put("input_video_path", inputVideoPath)
+            put("output_dir", audioDir.absolutePath)
+            put("chunk_duration_sec", 300)
+        }.toString()
 
-        val transcribePayload = createJson { obj {
-            kv("audio_path", audioDir.resolve("chunk_0000.m4a").absolutePath)
-            kv("language", langCode)
-            kv("model_size", modelName)
-            kv("output_path", transcriptDir.resolve("transcript.json").absolutePath)
-            kv("allow_download", allowDownload)
-        } }.toString()
+        val transcribePayload = buildJsonObject {
+            put("audio_path", audioDir.resolve("chunk_0000.m4a").absolutePath)
+            put("language", langCode)
+            put("model_size", modelName)
+            put("output_path", transcriptDir.resolve("transcript.json").absolutePath)
+            put("allow_download", allowDownload)
+        }.toString()
 
         val tasks = buildList {
             add(CommonWorkflowService.TaskDef(

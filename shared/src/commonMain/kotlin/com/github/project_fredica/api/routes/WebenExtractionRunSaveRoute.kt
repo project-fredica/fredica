@@ -2,10 +2,12 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.weben.WebenConcept
@@ -67,16 +69,16 @@ object WebenExtractionRunSaveRoute : FredicaApi.Route {
                 "WebenExtractionRunSaveRoute: 保存完成 sourceId=${source.id} runId=${run.id}" +
                     " conceptCreated=$conceptCreated conceptTotal=${p.concepts.size}"
             )
-            buildValidJson {
-                kv("ok", true)
-                kv("source_id", source.id)
-                kv("run_id", run.id)
-                kv("concept_created", conceptCreated)
-                kv("concept_total", p.concepts.size)
-            }
+            buildJsonObject {
+                put("ok", true)
+                put("source_id", source.id)
+                put("run_id", run.id)
+                put("concept_created", conceptCreated)
+                put("concept_total", p.concepts.size)
+            }.toValidJson()
         } catch (e: Throwable) {
             logger.warn("[WebenExtractionRunSaveRoute] 保存失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 

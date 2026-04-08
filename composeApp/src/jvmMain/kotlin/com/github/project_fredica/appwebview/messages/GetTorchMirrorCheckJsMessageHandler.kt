@@ -3,8 +3,10 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.get
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
@@ -36,7 +38,7 @@ class GetTorchMirrorCheckJsMessageHandler : MyJsMessageHandler() {
 
         val variant = params?.get("variant")?.let { it as? JsonPrimitive }?.content ?: ""
         if (variant.isBlank()) {
-            callback(buildValidJson { kv("error", "variant is required") }.str)
+            callback(buildJsonObject { put("error", "variant is required") }.toString())
             return
         }
 
@@ -53,7 +55,7 @@ class GetTorchMirrorCheckJsMessageHandler : MyJsMessageHandler() {
             FredicaApi.PyUtil.get(path)
         } catch (e: Throwable) {
             logger.warn("[GetTorchMirrorCheckJsMessageHandler] Python call failed", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown error") }.str
+            buildJsonObject { put("error", e.message ?: "unknown error") }.toString()
         }
         callback(result)
     }

@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
 import kotlinx.serialization.Serializable
 
@@ -14,7 +16,7 @@ object MaterialDeleteRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<MaterialDeleteParam>().getOrThrow()
         MaterialVideoService.repo.deleteByIds(p.ids)
-        return buildValidJson { kv("deleted", p.ids.size) }
+        return buildJsonObject { put("deleted", p.ids.size) }.toValidJson()
     }
 }
 

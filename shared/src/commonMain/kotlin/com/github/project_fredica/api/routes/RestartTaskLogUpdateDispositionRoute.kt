@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.RestartTaskLogService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -41,7 +43,7 @@ object RestartTaskLogUpdateDispositionRoute : FredicaApi.Route {
             newWorkflowRunId = p.newWorkflowRunId,
         )
 
-        return buildValidJson { kv("ok", true) }
+        return buildJsonObject { put("ok", true) }.toValidJson()
     }
 }
 

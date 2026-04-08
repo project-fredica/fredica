@@ -3,8 +3,9 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.getNativeWebServerLocalDomainAndPort
 import com.github.project_fredica.apputil.IntentUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import kotlinx.serialization.json.buildJsonObject
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.openBrowser
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -45,6 +46,6 @@ class OpenInternalTabJsMessageHandler : MyJsMessageHandler() {
         }
         logger.debug("open internal tab: $url")
         IntentUtil.openBrowser(url)
-        callback(buildValidJson { }.str)
+        callback(buildJsonObject { }.toString())
     }
 }

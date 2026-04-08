@@ -1,7 +1,6 @@
 package com.github.project_fredica.worker.executors
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.AppConfigService
@@ -17,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 下载指定 variant 的 torch 到隔离目录。
@@ -67,23 +68,23 @@ object DownloadTorchExecutor : WebSocketTaskExecutor() {
             "torchVersion=${payload.torchVersion} indexUrl=${payload.indexUrl} " +
             "indexUrlMode=${payload.indexUrlMode} downloadDir=$downloadDir pipLogFilePath=$pipLogFilePath [taskId=${task.id}]")
 
-        val paramJson = buildValidJson {
-            kv("variant", variant)
-            kv("download_dir", downloadDir)
-            kv("use_proxy", payload.useProxy)
-            kv("proxy", payload.proxy)
-            kv("index_url_mode", payload.indexUrlMode)
-            kv("pip_log_file_path", pipLogFilePath)
-            if (payload.expectedVersion.isNotBlank()) kv("expected_version", payload.expectedVersion)
+        val paramJson = buildJsonObject {
+            put("variant", variant)
+            put("download_dir", downloadDir)
+            put("use_proxy", payload.useProxy)
+            put("proxy", payload.proxy)
+            put("index_url_mode", payload.indexUrlMode)
+            put("pip_log_file_path", pipLogFilePath)
+            if (payload.expectedVersion.isNotBlank()) put("expected_version", payload.expectedVersion)
             if (variant == "custom") {
-                kv("custom_packages", payload.customPackages)
-                kv("custom_index_url", payload.customIndexUrl)
-                kv("custom_variant_id", payload.customVariantId)
+                put("custom_packages", payload.customPackages)
+                put("custom_index_url", payload.customIndexUrl)
+                put("custom_variant_id", payload.customVariantId)
             } else {
-                kv("torch_version", payload.torchVersion)
-                kv("index_url", payload.indexUrl)
+                put("torch_version", payload.torchVersion)
+                put("index_url", payload.indexUrl)
             }
-        }.str
+        }.toString()
         logger.debug("DownloadTorchExecutor: paramJson (proxy masked)=${
             paramJson.replace(Regex("\"proxy\":\"[^\"]+\""), "\"proxy\":\"***\"")
         } [taskId=${task.id}]")

@@ -3,10 +3,12 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskService
 import kotlinx.serialization.encodeToString
 
@@ -34,7 +36,7 @@ object WorkerTaskWfIdListRoute : FredicaApi.Route {
             logger.info("[WorkerTaskWfIdListRoute] task_type=$taskType page=$page page_size=$pageSize")
 
             if (taskType.isBlank()) {
-                return buildValidJson { kv("error", "task_type is required") }
+                return buildJsonObject { put("error", "task_type is required") }.toValidJson()
             }
 
             val result = TaskService.repo.listWorkflowRunIdsByType(
@@ -46,7 +48,7 @@ object WorkerTaskWfIdListRoute : FredicaApi.Route {
             ValidJsonString(AppUtil.GlobalVars.json.encodeToString(result))
         } catch (e: Throwable) {
             logger.warn("[WorkerTaskWfIdListRoute] 查询失败: ${e.message}")
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 }

@@ -2,12 +2,14 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenConceptService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * POST /api/v1/WebenConceptUpdateRoute
@@ -36,7 +38,7 @@ object WebenConceptUpdateRoute : FredicaApi.Route {
         val existing = WebenConceptService.repo.getById(p.id)
         if (existing == null) {
             logger.debug("WebenConceptUpdateRoute: 概念不存在 id=${p.id}，返回 not found")
-            return buildValidJson { kv("ok", false); kv("error", "not found") }
+            return buildJsonObject { put("ok", false); put("error", "not found") }.toValidJson()
         }
 
         val nowSec = System.currentTimeMillis() / 1000L
@@ -52,7 +54,7 @@ object WebenConceptUpdateRoute : FredicaApi.Route {
             "WebenConceptUpdateRoute: 概念已更新 id=${p.id}" +
             " conceptType=${updated.conceptType}"
         )
-        return buildValidJson { kv("ok", true) }
+        return buildJsonObject { put("ok", true) }.toValidJson()
     }
 }
 

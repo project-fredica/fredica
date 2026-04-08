@@ -3,10 +3,12 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.AppConfigService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 此路由已迁移至 kmpJsBridge：`CheckBilibiliCredentialJsMessageHandler`。
@@ -24,10 +26,10 @@ object BilibiliCredentialCheckRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         logger.warn("BilibiliCredentialCheckRoute 已废弃，请使用 kmpJsBridge check_bilibili_credential")
-        return buildValidJson {
-            kv("configured", false)
-            kv("valid", false)
-            kv("message", "此接口已废弃，请使用桌面端 App")
-        }
+        return buildJsonObject {
+            put("configured", false)
+            put("valid", false)
+            put("message", "此接口已废弃，请使用桌面端 App")
+        }.toValidJson()
     }
 }

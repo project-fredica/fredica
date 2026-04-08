@@ -3,13 +3,15 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenConceptService
 import com.github.project_fredica.db.weben.WebenNoteService
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * GET /api/v1/WebenConceptGetRoute?id=<uuid>
@@ -32,7 +34,7 @@ object WebenConceptGetRoute : FredicaApi.Route {
 
         if (id == null) {
             logger.debug("WebenConceptGetRoute: 缺少 id 参数，返回 error")
-            return buildValidJson { kv("error", "missing id") }
+            return buildJsonObject { put("error", "missing id") }.toValidJson()
         }
 
         logger.debug("WebenConceptGetRoute: 查询概念详情 conceptId=$id")
@@ -40,7 +42,7 @@ object WebenConceptGetRoute : FredicaApi.Route {
         val concept = WebenConceptService.repo.getById(id)
         if (concept == null) {
             logger.debug("WebenConceptGetRoute: 概念不存在 conceptId=$id，返回 not found")
-            return buildValidJson { kv("error", "not found") }
+            return buildJsonObject { put("error", "not found") }.toValidJson()
         }
 
         val aliases = WebenConceptService.repo.listAliases(id)
@@ -53,11 +55,11 @@ object WebenConceptGetRoute : FredicaApi.Route {
             " aliases=${aliases.size} sources=${sources.size} notes=${notes.size}"
         )
 
-        return buildValidJson {
-            kv("concept",  ValidJsonString(json.encodeToString(concept)))
-            kv("aliases",  ValidJsonString(json.encodeToString(aliases)))
-            kv("sources",  ValidJsonString(json.encodeToString(sources)))
-            kv("notes",    ValidJsonString(json.encodeToString(notes)))
-        }
+        return buildJsonObject {
+            put("concept",  ValidJsonString(json.encodeToString(concept)).toJsonElement())
+            put("aliases",  ValidJsonString(json.encodeToString(aliases)).toJsonElement())
+            put("sources",  ValidJsonString(json.encodeToString(sources)).toJsonElement())
+            put("notes",    ValidJsonString(json.encodeToString(notes)).toJsonElement())
+        }.toValidJson()
     }
 }

@@ -1,8 +1,10 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.db.AppConfigService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 
@@ -27,14 +29,14 @@ class GetDeviceInfoJsMessageHandler : MyJsMessageHandler() {
         callback: (String) -> Unit
     ) {
         val config = AppConfigService.repo.getConfig()
-        val result = buildValidJson {
-            kv("device_info_json", config.deviceInfoJson)
-            kv("ffmpeg_probe_json", config.ffmpegProbeJson)
-            kv("ffmpeg_path", config.ffmpegPath)
-            kv("ffmpeg_hw_accel", config.ffmpegHwAccel)
-            kv("ffmpeg_auto_detect", config.ffmpegAutoDetect)
+        val result = buildJsonObject {
+            put("device_info_json", config.deviceInfoJson)
+            put("ffmpeg_probe_json", config.ffmpegProbeJson)
+            put("ffmpeg_path", config.ffmpegPath)
+            put("ffmpeg_hw_accel", config.ffmpegHwAccel)
+            put("ffmpeg_auto_detect", config.ffmpegAutoDetect)
         }
-        logger.debug("result.str is ${result.str}")
-        callback(result.str)
+        logger.debug("result.str is ${result}")
+        callback(result.toString())
     }
 }

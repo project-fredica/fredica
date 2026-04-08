@@ -14,7 +14,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
@@ -24,6 +24,8 @@ import com.github.project_fredica.db.PromptTemplateService
 import com.github.project_fredica.prompt.BuiltInTemplateLoader
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // 内置模板列表：由 BuiltInTemplateLoader 从 commonMain/resources/prompt_templates/ 加载。
 // 使用 lazy 确保首次访问时才触发 IO，避免静态初始化顺序问题。
@@ -63,7 +65,7 @@ object PromptTemplateListRoute : FredicaApi.Route {
             AppUtil.dumpJsonStr(items).getOrThrow()
         } catch (e: Throwable) {
             logger.warn("[PromptTemplateListRoute] 查询模板列表失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 }

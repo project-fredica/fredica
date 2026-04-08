@@ -2,10 +2,12 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.warn
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.weben.WebenConcept
@@ -51,15 +53,15 @@ object WebenConceptBatchImportRoute : FredicaApi.Route {
                 "WebenConceptBatchImportRoute: 导入完成 sourceId=${source.id}" +
                     " conceptCreated=$conceptCreated"
             )
-            buildValidJson {
-                kv("ok", true)
-                kv("source_id", source.id)
-                kv("concept_created", conceptCreated)
-                kv("concept_total", p.concepts.size)
-            }
+            buildJsonObject {
+                put("ok", true)
+                put("source_id", source.id)
+                put("concept_created", conceptCreated)
+                put("concept_total", p.concepts.size)
+            }.toValidJson()
         } catch (e: Throwable) {
             logger.warn("[WebenConceptBatchImportRoute] 批量导入失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 

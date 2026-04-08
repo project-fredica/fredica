@@ -3,8 +3,10 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.get
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.TorchMirrorVersionsCacheService
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -37,7 +39,7 @@ class GetTorchMirrorVersionsJsMessageHandler : MyJsMessageHandler() {
 
         val mirrorKey = params?.get("mirror_key")?.let { it as? JsonPrimitive }?.content ?: ""
         if (mirrorKey.isBlank()) {
-            callback(buildValidJson { kv("error", "mirror_key is required") }.str)
+            callback(buildJsonObject { put("error", "mirror_key is required") }.toString())
             return
         }
 
@@ -55,7 +57,7 @@ class GetTorchMirrorVersionsJsMessageHandler : MyJsMessageHandler() {
             TorchMirrorVersionsCacheService.getOrFetch(mirrorKey) { FredicaApi.PyUtil.get(path) }
         } catch (e: Throwable) {
             logger.warn("[GetTorchMirrorVersionsJsMessageHandler] fetch failed", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown error") }.str
+            buildJsonObject { put("error", e.message ?: "unknown error") }.toString()
         }
         callback(result)
     }

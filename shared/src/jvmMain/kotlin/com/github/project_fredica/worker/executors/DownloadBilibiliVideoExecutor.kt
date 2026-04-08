@@ -1,7 +1,6 @@
 package com.github.project_fredica.worker.executors
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.db.Task
@@ -19,6 +18,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 
 /**
@@ -110,7 +111,7 @@ object DownloadBilibiliVideoExecutor : WebSocketTaskExecutor() {
 
         logger.info("DownloadBilibiliVideoExecutor: 开始下载 bvid=$bvid P${payload.page} → $outputDir [taskId=${task.id}]")
 
-        val paramJson = buildValidJson { kv("output_dir", outputDir) }.str
+        val paramJson = buildJsonObject { put("output_dir", outputDir) }.toString()
 
         return@withContext try {
             val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(

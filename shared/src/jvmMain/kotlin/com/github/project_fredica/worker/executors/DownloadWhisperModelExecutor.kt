@@ -1,6 +1,5 @@
 package com.github.project_fredica.worker.executors
 
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.Task
@@ -15,6 +14,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 下载指定 Whisper 模型到本地缓存目录。
@@ -73,11 +74,11 @@ object DownloadWhisperModelExecutor : WebSocketTaskExecutor() {
         }
 
         val cfg = AppConfigService.repo.getConfig()
-        val paramJson = buildValidJson {
-            kv("model_name", payload.modelName)
-            kv("proxy", payload.proxy.ifBlank { cfg.proxyUrl })
-            if (cfg.fasterWhisperModelsDir.isNotBlank()) kv("models_dir", cfg.fasterWhisperModelsDir)
-        }.str
+        val paramJson = buildJsonObject {
+            put("model_name", payload.modelName)
+            put("proxy", payload.proxy.ifBlank { cfg.proxyUrl })
+            if (cfg.fasterWhisperModelsDir.isNotBlank()) put("models_dir", cfg.fasterWhisperModelsDir)
+        }.toString()
 
         logger.info("DownloadWhisperModelExecutor: 开始下载 model=${payload.modelName} [taskId=${task.id}]")
 

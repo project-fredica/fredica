@@ -4,10 +4,12 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.BilibiliSubtitleBodyCacheService
 import kotlinx.serialization.SerialName
@@ -65,7 +67,7 @@ object MaterialSubtitleContentRoute : FredicaApi.Route {
             AppUtil.dumpJsonStr(response).getOrThrow()
         } catch (e: Throwable) {
             logger.warn("[MaterialSubtitleContentRoute] 获取素材字幕正文失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 

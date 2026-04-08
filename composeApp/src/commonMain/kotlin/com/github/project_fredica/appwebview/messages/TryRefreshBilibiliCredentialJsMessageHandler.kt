@@ -2,8 +2,10 @@ package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.AppConfigService
@@ -80,37 +82,37 @@ class TryRefreshBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
         // sessdata 为空视为未配置，直接返回
         if (sessdata.isNullOrBlank()) {
             logger.debug("TryRefreshBilibiliCredential: 未配置 bilibiliSessdata，跳过")
-            callback(buildValidJson {
-                kv("success", false)
-                kv("refreshed", false)
-                kv("message", "未配置账号")
-            }.str)
+            callback(buildJsonObject {
+                put("success", false)
+                put("refreshed", false)
+                put("message", "未配置账号")
+            }.toString())
             return
         }
 
         logger.debug("TryRefreshBilibiliCredential: 开始调用 Python try-refresh")
-        val pyBody = buildValidJson {
-            kv("sessdata", sessdata)
-            kv("bili_jct", biliJct)
-            kv("buvid3", buvid3)
-            kv("buvid4", buvid4)
-            kv("dedeuserid", dedeuserid)
-            kv("ac_time_value", acTimeValue)
-            kv("proxy", proxy)
+        val pyBody = buildJsonObject {
+            put("sessdata", sessdata)
+            put("bili_jct", biliJct)
+            put("buvid3", buvid3)
+            put("buvid4", buvid4)
+            put("dedeuserid", dedeuserid)
+            put("ac_time_value", acTimeValue)
+            put("proxy", proxy)
         }
 
         try {
-            val raw = FredicaApi.PyUtil.post("/bilibili/credential/try-refresh", pyBody.str)
+            val raw = FredicaApi.PyUtil.post("/bilibili/credential/try-refresh", pyBody.toString())
             logger.info("TryRefreshBilibiliCredential: 完成，raw=$raw")
             callback(raw)
         } catch (e: Throwable) {
             logger.warn("TryRefreshBilibiliCredential: Python 服务异常", isHappensFrequently = false, err = e)
-            callback(buildValidJson {
-                kv("success", false)
-                kv("refreshed", false)
-                kv("message", "刷新失败: ${e.message}")
-                kv("error", e.message ?: "unknown")
-            }.str)
+            callback(buildJsonObject {
+                put("success", false)
+                put("refreshed", false)
+                put("message", "刷新失败: ${e.message}")
+                put("error", e.message ?: "unknown")
+            }.toString())
         }
     }
 }

@@ -3,9 +3,11 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
@@ -27,7 +29,7 @@ object MaterialActiveTasksRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
-            ?: return buildValidJson { kv("error", "material_id required") }
+            ?: return buildJsonObject { put("error", "material_id required") }.toValidJson()
 
         // listAll 在首次调用时触发 material 维度的 WorkflowRun 对账（StartupReconcileGuard 保护）
         val tasks = TaskStatusService.listAll(materialId = materialId, pageSize = 200).items

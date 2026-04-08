@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialCategoryService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -15,7 +17,7 @@ object MaterialSetCategoriesRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<MaterialSetCategoriesParam>().getOrThrow()
         MaterialCategoryService.repo.setMaterialCategories(p.materialId, p.categoryIds)
-        return buildValidJson { kv("updated", true) }
+        return buildJsonObject { put("updated", true) }.toValidJson()
     }
 }
 

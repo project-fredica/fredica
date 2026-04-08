@@ -1,16 +1,8 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.CaseFormat
-import com.github.project_fredica.apputil.CreateJsonUtil
-import com.github.project_fredica.apputil.asT
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.convertCase
 import com.github.project_fredica.apputil.createLogger
-import com.github.project_fredica.apputil.json
-import com.github.project_fredica.apputil.jsonPretty
-import com.github.project_fredica.apputil.loadJson
-import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import com.multiplatform.webview.jsbridge.IJsMessageHandler
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -18,6 +10,8 @@ import com.multiplatform.webview.web.WebViewNavigator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 abstract class MyJsMessageHandler : IJsMessageHandler {
     protected open val logger = createLogger()
@@ -56,7 +50,7 @@ abstract class MyJsMessageHandler : IJsMessageHandler {
                 }
             } catch (e: Throwable) {
                 logger.warn("[${this@MyJsMessageHandler.javaClass.simpleName}] unhandled error", isHappensFrequently = false, err = e)
-                callback(buildValidJson { kv("error", e.message ?: "unknown error") }.str)
+                callback(buildJsonObject { put("error", e.message ?: "unknown error") }.toString())
             }
         }
     }

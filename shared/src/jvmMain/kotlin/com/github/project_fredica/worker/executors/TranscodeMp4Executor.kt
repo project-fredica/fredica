@@ -1,7 +1,6 @@
 package com.github.project_fredica.worker.executors
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.json
@@ -20,8 +19,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 
 /**
@@ -168,15 +169,15 @@ object TranscodeMp4Executor : WebSocketTaskExecutor() {
 
         logger.info("TranscodeMp4Executor: 开始转码 $resolvedInputVideo → ${payload.outputPath} [accel=$resolvedAccel, ffmpeg=$ffmpegPath, taskId=${task.id}]")
 
-        val paramJson = buildValidJson {
-            kv("input_video", resolvedInputVideo)
-            kv("output_path", payload.outputPath)
-            kv("hw_accel", resolvedAccel)
-            kv("ffmpeg_path", ffmpegPath)
+        val paramJson = buildJsonObject {
+            put("input_video", resolvedInputVideo)
+            put("output_path", payload.outputPath)
+            put("hw_accel", resolvedAccel)
+            put("ffmpeg_path", ffmpegPath)
             if (resolvedInputAudio != null) {
-                kv("input_audio", resolvedInputAudio)
+                put("input_audio", resolvedInputAudio)
             }
-        }.str
+        }.toString()
 
         return@withContext try {
             val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(

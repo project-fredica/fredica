@@ -3,6 +3,9 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.LlmResponseCacheService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonNull
 
 object LlmCacheQueryRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
@@ -12,21 +15,21 @@ object LlmCacheQueryRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse {
-            return buildValidJson { kv("error", "invalid query params") }
+            return buildJsonObject { put("error", "invalid query params") }.toValidJson()
         }
 
         val keyHash = query["key_hash"]?.firstOrNull()
-            ?: return buildValidJson { kv("error", "key_hash required") }
+            ?: return buildJsonObject { put("error", "key_hash required") }.toValidJson()
 
         val cache = LlmResponseCacheService.repo.findByHash(keyHash)
 
-        return buildValidJson {
+        return buildJsonObject {
             if (cache != null) {
-                kv("cache", AppUtil.dumpJsonStr(cache).getOrThrow())
+                put("cache", AppUtil.dumpJsonStr(cache).getOrThrow().toJsonElement())
             } else {
-                kv("cache", null as String?)
+                put("cache", JsonNull)
             }
-            kv("revision", null as String?)
-        }
+            put("revision", JsonNull)
+        }.toValidJson()
     }
 }

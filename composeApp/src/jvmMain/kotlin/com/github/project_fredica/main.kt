@@ -20,7 +20,6 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.JVMPlatform
 import com.github.project_fredica.apputil.Platform
 import com.github.project_fredica.apputil.addShutdownHook
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.burningwaveExportAllModule
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.getPlatform

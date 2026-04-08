@@ -15,9 +15,11 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.json
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
 import com.github.project_fredica.db.Task
@@ -81,6 +83,6 @@ object NetworkTestRoute : FredicaApi.Route {
         WorkflowRunStatusService.create(run)
         TaskStatusService.createAll(listOf(task))
 
-        return buildValidJson { kv("workflow_run_id", workflowRunId); kv("task_id", taskId) }
+        return buildJsonObject { put("workflow_run_id", workflowRunId); put("task_id", taskId) }.toValidJson()
     }
 }

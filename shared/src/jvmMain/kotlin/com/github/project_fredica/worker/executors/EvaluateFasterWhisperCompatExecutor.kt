@@ -1,6 +1,5 @@
 package com.github.project_fredica.worker.executors
 
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.db.AppConfigService
@@ -15,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 评估本地 GPU 对 Whisper 各 compute_type / 模型的兼容性。
@@ -58,10 +59,10 @@ object EvaluateFasterWhisperCompatExecutor : WebSocketTaskExecutor() {
             .getOrDefault(Payload())
 
         val cfg = AppConfigService.repo.getConfig()
-        val paramJson = buildValidJson {
-            kv("proxy", payload.proxy.ifBlank { cfg.proxyUrl })
-            if (cfg.fasterWhisperModelsDir.isNotBlank()) kv("models_dir", cfg.fasterWhisperModelsDir)
-        }.str
+        val paramJson = buildJsonObject {
+            put("proxy", payload.proxy.ifBlank { cfg.proxyUrl })
+            if (cfg.fasterWhisperModelsDir.isNotBlank()) put("models_dir", cfg.fasterWhisperModelsDir)
+        }.toString()
 
         logger.info("EvaluateFasterWhisperCompatExecutor: 开始兼容性评估 [taskId=${task.id}]")
 

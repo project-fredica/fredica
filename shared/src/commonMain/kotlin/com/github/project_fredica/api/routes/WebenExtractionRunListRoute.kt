@@ -3,13 +3,15 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenExtractionRunService
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * GET /api/v1/WebenExtractionRunListRoute?source_id=<uuid>&limit=20&offset=0
@@ -44,7 +46,7 @@ object WebenExtractionRunListRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val sourceId = query["source_id"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-            ?: return buildValidJson { kv("error", "source_id 不能为空") }
+            ?: return buildJsonObject { put("error", "source_id 不能为空") }.toValidJson()
         val limit = query["limit"]?.firstOrNull()?.toIntOrNull()?.coerceIn(1, 100) ?: 20
         val offset = query["offset"]?.firstOrNull()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
 

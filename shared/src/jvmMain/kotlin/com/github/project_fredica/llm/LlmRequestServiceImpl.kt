@@ -3,7 +3,9 @@ package com.github.project_fredica.llm
 import com.github.project_fredica.apputil.*
 import com.github.project_fredica.db.LlmResponseCache
 import com.github.project_fredica.db.LlmResponseCacheService
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
@@ -123,12 +125,10 @@ private suspend fun simulateStream(text: String, onChunk: suspend (String) -> Un
 }
 
 private fun buildLlmRequestBody(req: LlmRequest): String {
-    val base = createJson {
-        obj {
-            kv("model", req.modelConfig.model)
-            kv("messages", AppUtil.GlobalVars.json.parseToJsonElement(req.messages.raw).jsonArray)
-            kv("stream", true)  // 强制流式，所有 OpenAI 兼容模型都支持
-        }
+    val base = buildJsonObject {
+        put("model", req.modelConfig.model)
+        put("messages", AppUtil.GlobalVars.json.parseToJsonElement(req.messages.raw).jsonArray)
+        put("stream", true)  // 强制流式，所有 OpenAI 兼容模型都支持
     }.toMutableMap()
     // 透传 extraFields（temperature、max_tokens、response_format 等）
     req.extraFields?.forEach { (k, v) -> base[k] = v }

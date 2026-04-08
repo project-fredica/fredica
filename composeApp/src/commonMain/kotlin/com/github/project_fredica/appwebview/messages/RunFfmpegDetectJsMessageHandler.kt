@@ -1,8 +1,10 @@
 package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.AppConfigService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
@@ -44,15 +46,15 @@ class RunFfmpegDetectJsMessageHandler : MyJsMessageHandler() {
                 )
             )
 
-            val result = buildValidJson {
-                kv("device_info_json", deviceInfoJson)
-                kv("ffmpeg_probe_json", ffmpegProbeJson)
+            val result = buildJsonObject {
+                put("device_info_json", deviceInfoJson)
+                put("ffmpeg_probe_json", ffmpegProbeJson)
             }
-            callback(result.str)
+            callback(result.toString())
         } catch (e: Throwable) {
             logger.error("RunFfmpegDetectJsMessageHandler failed: ${e.message}")
-            val result = buildValidJson { kv("error", e.message ?: "unknown error") }
-            callback(result.str)
+            val result = buildJsonObject { put("error", e.message ?: "unknown error") }
+            callback(result.toString())
         }
     }
 }

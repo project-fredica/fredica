@@ -3,8 +3,10 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
 
 /**
@@ -29,10 +31,10 @@ object MaterialVideoCheckRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val p = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val materialId = p["material_id"]?.firstOrNull()
-            ?: return buildValidJson { kv("error", "MISSING_MATERIAL_ID") }
+            ?: return buildJsonObject { put("error", "MISSING_MATERIAL_ID") }.toValidJson()
 
         MaterialVideoService.repo.findById(materialId)
-            ?: return buildValidJson { kv("error", "MATERIAL_NOT_FOUND") }
+            ?: return buildJsonObject { put("error", "MATERIAL_NOT_FOUND") }.toValidJson()
 
         val mediaDir = AppUtil.Paths.materialMediaDir(materialId)
         val mp4File = mediaDir.resolve("video.mp4")
@@ -40,17 +42,17 @@ object MaterialVideoCheckRoute : FredicaApi.Route {
 
         // 双重校验：文件存在 + done 标记，防止转码中途返回不完整文件
         if (!mp4File.exists() || !doneFile.exists()) {
-            return buildValidJson {
-                kv("ready", false)
-                kv("file_mtime", null as Long?)
-                kv("file_size", null as Long?)
-            }
+            return buildJsonObject {
+                put("ready", false)
+                put("file_mtime", null as Long?)
+                put("file_size", null as Long?)
+            }.toValidJson()
         }
 
-        return buildValidJson {
-            kv("ready", true)
-            kv("file_mtime", mp4File.lastModified())
-            kv("file_size", mp4File.length())
-        }
+        return buildJsonObject {
+            put("ready", true)
+            put("file_mtime", mp4File.lastModified())
+            put("file_size", mp4File.length())
+        }.toValidJson()
     }
 }

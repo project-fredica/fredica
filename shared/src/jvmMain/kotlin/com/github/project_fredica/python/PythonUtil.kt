@@ -3,8 +3,6 @@ package com.github.project_fredica.python
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.JVMPlatform
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.apputil.createJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.getAsset
@@ -38,8 +36,10 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -366,7 +366,7 @@ object PythonUtil {
             ): String? = withContext(Dispatchers.IO) {
                 logger.debug("start websocketTask to ws $pth")
                 val paramJsonElement = if (paramJson.isBlank()) {
-                    createJson { obj { } }
+                    buildJsonObject { }
                 } else {
                     paramJson.loadJsonModel<JsonObject>().also {
                         if (it.isFailure) {
@@ -435,10 +435,10 @@ object PythonUtil {
 
                     try {
                         // Send init_param_and_run command
-                        val initCmd = buildValidJson {
-                            kv("command", "init_param_and_run")
-                            kv("data", paramJsonElement)
-                        }.str
+                        val initCmd = buildJsonObject {
+                            put("command", "init_param_and_run")
+                            put("data", paramJsonElement)
+                        }.toString()
                         send(Frame.Text(initCmd))
                         logger.debug("websocketTask sent init_param_and_run for $pth")
                         var lastPct = -1

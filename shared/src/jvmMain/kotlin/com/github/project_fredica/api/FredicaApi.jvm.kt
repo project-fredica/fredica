@@ -33,8 +33,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 
 
@@ -355,11 +357,11 @@ object FredicaApiJvmService {
                      err.message?.contains("WSAECONNABORTED", ignoreCase = true) == true ||
                      err.cause?.message?.contains("中止了一个已建立的连接") == true)
                 ) "OpenClashPAC" else null
-                val errorJson = buildValidJson {
-                    kv("error", err.message ?: err::class.simpleName ?: "unknown")
-                    if (fixAdvice != null) kv("FredicaFixBugAdvice", fixAdvice)
+                val errorJson = buildJsonObject {
+                    put("error", err.message ?: err::class.simpleName ?: "unknown")
+                    if (fixAdvice != null) put("FredicaFixBugAdvice", fixAdvice)
                 }
-                call.respondText(errorJson.str, ContentType.Application.Json, HttpStatusCode.InternalServerError)
+                call.respondText(errorJson.toString(), ContentType.Application.Json, HttpStatusCode.InternalServerError)
             }
         }
 

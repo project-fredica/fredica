@@ -1,7 +1,6 @@
 package com.github.project_fredica.worker.executors
 
 import com.github.project_fredica.apputil.PyCallGuard
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.Task
@@ -16,6 +15,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.security.MessageDigest
 
@@ -123,11 +124,11 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
 
             File(payload.outputDir).mkdirs()
 
-            val paramJson = buildValidJson {
-                kv("video_path", payload.inputVideoPath)
-                kv("output_dir", payload.outputDir)
-                kv("chunk_duration_sec", payload.chunkDurationSec)
-            }.str
+            val paramJson = buildJsonObject {
+                put("video_path", payload.inputVideoPath)
+                put("output_dir", payload.outputDir)
+                put("chunk_duration_sec", payload.chunkDurationSec)
+            }.toString()
 
             logger.info("ExtractAudioExecutor: 开始提取音频 input=${payload.inputVideoPath} [taskId=${task.id}]")
 
@@ -147,10 +148,10 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
                     // 写入 done 文件，记录 hash 和切段参数
                     if (inputFile.exists()) {
                         val hash = sha256(inputFile)
-                        val doneContent = buildValidJson {
-                            kv("input_hash", hash)
-                            kv("chunk_duration_sec", payload.chunkDurationSec)
-                        }.str
+                        val doneContent = buildJsonObject {
+                            put("input_hash", hash)
+                            put("chunk_duration_sec", payload.chunkDurationSec)
+                        }.toString()
                         doneFile.writeText(doneContent)
                         logger.debug("ExtractAudioExecutor: 写入 done 文件 hash=${hash.take(12)}… [taskId=${task.id}]")
                     }

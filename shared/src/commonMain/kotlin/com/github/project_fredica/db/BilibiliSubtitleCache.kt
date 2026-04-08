@@ -7,7 +7,8 @@ import com.github.project_fredica.api.routes.BilibiliVideoSubtitleRoute
 import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
 import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.PyCallGuard
-import com.github.project_fredica.apputil.buildValidJson
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJson
 import kotlinx.serialization.SerialName
@@ -106,18 +107,18 @@ object BilibiliSubtitleMetaCacheService {
         cfg: BilibiliApiPythonCredentialConfig,
     ): String = fetchOrLoad(bvid, pageIndex, isUpdate) {
         val hasCreds = cfg.bilibiliSessdata.isNotBlank()
-        val credBody = buildValidJson {
-            kv("sessdata", cfg.bilibiliSessdata)
-            kv("bili_jct", cfg.bilibiliBiliJct)
-            kv("buvid3", cfg.bilibiliBuvid3)
-            kv("buvid4", cfg.bilibiliBuvid4)
-            kv("dedeuserid", cfg.bilibiliDedeuserid)
-            kv("ac_time_value", cfg.bilibiliAcTimeValue)
-            kv("proxy", cfg.bilibiliProxy)
+        val credBody = buildJsonObject {
+            put("sessdata", cfg.bilibiliSessdata)
+            put("bili_jct", cfg.bilibiliBiliJct)
+            put("buvid3", cfg.bilibiliBuvid3)
+            put("buvid4", cfg.bilibiliBuvid4)
+            put("dedeuserid", cfg.bilibiliDedeuserid)
+            put("ac_time_value", cfg.bilibiliAcTimeValue)
+            put("proxy", cfg.bilibiliProxy)
         }
         logger.debug("调用 Python bvid=${bvid} pageIndex=${pageIndex}")
         val raw = FredicaApi.PyUtil.post(
-            "/bilibili/video/subtitle-meta/$bvid/$pageIndex", credBody.str, timeoutMs = 5 * 60_000L
+            "/bilibili/video/subtitle-meta/$bvid/$pageIndex", credBody.toString(), timeoutMs = 5 * 60_000L
         )
         val isSuccess = computeIsSuccess(raw, bvid, hasCreds)
         raw to isSuccess
@@ -235,9 +236,9 @@ object BilibiliSubtitleBodyCacheService {
         val urlKey = BilibiliSubtitleUtil.extractSubtitleUrlKey(subtitleUrlFieldValue)
         logger.debug("请求 urlKey=$urlKey is_update=${isUpdate} original_url=${subtitleUrlFieldValue}")
         val res = fetchOrLoad(urlKey, isUpdate) {
-            val pyBody = buildValidJson { kv("subtitle_url", subtitleUrlFieldValue) }
+            val pyBody = buildJsonObject { put("subtitle_url", subtitleUrlFieldValue) }
             logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
-            val row = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.str, timeoutMs = 5 * 60_000L)
+            val row = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.toString(), timeoutMs = 5 * 60_000L)
             row to computeIsSuccess(row)
         }
         logger.debug("返回结果 urlKey=$urlKey")

@@ -24,7 +24,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
@@ -33,6 +33,8 @@ import com.github.project_fredica.db.PromptTemplate
 import com.github.project_fredica.db.PromptTemplateService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 object PromptTemplateSaveRoute : FredicaApi.Route {
     private val logger = createLogger { "PromptTemplateSaveRoute" }
@@ -62,14 +64,14 @@ object PromptTemplateSaveRoute : FredicaApi.Route {
                     "[PromptTemplateSaveRoute] 拒绝写入：id 以 sys_ 开头 id=${p.id}",
                     isHappensFrequently = false, err = null
                 )
-                return buildValidJson { kv("error", "id 不能以 sys_ 开头，该命名空间保留给系统模板") }
+                return buildJsonObject { put("error", "id 不能以 sys_ 开头，该命名空间保留给系统模板") }.toValidJson()
             }
 
             val nowSec = System.currentTimeMillis() / 1000L
 
             val trimmedName = p.name.trim()
             if (trimmedName.isBlank()) {
-                return buildValidJson { kv("error", "模板名称不能为空") }
+                return buildJsonObject { put("error", "模板名称不能为空") }.toValidJson()
             }
 
             // 若已存在则保留原 created_at；否则以当前时间为准
@@ -95,7 +97,7 @@ object PromptTemplateSaveRoute : FredicaApi.Route {
             AppUtil.dumpJsonStr(saved).getOrThrow()
         } catch (e: Throwable) {
             logger.warn("[PromptTemplateSaveRoute] 保存模板失败", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown") }
+            buildJsonObject { put("error", e.message ?: "unknown") }.toValidJson()
         }
     }
 }

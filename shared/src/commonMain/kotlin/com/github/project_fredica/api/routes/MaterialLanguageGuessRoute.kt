@@ -3,7 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
@@ -47,9 +47,9 @@ object MaterialLanguageGuessRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
-            ?: return buildValidJson { kv("language", null as String?) }
+            ?: return buildJsonObject { put("language", null as String?) }.toValidJson()
 
-        return buildValidJson { kv("language", guessLanguage(materialId)) }
+        return buildJsonObject { put("language", guessLanguage(materialId)) }.toValidJson()
     }
 
     private suspend fun guessLanguage(materialId: String): String? {

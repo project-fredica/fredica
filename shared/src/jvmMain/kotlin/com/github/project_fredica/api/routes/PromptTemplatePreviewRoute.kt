@@ -17,7 +17,6 @@ package com.github.project_fredica.api.routes
 //     { "type": "error",  "error": "...", "error_type": "..." }
 // =============================================================================
 
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
@@ -30,6 +29,8 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.routing.RoutingContext
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 object PromptTemplatePreviewRoute {
     private val logger = createLogger { "PromptTemplatePreviewRoute" }
@@ -59,29 +60,29 @@ object PromptTemplatePreviewRoute {
             call.respondBytesWriter(ContentType.Text.EventStream) {
                 // 先发所有日志条目
                 for (log in result.logs) {
-                    val event = buildValidJson {
-                        kv("type", "log")
-                        kv("level", log.level)
-                        kv("args", log.args)
-                        kv("ts", log.ts)
+                    val event = buildJsonObject {
+                        put("type", "log")
+                        put("level", log.level)
+                        put("args", log.args)
+                        put("ts", log.ts)
                     }
-                    writeStringUtf8("data: ${event.str}\n\n")
+                    writeStringUtf8("data: ${event}\n\n")
                     flush()
                 }
                 // 再发最终结果或错误
                 if (result.error != null) {
-                    val event = buildValidJson {
-                        kv("type", "error")
-                        kv("error", result.error)
-                        kv("error_type", result.errorType ?: "unknown")
+                    val event = buildJsonObject {
+                        put("type", "error")
+                        put("error", result.error)
+                        put("error_type", result.errorType ?: "unknown")
                     }
-                    writeStringUtf8("data: ${event.str}\n\n")
+                    writeStringUtf8("data: ${event}\n\n")
                 } else {
-                    val event = buildValidJson {
-                        kv("type", "result")
-                        kv("prompt_text", result.promptText ?: "")
+                    val event = buildJsonObject {
+                        put("type", "result")
+                        put("prompt_text", result.promptText ?: "")
                     }
-                    writeStringUtf8("data: ${event.str}\n\n")
+                    writeStringUtf8("data: ${event}\n\n")
                 }
                 flush()
             }

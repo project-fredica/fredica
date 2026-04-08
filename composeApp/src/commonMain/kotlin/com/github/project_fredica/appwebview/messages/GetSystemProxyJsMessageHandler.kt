@@ -1,8 +1,10 @@
 package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.readNetworkProxyUrl
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
@@ -37,6 +39,6 @@ class GetSystemProxyJsMessageHandler : MyJsMessageHandler() {
         } else {
             logger.debug("[GetSystemProxyJsMessageHandler] detected proxy=$addr")
         }
-        callback(buildValidJson { kv("proxy_url", addr) }.str)
+        callback(buildJsonObject { put("proxy_url", addr) }.toString())
     }
 }

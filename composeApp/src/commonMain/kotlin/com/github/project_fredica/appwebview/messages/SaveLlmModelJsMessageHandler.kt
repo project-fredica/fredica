@@ -1,7 +1,9 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.AppConfigService
@@ -33,7 +35,7 @@ class SaveLlmModelJsMessageHandler : MyJsMessageHandler() {
             val conflict = models.any { it.appModelId == incoming.appModelId && it.id != incoming.id }
             if (conflict) {
                 logger.error("SaveLlmModelJsMessageHandler: appModelId 冲突 appModelId=${incoming.appModelId}")
-                callback(buildValidJson { kv("error", "appModelId '${incoming.appModelId}' 已被其他模型使用") }.str)
+                callback(buildJsonObject { put("error", "appModelId '${incoming.appModelId}' 已被其他模型使用") }.toString())
                 return
             }
             incoming

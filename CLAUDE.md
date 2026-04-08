@@ -87,7 +87,7 @@ cd fredica-webui && npm install && npm run dev
 
 | 文件 | 主要 API |
 |------|---------|
-| `jsons.kt` | `buildValidJson { kv() }` · `loadJsonModel<T>()` · `dumpJsonStr()` · `asT<T>()` · 详见 [docs/dev/json-handling.md](docs/dev/json-handling.md) |
+| `jsons.kt` | `buildJsonObject { put() }.toValidJson()` · `loadJsonModel<T>()` · `dumpJsonStr()` · `asT<T>()` · 详见 [docs/dev/json-handling.md](docs/dev/json-handling.md) |
 | `commonUtil.kt` | `Result.wrap { }` · `wrapAsync { }` · `Double.toFixed(n)` |
 | `logger.kt` | `createLogger("name")` → `logger.error(msg, throwable)` 需显式导入扩展函数 |
 | `AppUtil.kt` | `Paths`（应用路径）· `GlobalVars`（全局 HTTP 客户端）· 时间工具 |
@@ -132,7 +132,7 @@ cd fredica-webui && npm install && npm run dev
 - `logger.warn` 只有单参重载，Throwable 要手动提取 `.message`
 - GET 路由 param：`Map<String, List<String>>` JSON，用 `query["key"]?.firstOrNull()`
 - `FredicaApi.PyUtil.post()` 在 jvmMain 需 `import com.github.project_fredica.api.post`
-- `kv()` / `obj()` 是 `buildValidJson { }` DSL 作用域方法，不可顶层 import
+- `kv()` / `obj()` 已删除，改用 `buildJsonObject { put(...) }`
 - `PromptGraphDb` / `PromptGraphEngine` 在 commonMain（非 jvmMain）
 - `assertNotNull(x)` 返回 `T`（非 Unit），作为 runBlocking 末尾语句需加 `Unit`
 
@@ -158,7 +158,7 @@ cd fredica-webui && npm install && npm run dev
 
 详见 [docs/dev/json-handling.md](docs/dev/json-handling.md)，核心规则：
 
-- **Kotlin 构建 JSON**：用 `buildValidJson { kv("k", v) }`，禁止字符串插值拼接 JSON
+- **Kotlin 构建 JSON**：用 `buildJsonObject { put("k", v) }.toValidJson()`（路由返回）或 `.toString()`（paramJson 等），禁止字符串插值拼接 JSON
 - **Kotlin 序列化**：优先用扩展函数 `elem.dumpJsonStr()` / `AppUtil.dumpJsonStr(obj)`，不直接调 `AppUtil.GlobalVars.json.encodeToString(...)`
 - **Kotlin 反序列化**：优先用扩展函数 `str.loadJson()` / `str.loadJsonModel<T>()`，不直接调 `AppUtil.GlobalVars.json.decodeFromString(...)`
 - **Kotlin 提取字段**：`jsonObj["key"].asT<String>()`

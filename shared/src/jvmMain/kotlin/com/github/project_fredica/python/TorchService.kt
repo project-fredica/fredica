@@ -4,7 +4,6 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.get
 import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.json
@@ -17,9 +16,11 @@ import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 /**
@@ -65,23 +66,23 @@ object TorchService {
     /** 获取当前 torch 配置与推荐信息。 */
     suspend fun getInfo(): String {
         val cfg = AppConfigService.repo.getConfig()
-        return buildValidJson {
-            kv("torch_variant", cfg.torchVariant)
-            kv("torch_recommended_variant", cfg.torchRecommendedVariant)
-            kv("torch_recommendation_json", cfg.torchRecommendationJson)
-            kv("torch_download_use_proxy", cfg.torchDownloadUseProxy)
-            kv("torch_download_proxy_url", cfg.torchDownloadProxyUrl)
-            kv("torch_download_index_url", cfg.torchDownloadIndexUrl)
-            kv("torch_custom_packages", cfg.torchCustomPackages)
-            kv("torch_custom_index_url", cfg.torchCustomIndexUrl)
-            kv("torch_custom_variant_id", cfg.torchCustomVariantId)
-        }.str
+        return buildJsonObject {
+            put("torch_variant", cfg.torchVariant)
+            put("torch_recommended_variant", cfg.torchRecommendedVariant)
+            put("torch_recommendation_json", cfg.torchRecommendationJson)
+            put("torch_download_use_proxy", cfg.torchDownloadUseProxy)
+            put("torch_download_proxy_url", cfg.torchDownloadProxyUrl)
+            put("torch_download_index_url", cfg.torchDownloadIndexUrl)
+            put("torch_custom_packages", cfg.torchCustomPackages)
+            put("torch_custom_index_url", cfg.torchCustomIndexUrl)
+            put("torch_custom_variant_id", cfg.torchCustomVariantId)
+        }.toString()
     }
 
     /** 保存用户选择的 torch variant 及代理配置。 */
     suspend fun saveConfig(param: SaveConfigParam): String {
         if (param.torchVariant.isBlank()) {
-            return buildValidJson { kv("error", "MISSING_TORCH_VARIANT") }.str
+            return buildJsonObject { put("error", "MISSING_TORCH_VARIANT") }.toString()
         }
         val cfg = AppConfigService.repo.getConfig()
         AppConfigService.repo.updateConfig(cfg.copy(
@@ -93,7 +94,7 @@ object TorchService {
             torchCustomIndexUrl   = param.torchCustomIndexUrl,
             torchCustomVariantId  = param.torchCustomVariantId,
         ))
-        return buildValidJson { kv("ok", true) }.str
+        return buildJsonObject { put("ok", true) }.toString()
     }
 
     // ── GPU 探测 ───────────────────────────────────────────────────────────────
@@ -112,10 +113,10 @@ object TorchService {
             torchRecommendedVariant = recommendedVariant,
             torchRecommendationJson = resultText,
         ))
-        return buildValidJson {
-            kv("torch_recommended_variant", recommendedVariant)
-            kv("torch_recommendation_json", resultText)
-        }.str
+        return buildJsonObject {
+            put("torch_recommended_variant", recommendedVariant)
+            put("torch_recommendation_json", resultText)
+        }.toString()
     }
 
     // ── 安装检测 ───────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ object TorchService {
         useProxy: Boolean,
         proxy: String,
     ): String {
-        if (indexUrl.isBlank()) return buildValidJson { kv("command", "") }.str
+        if (indexUrl.isBlank()) return buildJsonObject { put("command", "") }.toString()
         val downloadDir = AppUtil.Paths.torchDownloadDir.absolutePath
         val path = buildString {
             append("/torch/pip-command?index_url=$indexUrl")
@@ -160,7 +161,7 @@ object TorchService {
 
     /** 探测各镜像站对指定 variant 的支持情况。 */
     suspend fun mirrorCheck(variant: String, useProxy: Boolean, proxy: String): String {
-        if (variant.isBlank()) return buildValidJson { kv("error", "variant is required") }.str
+        if (variant.isBlank()) return buildJsonObject { put("error", "variant is required") }.toString()
         val path = buildString {
             append("/torch/mirror-check?variant=$variant")
             if (useProxy && proxy.isNotBlank()) append("&proxy=$proxy")
@@ -181,7 +182,7 @@ object TorchService {
 
     /** 查询指定镜像站支持的 variant 列表（带缓存）。 */
     suspend fun mirrorVersions(mirrorKey: String, useProxy: Boolean, proxy: String): String {
-        if (mirrorKey.isBlank()) return buildValidJson { kv("error", "mirror_key is required") }.str
+        if (mirrorKey.isBlank()) return buildJsonObject { put("error", "mirror_key is required") }.toString()
         val path = buildString {
             append("/torch/mirror-versions/?mirror_key=$mirrorKey")
             if (useProxy && proxy.isNotBlank()) append("&proxy=$proxy")
@@ -201,10 +202,10 @@ object TorchService {
         val activeTask = TaskService.repo.listByType("DOWNLOAD_TORCH")
             .firstOrNull { it.status in ACTIVE_STATUSES }
         if (activeTask != null) {
-            return buildValidJson {
-                kv("error", "TASK_ALREADY_ACTIVE")
-                kv("workflow_run_id", activeTask.workflowRunId)
-            }.str
+            return buildJsonObject {
+                put("error", "TASK_ALREADY_ACTIVE")
+                put("workflow_run_id", activeTask.workflowRunId)
+            }.toString()
         }
 
         val payload = AppUtil.dumpJsonStr(param).getOrThrow().str
@@ -234,20 +235,20 @@ object TorchService {
             )
         )
 
-        return buildValidJson {
-            kv("task_id", taskId)
-            kv("workflow_run_id", workflowRunId)
-        }.str
+        return buildJsonObject {
+            put("task_id", taskId)
+            put("workflow_run_id", workflowRunId)
+        }.toString()
     }
 
     /** 查询当前活跃的 DOWNLOAD_TORCH 任务（页面刷新后恢复进度面板用）。 */
     suspend fun getActiveDownload(): String {
         val task = TaskService.repo.listByType("DOWNLOAD_TORCH")
             .firstOrNull { it.status in ACTIVE_STATUSES }
-        return buildValidJson {
-            kv("workflow_run_id", task?.workflowRunId ?: "")
-            kv("task_id", task?.id ?: "")
-            kv("status", task?.status ?: "")
-        }.str
+        return buildJsonObject {
+            put("workflow_run_id", task?.workflowRunId ?: "")
+            put("task_id", task?.id ?: "")
+            put("status", task?.status ?: "")
+        }.toString()
     }
 }

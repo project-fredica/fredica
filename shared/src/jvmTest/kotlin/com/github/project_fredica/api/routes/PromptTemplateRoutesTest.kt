@@ -8,13 +8,14 @@ package com.github.project_fredica.api.routes
 // 每个测试方法独立初始化，互不干扰。
 // =============================================================================
 
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.PromptTemplate
 import com.github.project_fredica.db.PromptTemplateDb
 import com.github.project_fredica.db.PromptTemplateService
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import org.ktorm.database.Database
@@ -56,7 +57,7 @@ class PromptTemplateRoutesTest {
 
     /** 构造 GET 路由参数：`{"key":["value"]}` 格式（Map<String, List<String>>） */
     private fun getParam(key: String, value: String) =
-        buildValidJson { kv(key, JsonArray(listOf(JsonPrimitive(value)))) }
+        buildJsonObject { put(key, JsonArray(listOf(JsonPrimitive(value)))) }.toString()
 
     // ── PromptTemplateListRoute ───────────────────────────────────────────────
 
@@ -75,13 +76,13 @@ class PromptTemplateRoutesTest {
     @Test
     fun `list returns user templates alongside system templates`() = runBlocking {
         // 先保存一个用户模板
-        val saveParam = buildValidJson {
-            kv("id", "route-test-tpl-1")
-            kv("name", "测试模板1")
-            kv("script_code", "async function main() { return 'x' }")
-            kv("category", "weben_extract")
-        }
-        PromptTemplateSaveRoute.handler(saveParam.str)
+        val saveParam = buildJsonObject {
+            put("id", "route-test-tpl-1")
+            put("name", "测试模板1")
+            put("script_code", "async function main() { return 'x' }")
+            put("category", "weben_extract")
+        }.toString()
+        PromptTemplateSaveRoute.handler(saveParam)
 
         val result = PromptTemplateListRoute.handler("{}")
         val items = result.str.loadJsonModel<List<PromptTemplateListItem>>().getOrThrow()
@@ -93,16 +94,16 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `list with category filter returns matching templates only`() = runBlocking {
-        val saveParam = buildValidJson {
-            kv("id", "route-test-tpl-cat")
-            kv("name", "分类测试")
-            kv("script_code", "async function main() { return 'y' }")
-            kv("category", "other_cat")
-        }
-        PromptTemplateSaveRoute.handler(saveParam.str)
+        val saveParam = buildJsonObject {
+            put("id", "route-test-tpl-cat")
+            put("name", "分类测试")
+            put("script_code", "async function main() { return 'y' }")
+            put("category", "other_cat")
+        }.toString()
+        PromptTemplateSaveRoute.handler(saveParam)
 
         val filteredParam = getParam("category", "other_cat")
-        val result = PromptTemplateListRoute.handler(filteredParam.str)
+        val result = PromptTemplateListRoute.handler(filteredParam)
         val items = result.str.loadJsonModel<List<PromptTemplateListItem>>().getOrThrow()
 
         assertTrue(items.all { it.category == "other_cat" }, "过滤后只应返回指定 category")
@@ -114,17 +115,15 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `get returns full template including script_code`() = runBlocking {
-        val saveParam = buildValidJson {
-            kv("id", "route-get-tpl")
-            kv("name", "获取测试")
-            kv("script_code", "async function main() { return 'full' }")
-            kv("schema_target", "weben_v1")
-        }
-        PromptTemplateSaveRoute.handler(saveParam.str)
+        val saveParam = buildJsonObject {
+            put("id", "route-get-tpl")
+            put("name", "获取测试")
+            put("script_code", "async function main() { return 'full' }")
+            put("schema_target", "weben_v1")
+        }.toString()
+        PromptTemplateSaveRoute.handler(saveParam)
 
-        val result = PromptTemplateGetRoute.handler(
-            getParam("id", "route-get-tpl").str
-        )
+        val result = PromptTemplateGetRoute.handler(getParam("id", "route-get-tpl"))
         val tpl = result.str.loadJsonModel<PromptTemplate>().getOrThrow()
 
         assertEquals("route-get-tpl", tpl.id)
@@ -137,9 +136,7 @@ class PromptTemplateRoutesTest {
     @Test
     fun `get returns system template from built-in list`() = runBlocking {
         val sysId = BUILT_IN_PROMPT_TEMPLATES.first().id
-        val result = PromptTemplateGetRoute.handler(
-            getParam("id", sysId).str
-        )
+        val result = PromptTemplateGetRoute.handler(getParam("id", sysId))
         val tpl = result.str.loadJsonModel<PromptTemplate>().getOrThrow()
 
         assertEquals(sysId, tpl.id)
@@ -149,9 +146,7 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `get returns error for nonexistent template`() = runBlocking {
-        val result = PromptTemplateGetRoute.handler(
-            getParam("id", "no-such-tpl").str
-        )
+        val result = PromptTemplateGetRoute.handler(getParam("id", "no-such-tpl"))
         @Serializable data class ErrorResp(val error: String? = null)
         val resp = result.str.loadJsonModel<ErrorResp>().getOrThrow()
         assertNotNull(resp.error)
@@ -163,15 +158,15 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `save creates new user template and returns it`() = runBlocking {
-        val param = buildValidJson {
-            kv("id", "route-save-new")
-            kv("name", "新模板")
-            kv("description", "描述文字")
-            kv("category", "weben_extract")
-            kv("script_code", "async function main() { return 'saved' }")
-            kv("schema_target", "weben_v1")
-        }
-        val result = PromptTemplateSaveRoute.handler(param.str)
+        val param = buildJsonObject {
+            put("id", "route-save-new")
+            put("name", "新模板")
+            put("description", "描述文字")
+            put("category", "weben_extract")
+            put("script_code", "async function main() { return 'saved' }")
+            put("schema_target", "weben_v1")
+        }.toString()
+        val result = PromptTemplateSaveRoute.handler(param)
         val tpl = result.str.loadJsonModel<PromptTemplate>().getOrThrow()
 
         assertEquals("route-save-new", tpl.id)
@@ -183,12 +178,12 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `save rejects id starting with sys_`() = runBlocking {
-        val param = buildValidJson {
-            kv("id", "sys_forbidden")
-            kv("name", "禁止写入")
-            kv("script_code", "async function main() { return '' }")
-        }
-        val result = PromptTemplateSaveRoute.handler(param.str)
+        val param = buildJsonObject {
+            put("id", "sys_forbidden")
+            put("name", "禁止写入")
+            put("script_code", "async function main() { return '' }")
+        }.toString()
+        val result = PromptTemplateSaveRoute.handler(param)
         @Serializable data class ErrorResp(val error: String? = null)
         val resp = result.str.loadJsonModel<ErrorResp>().getOrThrow()
         assertNotNull(resp.error)
@@ -201,12 +196,12 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `save rejects blank name`() = runBlocking {
-        val param = buildValidJson {
-            kv("id", "route-blank-name")
-            kv("name", "   ")
-            kv("script_code", "async function main() { return '' }")
-        }
-        val result = PromptTemplateSaveRoute.handler(param.str)
+        val param = buildJsonObject {
+            put("id", "route-blank-name")
+            put("name", "   ")
+            put("script_code", "async function main() { return '' }")
+        }.toString()
+        val result = PromptTemplateSaveRoute.handler(param)
         @Serializable data class ErrorResp(val error: String? = null)
         val resp = result.str.loadJsonModel<ErrorResp>().getOrThrow()
         assertNotNull(resp.error)
@@ -216,24 +211,24 @@ class PromptTemplateRoutesTest {
     @Test
     fun `save update preserves original created_at`() = runBlocking {
         val now = System.currentTimeMillis() / 1000L
-        val param = buildValidJson {
-            kv("id", "route-preserve-ts")
-            kv("name", "时间戳测试")
-            kv("script_code", "async function main() { return 'v1' }")
-        }
-        PromptTemplateSaveRoute.handler(param.str)
+        val param = buildJsonObject {
+            put("id", "route-preserve-ts")
+            put("name", "时间戳测试")
+            put("script_code", "async function main() { return 'v1' }")
+        }.toString()
+        PromptTemplateSaveRoute.handler(param)
 
         val firstSaved = PromptTemplateService.repo.getById("route-preserve-ts")
         assertNotNull(firstSaved)
         val originalCreatedAt = firstSaved.createdAt
 
         // 稍后更新
-        val updateParam = buildValidJson {
-            kv("id", "route-preserve-ts")
-            kv("name", "时间戳测试更新")
-            kv("script_code", "async function main() { return 'v2' }")
-        }
-        PromptTemplateSaveRoute.handler(updateParam.str)
+        val updateParam = buildJsonObject {
+            put("id", "route-preserve-ts")
+            put("name", "时间戳测试更新")
+            put("script_code", "async function main() { return 'v2' }")
+        }.toString()
+        PromptTemplateSaveRoute.handler(updateParam)
 
         val updated = PromptTemplateService.repo.getById("route-preserve-ts")
         assertNotNull(updated)
@@ -246,15 +241,15 @@ class PromptTemplateRoutesTest {
 
     @Test
     fun `delete removes user template and returns ok`() = runBlocking {
-        val saveParam = buildValidJson {
-            kv("id", "route-del-tpl")
-            kv("name", "待删除")
-            kv("script_code", "async function main() { return '' }")
-        }
-        PromptTemplateSaveRoute.handler(saveParam.str)
+        val saveParam = buildJsonObject {
+            put("id", "route-del-tpl")
+            put("name", "待删除")
+            put("script_code", "async function main() { return '' }")
+        }.toString()
+        PromptTemplateSaveRoute.handler(saveParam)
 
         val result = PromptTemplateDeleteRoute.handler(
-            buildValidJson { kv("id", "route-del-tpl") }.str
+            buildJsonObject { put("id", "route-del-tpl") }.toString()
         )
         val resp = result.str.loadJsonModel<DeleteResponse>().getOrThrow()
         assertTrue(resp.ok == true)
@@ -267,7 +262,7 @@ class PromptTemplateRoutesTest {
     @Test
     fun `delete returns error for system template id`() = runBlocking {
         val result = PromptTemplateDeleteRoute.handler(
-            buildValidJson { kv("id", "sys_weben_extract_v1") }.str
+            buildJsonObject { put("id", "sys_weben_extract_v1") }.toString()
         )
         val resp = result.str.loadJsonModel<DeleteResponse>().getOrThrow()
         assertFalse(resp.ok == true)
@@ -278,7 +273,7 @@ class PromptTemplateRoutesTest {
     @Test
     fun `delete returns error for nonexistent template`() = runBlocking {
         val result = PromptTemplateDeleteRoute.handler(
-            buildValidJson { kv("id", "no-such-template") }.str
+            buildJsonObject { put("id", "no-such-template") }.toString()
         )
         val resp = result.str.loadJsonModel<DeleteResponse>().getOrThrow()
         assertFalse(resp.ok == true)

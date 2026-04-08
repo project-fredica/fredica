@@ -3,8 +3,10 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.get
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
@@ -53,7 +55,7 @@ class GetTorchPipCommandJsMessageHandler : MyJsMessageHandler() {
         val indexUrlMode = (params?.get("index_url_mode") as? JsonPrimitive)?.contentOrNull ?: "replace"
 
         if (indexUrl.isBlank()) {
-            callback(buildValidJson { kv("command", "") }.str)
+            callback(buildJsonObject { put("command", "") }.toString())
             return
         }
 
@@ -72,7 +74,7 @@ class GetTorchPipCommandJsMessageHandler : MyJsMessageHandler() {
             FredicaApi.PyUtil.get(path)
         } catch (e: Throwable) {
             logger.warn("[GetTorchPipCommandJsMessageHandler] Python call failed for variant=$variant", isHappensFrequently = false, err = e)
-            buildValidJson { kv("error", e.message ?: "unknown error") }.str
+            buildJsonObject { put("error", e.message ?: "unknown error") }.toString()
         }
         callback(result)
     }

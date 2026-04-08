@@ -15,44 +15,56 @@ order: 120
 
 ## 1. Kotlin 层（`shared/src/commonMain/.../apputil/jsons.kt`）
 
-### 1.1 构建 JSON 对象 — `buildValidJson`
+### 1.1 构建 JSON 对象 — `buildJsonObject`
 
-最常用的构建方式，直接返回 `ValidJsonString`，**字符串值自动转义**，无 JSON 注入风险：
+使用标准库 `buildJsonObject { put(...) }` 构建 JSON，**字符串值自动转义**，无 JSON 注入风险：
 
 ```kotlin
 // ❌ 危险：$id 若含引号或反斜杠会破坏 JSON 结构
 return ValidJsonString("""{"error":"not_found","id":"$id"}""")
 
-// ✅ 安全
-return buildValidJson {
-    kv("error", "not_found")
-    kv("id", id)
-}
+// ✅ 安全 — 返回 ValidJsonString（路由 handler 返回类型）
+return buildJsonObject {
+    put("error", "not_found")
+    put("id", id)
+}.toValidJson()
+
+// ✅ 安全 — 返回 String（Executor paramJson 等场景）
+val paramJson = buildJsonObject {
+    put("variant", variant)
+    put("download_dir", downloadDir)
+}.toString()
 ```
 
-`kv` 支持 `String?` / `Boolean?` / `Number?` / `JsonObject?` / `JsonArray?` / `JsonElement?` / `ValidJsonString?`，`kNull` 显式写入 JSON null。
+`put` 支持 `String?` / `Boolean?` / `Number?` / `JsonObject` / `JsonArray` / `JsonElement`，显式写入 null 用 `put("k", JsonNull)`。
 
-嵌套 `@Serializable` 子对象时，先转成 `JsonElement` 再传给 `kv`：
+嵌套 `@Serializable` 子对象时，先转成 `JsonElement` 再传给 `put`：
 
 ```kotlin
-return buildValidJson {
-    kv("pipeline", AppUtil.GlobalVars.json.encodeToJsonElement(pipeline))
-    kv("tasks",    AppUtil.GlobalVars.json.encodeToJsonElement(tasks))
-}
+return buildJsonObject {
+    put("pipeline", AppUtil.GlobalVars.json.encodeToJsonElement(pipeline))
+    put("tasks",    AppUtil.GlobalVars.json.encodeToJsonElement(tasks))
+}.toValidJson()
 ```
 
-需要拿到 `JsonObject`（而非直接序列化为字符串）时，用 `createJson`：
+### 1.2 `ValidJsonString` 与 `toValidJson()`
+
+`ValidJsonString` 是 `@JvmInline value class`，持有"已知合法"的 JSON 字符串，是路由 handler 的返回类型。`toString()` 直接返回 JSON 内容：
 
 ```kotlin
-val body: JsonObject = createJson {
-    obj {
-        kv("page", 1)
-        kv("size", 20)
-    }
-}
+val vjs: ValidJsonString = buildJsonObject { put("ok", true) }.toValidJson()
+println(vjs)          // {"ok":true}
+println(vjs.str)      // {"ok":true}
+val elem = vjs.toJsonElement()  // 转回 JsonElement 树
 ```
 
-### 1.2 序列化 — `dumpJsonStr`
+`JsonObject.toValidJson()` 是定义在 `jsons.kt` 中的扩展函数，将 `buildJsonObject` 的结果包装为 `ValidJsonString`：
+
+```kotlin
+fun JsonObject.toValidJson() = ValidJsonString(toString())
+```
+
+### 1.3 序列化 — `dumpJsonStr`
 
 优先使用扩展函数，**不要直接调 `AppUtil.GlobalVars.json.encodeToString(...)`**：
 
@@ -69,7 +81,7 @@ val pretty: ValidJsonString = myJsonElement.dumpJsonStr(pretty = true).getOrThro
 
 两者都返回 `Result<ValidJsonString>`，用 `.getOrThrow()` 或 `.getOrElse { }` 处理。
 
-### 1.3 反序列化 — `loadJson` / `loadJsonModel`
+### 1.4 反序列化 — `loadJson` / `loadJsonModel`
 
 优先使用扩展函数，**不要直接调 `AppUtil.GlobalVars.json.decodeFromString(...)`**：
 
@@ -81,7 +93,7 @@ val elem: Result<JsonElement> = jsonStr.loadJson()
 val result: Result<MyData> = jsonStr.loadJsonModel<MyData>()
 ```
 
-### 1.4 提取字段 — `asT`
+### 1.5 提取字段 — `asT`
 
 从 `JsonElement` 中类型安全地提取具体类型，包装在 `Result` 中：
 
@@ -92,7 +104,7 @@ val arr:  Result<JsonArray>  = jsonObj["items"].asT<JsonArray>()
 val opt:  Result<String?>    = jsonObj["opt"].asT<String?>()   // 可空
 ```
 
-### 1.5 局部修改 — `mapOneKey` / `mapKey`
+### 1.6 局部修改 — `mapOneKey` / `mapKey`
 
 对 `JsonObject` 中的单个键做不可变变换，返回新对象，原对象不变：
 
@@ -107,17 +119,6 @@ val removed = original.mapOneKey("tmp") { null }
 ```kotlin
 val m = original.toMutableMap()
 m.mapKey("count") { old -> JsonPrimitive((old as? JsonPrimitive)?.int?.plus(1) ?: 0) }
-```
-
-### 1.6 `ValidJsonString` 值类
-
-`ValidJsonString` 是 `@JvmInline value class`，持有"已知合法"的 JSON 字符串，`toString()` 直接返回 JSON 内容，可安全嵌入 HTTP body 或 WebSocket 消息：
-
-```kotlin
-val vjs = buildValidJson { kv("ok", true) }
-println(vjs)          // {"ok":true}
-println(vjs.str)      // {"ok":true}
-val elem = vjs.toJsonElement()  // 转回 JsonElement 树
 ```
 
 ### 1.7 全局实例（仅在无扩展函数可用时使用）
@@ -286,7 +287,7 @@ body: JSON.stringify({ variant, download_dir: downloadDir })
 
 | 场景 | Kotlin | Python | 前端 |
 |------|--------|--------|------|
-| 构建 JSON 对象 | `buildValidJson { kv(...) }` | `TypedDict` 实例 / `dataclass.to_dict()` | `JSON.stringify({...})` |
+| 构建 JSON 对象 | `buildJsonObject { put(...) }.toValidJson()` | `TypedDict` 实例 / `dataclass.to_dict()` | `JSON.stringify({...})` |
 | 序列化对象 | `AppUtil.dumpJsonStr(obj)` | `JSONResponse(content=obj)` | `JSON.stringify(obj)` |
 | 序列化 JsonElement | `elem.dumpJsonStr()` | — | — |
 | 安全反序列化 | `str.loadJson()` | `await request.json()` | `json_parse<T>(raw)` |

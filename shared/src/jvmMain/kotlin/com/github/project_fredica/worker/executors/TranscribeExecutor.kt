@@ -1,6 +1,5 @@
 package com.github.project_fredica.worker.executors
 
-import com.github.project_fredica.apputil.buildValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
@@ -16,7 +15,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -75,13 +76,13 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
             return@withContext ExecuteResult(error = "Invalid payload: ${e.message}", errorType = "PAYLOAD_ERROR")
         }
 
-        val paramJson = buildValidJson {
-            kv("audio_path", payload.audioPath)
-            if (payload.language != null) kv("language", payload.language)
-            if (payload.modelSize != null) kv("model_name", payload.modelSize)
-            kv("device", "auto")
-            kv("allow_download", payload.allowDownload)
-        }.str
+        val paramJson = buildJsonObject {
+            put("audio_path", payload.audioPath)
+            if (payload.language != null) put("language", payload.language)
+            if (payload.modelSize != null) put("model_name", payload.modelSize)
+            put("device", "auto")
+            put("allow_download", payload.allowDownload)
+        }.toString()
 
         logger.info("TranscribeExecutor: 开始转录 audio=${payload.audioPath} [taskId=${task.id}]")
 

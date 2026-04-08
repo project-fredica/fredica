@@ -2,13 +2,15 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenNote
 import com.github.project_fredica.db.weben.WebenNoteService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * POST /api/v1/WebenNoteSaveRoute
@@ -51,7 +53,7 @@ object WebenNoteSaveRoute : FredicaApi.Route {
         WebenNoteService.repo.save(note)
 
         logger.info("WebenNoteSaveRoute: 笔记已${if (isNew) "创建" else "更新"} id=$noteId conceptId=${p.conceptId}")
-        return buildValidJson { kv("ok", true); kv("id", note.id) }
+        return buildJsonObject { put("ok", true); put("id", note.id) }.toValidJson()
     }
 }
 

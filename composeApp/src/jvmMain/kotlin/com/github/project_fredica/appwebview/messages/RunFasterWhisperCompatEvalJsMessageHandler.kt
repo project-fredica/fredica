@@ -1,7 +1,9 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.db.AppConfigService
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.db.WorkflowRun
@@ -33,7 +35,7 @@ class RunFasterWhisperCompatEvalJsMessageHandler : MyJsMessageHandler() {
         val isActive = TaskStatusService.listAll(pageSize = 200)
             .items.any { it.type == "EVALUATE_WHISPER_COMPAT" && it.status in activeStatuses }
         if (isActive) {
-            callback(buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }.str)
+            callback(buildJsonObject { put("error", "TASK_ALREADY_ACTIVE") }.toString())
             return
         }
 
@@ -42,10 +44,10 @@ class RunFasterWhisperCompatEvalJsMessageHandler : MyJsMessageHandler() {
         val workflowRunId = UUID.randomUUID().toString()
         val taskId = UUID.randomUUID().toString()
 
-        val payload = buildValidJson {
-            kv("proxy", cfg.proxyUrl)
-            if (cfg.fasterWhisperModelsDir.isNotBlank()) kv("models_dir", cfg.fasterWhisperModelsDir)
-        }.str
+        val payload = buildJsonObject {
+            put("proxy", cfg.proxyUrl)
+            if (cfg.fasterWhisperModelsDir.isNotBlank()) put("models_dir", cfg.fasterWhisperModelsDir)
+        }.toString()
 
         WorkflowRunStatusService.create(
             WorkflowRun(
@@ -69,9 +71,9 @@ class RunFasterWhisperCompatEvalJsMessageHandler : MyJsMessageHandler() {
             )
         )
 
-        callback(buildValidJson {
-            kv("task_id", taskId)
-            kv("workflow_run_id", workflowRunId)
-        }.str)
+        callback(buildJsonObject {
+            put("task_id", taskId)
+            put("workflow_run_id", workflowRunId)
+        }.toString())
     }
 }

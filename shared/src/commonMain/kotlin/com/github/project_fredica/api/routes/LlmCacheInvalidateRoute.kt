@@ -9,6 +9,8 @@ import com.github.project_fredica.llm.LlmMessagesJson
 import com.github.project_fredica.llm.LlmCacheKeyUtil
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 data class LlmCacheInvalidateRequest(
@@ -26,7 +28,7 @@ object LlmCacheInvalidateRoute : FredicaApi.Route {
     override suspend fun handler(param: String): ValidJsonString {
         val req = param.loadJsonModel<LlmCacheInvalidateRequest>().getOrElse { e ->
             logger.error("请求体解析失败", e)
-            return buildValidJson { kv("error", "invalid request body") }
+            return buildJsonObject { put("error", "invalid request body") }.toValidJson()
         }
 
         val keyHash = when {
@@ -35,7 +37,7 @@ object LlmCacheInvalidateRoute : FredicaApi.Route {
                 val config = AppConfigService.repo.getConfig()
                 val models = config.llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrElse { emptyList() }
                 val modelConfig = models.find { it.appModelId == req.appModelId }
-                    ?: return buildValidJson { kv("error", "model not found") }
+                    ?: return buildJsonObject { put("error", "model not found") }.toValidJson()
 
                 val cacheKey = LlmCacheKeyUtil.buildCacheKey(
                     modelConfig.model,
@@ -44,10 +46,10 @@ object LlmCacheInvalidateRoute : FredicaApi.Route {
                 )
                 LlmCacheKeyUtil.hashKey(cacheKey)
             }
-            else -> return buildValidJson { kv("error", "key_hash or (app_model_id + messages_json) required") }
+            else -> return buildJsonObject { put("error", "key_hash or (app_model_id + messages_json) required") }.toValidJson()
         }
 
         LlmResponseCacheService.repo.invalidate(keyHash)
-        return buildValidJson { kv("ok", true) }
+        return buildJsonObject { put("ok", true) }.toValidJson()
     }
 }

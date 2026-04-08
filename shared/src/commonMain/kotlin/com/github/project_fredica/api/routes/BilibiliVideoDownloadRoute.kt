@@ -3,9 +3,10 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
-import com.github.project_fredica.apputil.createJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
@@ -31,13 +32,13 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
         val taskType = "DOWNLOAD_BILIBILI_VIDEO"
 
         val material = MaterialVideoService.repo.findById(materialId)
-            ?: return buildValidJson { kv("error", "MATERIAL_NOT_FOUND") }
+            ?: return buildJsonObject { put("error", "MATERIAL_NOT_FOUND") }.toValidJson()
 
         val activeStatuses = setOf("pending", "claimed", "running")
         val isActive = TaskStatusService.listAll(materialId = materialId, pageSize = 200)
             .items.any { it.type == taskType && it.status in activeStatuses }
         if (isActive) {
-            return buildValidJson { kv("error", "TASK_ALREADY_ACTIVE") }
+            return buildJsonObject { put("error", "TASK_ALREADY_ACTIVE") }.toValidJson()
         }
 
         val nowSec        = System.currentTimeMillis() / 1000L
@@ -45,11 +46,11 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
         val workflowRunId = UUID.randomUUID().toString()
         val taskId        = UUID.randomUUID().toString()
 
-        val payload = createJson { obj {
-            kv("bvid",        material.sourceId)
-            kv("page",        1)
-            kv("output_path", mediaDir.resolve("video.mp4").absolutePath)
-        } }.toString()
+        val payload = buildJsonObject {
+            put("bvid",        material.sourceId)
+            put("page",        1)
+            put("output_path", mediaDir.resolve("video.mp4").absolutePath)
+        }.toString()
 
         WorkflowRunStatusService.create(
             WorkflowRun(
@@ -74,10 +75,10 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
             )
         )
 
-        return buildValidJson {
-            kv("workflow_run_id", workflowRunId)
-            kv("task_id",        taskId)
-        }
+        return buildJsonObject {
+            put("workflow_run_id", workflowRunId)
+            put("task_id",        taskId)
+        }.toValidJson()
     }
 }
 

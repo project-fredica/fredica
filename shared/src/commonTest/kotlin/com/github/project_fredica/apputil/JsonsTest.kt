@@ -6,6 +6,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -52,7 +54,7 @@ class JsonsTest {
      */
     @Test
     fun dumpJsonStr_andLoadJson_roundtrip() {
-        val original = createJson { obj { kv("k", "v"); kv("n", 7) } }
+        val original = buildJsonObject { put("k", "v"); put("n", 7) }
         val dumped = original.dumpJsonStr().getOrThrow()
         val restored = dumped.str.loadJson().getOrThrow()
         assertEquals(original, restored)
@@ -125,7 +127,7 @@ class JsonsTest {
      */
     @Test
     fun copy_returnsEqualAndIndependentJsonObject() {
-        val original = createJson { obj { kv("x", 42); kv("y", "hello") } }
+        val original = buildJsonObject { put("x", 42); put("y", "hello") }
         val copy = original.copy()
         assertEquals(original, copy)
         // JsonObject 不可变，通过字段值验证内容独立正确
@@ -205,7 +207,7 @@ class JsonsTest {
      */
     @Test
     fun mapOneKey_returnsNewObject_originalUnchanged() {
-        val original = createJson { obj { kv("v", 1); kv("other", "x") } }
+        val original = buildJsonObject { put("v", 1); put("other", "x") }
         val modified = original.mapOneKey("v") { JsonPrimitive(999) }
 
         assertEquals(JsonPrimitive(1), original["v"])    // 原对象不变
@@ -218,7 +220,7 @@ class JsonsTest {
      */
     @Test
     fun mapOneKey_removesKeyInNewObject_whenMapperReturnsNull() {
-        val original = createJson { obj { kv("del", 1); kv("keep", 2) } }
+        val original = buildJsonObject { put("del", 1); put("keep", 2) }
         val modified = original.mapOneKey("del") { null }
 
         assertTrue("del" in original)    // 原对象保留
@@ -242,7 +244,7 @@ class JsonsTest {
      */
     @Test
     fun asT_extractsJsonObject() {
-        val obj = createJson { obj { kv("x", 1) } }
+        val obj = buildJsonObject { put("x", 1) }
         val extracted = obj.asT<JsonObject>().getOrThrow()
         assertEquals(JsonPrimitive(1), extracted["x"])
     }
@@ -285,198 +287,4 @@ class JsonsTest {
         assertTrue(nullElem.asT<String>().isFailure)
     }
 
-    // ─── 9. createJson { obj { } } ────────────────────────────────────────────
-
-    /**
-     * 证明 kv 对 String / Boolean / Number / kNull 等基本类型均能写入正确的 JsonElement。
-     */
-    @Test
-    fun createJsonObj_supportsAllPrimitiveTypes() {
-        val obj = createJson {
-            obj {
-                kv("str", "hello")
-                kv("bool", true)
-                kv("int", 42)
-                kv("dbl", 3.14)
-                kNull("nil")
-            }
-        }
-        assertEquals(JsonPrimitive("hello"), obj["str"])
-        assertEquals(JsonPrimitive(true), obj["bool"])
-        assertEquals(JsonPrimitive(42), obj["int"])
-        assertEquals(JsonPrimitive(3.14), obj["dbl"])
-        assertEquals(JsonNull, obj["nil"])
-    }
-
-    /**
-     * 证明 kv 对 null String/Boolean/Number 写入 JsonNull（JsonPrimitive(null)）。
-     */
-    @Test
-    fun createJsonObj_nullPrimitive_writesJsonNull() {
-        val obj = createJson {
-            obj {
-                kv("s", null as String?)
-                kv("b", null as Boolean?)
-                kv("n", null as Number?)
-            }
-        }
-        // JsonPrimitive(null) 在比较上等于 JsonNull
-        assertEquals(obj["s"].toString(), "null")
-        assertEquals(obj["b"].toString(), "null")
-        assertEquals(obj["n"].toString(), "null")
-    }
-
-    /**
-     * 证明 kv 可嵌套 JsonObject 和 JsonArray，嵌入后内容与原值相同。
-     */
-    @Test
-    fun createJsonObj_supportsNestedJsonObjectAndJsonArray() {
-        val nested = createJson { obj { kv("inner", 1) } }
-        val arr = listOf(JsonPrimitive("a"), JsonPrimitive("b")).toJsonArray()
-        val obj = createJson {
-            obj {
-                kv("nested", nested)
-                kv("arr", arr)
-            }
-        }
-        assertEquals(nested, obj["nested"])
-        assertEquals(arr, obj["arr"])
-    }
-
-    /**
-     * 证明空 DSL 块返回空 JsonObject（{}）。
-     */
-    @Test
-    fun createJsonObj_emptyBlock_returnsEmptyJsonObject() {
-        val obj = createJson { obj { } }
-        assertTrue(obj.isEmpty())
-    }
-
-    // ─── 10. buildValidJson { } ───────────────────────────────────────────────
-
-    /**
-     * 证明 buildValidJson 基础用法：String + Number kv 生成可解析的合法 JSON 字符串。
-     */
-    @Test
-    fun buildValidJson_basicKv_generatesCorrectJson() {
-        val result = buildValidJson { kv("status", "ok"); kv("count", 3) }
-        val parsed = result.toJsonElement() as JsonObject
-        assertEquals(JsonPrimitive("ok"), parsed["status"])
-        assertEquals(JsonPrimitive(3), parsed["count"])
-    }
-
-    /**
-     * 证明注入安全性：字符串值含双引号和反斜杠时，buildValidJson 仍能生成合法 JSON，
-     * 且解析后内容与原值完全一致——字符串拼接无法做到这一点。
-     */
-    @Test
-    fun buildValidJson_stringWithSpecialChars_autoEscaped() {
-        val tricky = """say "hello" and C:\path\to\file"""
-        val result = buildValidJson { kv("msg", tricky) }
-        // 能无异常解析回来说明是合法 JSON
-        val parsed = result.toJsonElement() as JsonObject
-        assertEquals(tricky, (parsed["msg"] as JsonPrimitive).content)
-    }
-
-    /**
-     * 证明 buildValidJson Boolean 和 Long 值正确写入。
-     */
-    @Test
-    fun buildValidJson_booleanAndLongValues() {
-        val result = buildValidJson { kv("ok", true); kv("n", 100L) }
-        val parsed = result.toJsonElement() as JsonObject
-        assertEquals(JsonPrimitive(true), parsed["ok"])
-        assertEquals(JsonPrimitive(100L), parsed["n"])
-    }
-
-    /**
-     * 证明 kNull 写入 JSON null，而非字符串 "null"。
-     */
-    @Test
-    fun buildValidJson_kNull_writesJsonNull() {
-        val result = buildValidJson { kNull("x") }
-        val parsed = result.toJsonElement() as JsonObject
-        assertEquals(JsonNull, parsed["x"])
-    }
-
-    /**
-     * 证明 kv(k, JsonArray?) 将数组正确嵌入，数组元素内容与原值一致。
-     */
-    @Test
-    fun buildValidJson_embedsJsonArray() {
-        val arr = listOf(JsonPrimitive(1), JsonPrimitive(2), JsonPrimitive(3)).toJsonArray()
-        val result = buildValidJson { kv("ids", arr) }
-        val parsed = result.toJsonElement() as JsonObject
-        assertEquals(arr, parsed["ids"])
-    }
-
-    /**
-     * 证明 kv(k, JsonElement?) 将任意 JsonElement（如 JsonObject）正确嵌入。
-     */
-    @Test
-    fun buildValidJson_embedsJsonElement() {
-        val inner: JsonElement = createJson { obj { kv("flag", false) } }
-        val result = buildValidJson { kv("data", inner) }
-        val parsed = (result.toJsonElement() as JsonObject)["data"] as JsonObject
-        assertEquals(JsonPrimitive(false), parsed["flag"])
-    }
-
-    /**
-     * 证明 kv(k, ValidJsonString?) 将已序列化 JSON 字符串解析后正确内嵌为子对象，
-     * 而非作为字符串字面量嵌入。
-     */
-    @Test
-    fun buildValidJson_embedsValidJsonString_parsedInline() {
-        val inner = ValidJsonString("""{"nested":true,"val":42}""")
-        val result = buildValidJson { kv("data", inner) }
-        val nested = (result.toJsonElement() as JsonObject)["data"] as JsonObject
-        assertEquals(JsonPrimitive(true), nested["nested"])
-        assertEquals(JsonPrimitive(42), nested["val"])
-    }
-
-    /**
-     * 证明 kv(k, null ValidJsonString?) 写入 JSON null，而非抛出异常。
-     */
-    @Test
-    fun buildValidJson_nullValidJsonString_writesJsonNull() {
-        val result = buildValidJson { kv("x", null as ValidJsonString?) }
-        assertEquals(JsonNull, (result.toJsonElement() as JsonObject)["x"])
-    }
-
-    /**
-     * 证明空块生成 "{}"，即空 JSON 对象字符串。
-     */
-    @Test
-    fun buildValidJson_emptyBlock_generatesEmptyObject() {
-        val result = buildValidJson { }
-        assertEquals("{}", result.str)
-    }
-
-    /**
-     * 证明 buildValidJson 的返回值是合法的 ValidJsonString，
-     * 即 toString() 与 .str 相同，均为紧凑 JSON 字符串。
-     */
-    @Test
-    fun buildValidJson_returnValue_toStringEqualsStr() {
-        val result = buildValidJson { kv("a", 1) }
-        assertEquals(result.str, result.toString())
-    }
-
-    /**
-     * 证明 buildValidJson 与手动 Json.encodeToString 的等价性：
-     * 对同一个 @Serializable 对象，两种方式生成的 JSON 内容一致。
-     */
-    @Test
-    fun buildValidJson_equivalentToEncodeToString() {
-        val model = SampleModel("Bob", 25)
-        val viaEncode = AppUtil.GlobalVars.json.encodeToString(model)
-        val viaBuilder = buildValidJson {
-            kv("name", model.name)
-            kv("age", model.age)
-        }
-        val fromEncode = viaEncode.loadJson().getOrThrow() as JsonObject
-        val fromBuilder = viaBuilder.toJsonElement() as JsonObject
-        assertEquals(fromEncode["name"], fromBuilder["name"])
-        assertEquals(fromEncode["age"], fromBuilder["age"])
-    }
 }

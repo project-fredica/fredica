@@ -2,8 +2,10 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
 import com.github.project_fredica.worker.TaskPauseResumeService
 import kotlinx.serialization.SerialName
@@ -26,7 +28,7 @@ object TaskResumeRoute : FredicaApi.Route {
         if (signalled) {
             TaskStatusService.updatePaused(p.taskId, false)
         }
-        return buildValidJson { kv("signalled", signalled) }
+        return buildJsonObject { put("signalled", signalled) }.toValidJson()
     }
 }
 

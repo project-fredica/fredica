@@ -1,7 +1,9 @@
 package com.github.project_fredica.appwebview.messages
 
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
@@ -52,7 +54,7 @@ class LlmProxyChatJsMessageHandler : MyJsMessageHandler() {
     ) {
         val param = message.params.loadJsonModel<Param>().getOrElse { e ->
             logger.error("LlmProxyChatJsMessageHandler: 参数解析失败", e)
-            callback(buildValidJson { kv("error", "参数解析失败: ${e.message}") }.str)
+            callback(buildJsonObject { put("error", "参数解析失败: ${e.message}") }.toString())
             return
         }
 
@@ -64,7 +66,7 @@ class LlmProxyChatJsMessageHandler : MyJsMessageHandler() {
         val modelConfig = models.find { it.appModelId == param.appModelId }
         if (modelConfig == null) {
             logger.error("LlmProxyChatJsMessageHandler: 未找到模型 appModelId=${param.appModelId}")
-            callback(buildValidJson { kv("error", "未找到模型 app_model_id='${param.appModelId}'") }.str)
+            callback(buildJsonObject { put("error", "未找到模型 app_model_id='${param.appModelId}'") }.toString())
             return
         }
 
@@ -77,17 +79,17 @@ class LlmProxyChatJsMessageHandler : MyJsMessageHandler() {
 
         try {
             val resp = LlmRequestServiceHolder.instance.request(llmReq)
-            callback(buildValidJson {
-                kv("content", resp.text)
-                kv("source", resp.source.name)
-                kv("key_hash", resp.keyHash)
-            }.str)
+            callback(buildJsonObject {
+                put("content", resp.text)
+                put("source", resp.source.name)
+                put("key_hash", resp.keyHash)
+            }.toString())
         } catch (e: LlmProviderException) {
             logger.warn("[LlmProxyChatJsMessageHandler] provider error type=${e.type}", isHappensFrequently = false, err = e)
-            callback(buildValidJson { kv("error", e.providerMessage); kv("error_type", e.type.name) }.str)
+            callback(buildJsonObject { put("error", e.providerMessage); put("error_type", e.type.name) }.toString())
         } catch (e: Exception) {
             logger.error("[LlmProxyChatJsMessageHandler] unexpected error", e)
-            callback(buildValidJson { kv("error", e.message ?: "unknown error") }.str)
+            callback(buildJsonObject { put("error", e.message ?: "unknown error") }.toString())
         }
     }
 }

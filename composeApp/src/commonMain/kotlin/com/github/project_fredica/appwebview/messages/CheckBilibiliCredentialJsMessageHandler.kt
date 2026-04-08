@@ -2,8 +2,10 @@ package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
-import com.github.project_fredica.apputil.buildValidJson
+import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.AppConfigService
@@ -71,36 +73,36 @@ class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
         // sessdata 为空视为未配置，无需调用 Python
         if (sessdata.isBlank()) {
             logger.debug("CheckBilibiliCredential: 未配置 bilibiliSessdata，跳过检测")
-            callback(buildValidJson {
-                kv("configured", false)
-                kv("valid", false)
-                kv("message", "未配置账号")
-            }.str)
+            callback(buildJsonObject {
+                put("configured", false)
+                put("valid", false)
+                put("message", "未配置账号")
+            }.toString())
             return
         }
 
         logger.debug("CheckBilibiliCredential: 开始调用 Python credential/check")
-        val pyBody = buildValidJson {
-            kv("sessdata", sessdata)
-            kv("bili_jct", biliJct)
-            kv("buvid3", buvid3)
-            kv("buvid4", buvid4)
-            kv("dedeuserid", dedeuserid)
-            kv("ac_time_value", acTimeValue)
-            kv("proxy", proxy)
+        val pyBody = buildJsonObject {
+            put("sessdata", sessdata)
+            put("bili_jct", biliJct)
+            put("buvid3", buvid3)
+            put("buvid4", buvid4)
+            put("dedeuserid", dedeuserid)
+            put("ac_time_value", acTimeValue)
+            put("proxy", proxy)
         }
 
         try {
-            val raw = FredicaApi.PyUtil.post("/bilibili/credential/check", pyBody.str)
+            val raw = FredicaApi.PyUtil.post("/bilibili/credential/check", pyBody.toString())
             logger.info("CheckBilibiliCredential: 完成，raw=$raw")
             callback(raw)
         } catch (e: Throwable) {
             logger.warn("CheckBilibiliCredential: Python 服务异常", isHappensFrequently = false, err = e)
-            callback(buildValidJson {
-                kv("configured", true)
-                kv("valid", false)
-                kv("message", "检测失败: ${e.message}")
-            }.str)
+            callback(buildJsonObject {
+                put("configured", true)
+                put("valid", false)
+                put("message", "检测失败: ${e.message}")
+            }.toString())
         }
     }
 }
