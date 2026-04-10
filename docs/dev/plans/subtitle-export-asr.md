@@ -1874,117 +1874,76 @@ class TestErrorClassification:
 - `ffmpeg` 硬件加速转码/解码（NVENC/NVDEC/AMF 等也占用 VRAM）
 - `torch`（其他推理任务）
 
-`PyCallGuard`（in-memory Coroutine Mutex）只能在单个 Ktor JVM 进程内串行化 Kotlin 协程，**无法跨 Python 子进程互斥**。需要操作系统级别的文件锁（advisory lock）。
+实际采用 JVM 进程内 `Semaphore(1)` 互斥锁（`GpuResourceLock` 单例），而非最初设计的 OS 文件锁。
+原因：所有 GPU 密集型任务均由 Kotlin Executor 发起（通过 `PythonUtil.websocketTask()` 调用 Python 子进程），
+因此进程内互斥即可保证同一时刻只有一个 GPU 任务在执行，无需跨进程文件锁。
 
-### 6.2 文件锁方案
+### 6.2 实现：GpuResourceLock 单例
 
-#### 6.2.1 锁文件路径
-
-```
-{appDataDir}/locks/
-├── gpu.lock          ← GPU 吃显存任务（faster-whisper 推理、ffmpeg hw_accel 转码）
-└── ffmpeg.lock       ← ffmpeg 所有调用（含纯 CPU 转码，防止多路并行）
-```
-
-**AppUtil.Paths 新增**：
+**文件**：`shared/src/commonMain/kotlin/.../worker/GpuResourceLock.kt`
 
 ```kotlin
-val gpuLockFile: Path get() = appDataDir.resolve("locks/gpu.lock")
-val ffmpegLockFile: Path get() = appDataDir.resolve("locks/ffmpeg.lock")
+object GpuResourceLock {
+    private val semaphore = Semaphore(1)   // permits=1 → 互斥
+
+    suspend fun <T> withGpuLock(taskId: String, block: suspend () -> T): T {
+        if (semaphore.availablePermits == 0) {
+            // 锁已被占用 → 写入等待提示，让用户在 UI 上看到原因
+            TaskService.repo.updateStatusText(taskId, "等待 GPU 资源…")
+        }
+        return semaphore.withPermit {
+            TaskService.repo.updateStatusText(taskId, null)  // 清除等待提示
+            block()
+        }
+    }
+}
 ```
 
-#### 6.2.2 Python 侧实现
+核心语义：
+- `Semaphore(1)` 等价于互斥锁，同一时刻最多 1 个协程持有 permit
+- `withPermit` 自动获取/释放，即使 `block()` 抛异常也能正确释放
+- 等待时写入 `statusText`，获取后清除，让前端实时显示等待原因
 
-新建 `fredica_pyutil_server/util/file_lock_util.py`：
+### 6.3 各 Executor 使用方式
 
-```python
-import fcntl  # Unix
-import msvcrt  # Windows
-import os
-from contextlib import contextmanager
-from pathlib import Path
+| Executor | 何时持锁 | 说明 |
+|----------|---------|------|
+| `TranscribeExecutor` | **始终** | faster-whisper 推理始终占用 GPU |
+| `TranscodeMp4Executor` | `hw_accel ≠ "cpu"` 时 | 纯 CPU 转码不需要 GPU 锁 |
+| `EvaluateFasterWhisperCompatExecutor` | **始终** | GPU 兼容性测试需要独占 GPU |
 
-@contextmanager
-def exclusive_file_lock(lock_path: str | Path):
-    """
-    跨进程互斥文件锁（advisory lock）。
-    Windows 用 msvcrt.locking，Unix 用 fcntl.flock。
-    阻塞直到获取锁，退出 context 时自动释放。
-    """
-    path = Path(lock_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(path, "w")
-    try:
-        if os.name == "nt":
-            # Windows：锁定文件的第一个字节
-            msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
-        fd.write(str(os.getpid()))
-        fd.flush()
-        yield
-    finally:
-        fd.close()  # 关闭文件自动释放锁
+**TranscodeMp4Executor 条件持锁示例**：
+
+```kotlin
+return if (resolvedAccel != "cpu") {
+    GpuResourceLock.withGpuLock(task.id) { runTask() }
+} else {
+    runTask()
+}
 ```
 
-#### 6.2.3 各场景应用
+### 6.4 注意事项
 
-| 场景 | 需要的锁 |
+- **进程内互斥足够**：所有 GPU 任务由 Kotlin Executor 发起，Python 子进程由 `websocketTask()` 管理，
+  Executor 持锁期间子进程运行，释放锁后子进程已结束，无需跨进程锁
+- **无死锁风险**：`withPermit` 基于 `try/finally`，异常时自动释放；不存在嵌套持锁场景
+- **与 WorkerEngine 并发控制的关系**：WorkerEngine 的 Semaphore 限制同时运行的 Task 总数，
+  GpuResourceLock 进一步限制 GPU 任务的并发数为 1，两者互补
+- **非 GPU 任务不受影响**：`TranscodeMp4Executor` 在 `hw_accel = "cpu"` 时跳过锁，
+  `ExtractAudioExecutor` 等纯 CPU Executor 不调用 `withGpuLock`
+
+### 6.5 测试
+
+**文件**：`shared/src/jvmTest/kotlin/.../worker/GpuResourceLockTest.kt`
+
+使用真实 SQLite 临时文件 + `CompletableDeferred` 精确控制时序，4 个测试用例：
+
+| 测试 | 验证目标 |
 |------|---------|
-| `faster-whisper` 推理（GPU/auto 模式） | `gpu.lock` |
-| `faster-whisper` 推理（CPU 模式） | 无需 GPU 锁 |
-| `ffmpeg` 硬件加速转码（hw_accel ≠ cpu） | `gpu.lock` + `ffmpeg.lock` |
-| `ffmpeg` 纯 CPU 转码 | `ffmpeg.lock` 仅（可选，防止磁盘 IO 竞争） |
-| `ffmpeg` 音频提取（hw_accel ≠ cpu） | `gpu.lock` + `ffmpeg.lock` |
-
-**`transcribe.py` 修改**：
-
-```python
-from fredica_pyutil_server.util.file_lock_util import exclusive_file_lock
-
-def _faster_whisper_worker(param, status_queue, cancel_event, resume_event):
-    device = param.get("device", "auto")
-    gpu_lock_path = param.get("gpu_lock_path", "")  # 由 Kotlin 传入绝对路径
-
-    # 仅 GPU/auto 模式需要显存锁
-    use_gpu_lock = gpu_lock_path and device in ("auto", "cuda", "gpu")
-
-    ctx = exclusive_file_lock(gpu_lock_path) if use_gpu_lock else nullcontext()
-    with ctx:
-        # ... 原有推理逻辑
-```
-
-**`transcode_worker`（Python transcode 路由）修改**（hw_accel ≠ cpu 时）：
-
-```python
-with exclusive_file_lock(gpu_lock_path):
-    with exclusive_file_lock(ffmpeg_lock_path):
-        # 执行 ffmpeg 命令
-```
-
-**`_extract_split_audio_worker`（audio.py）同理**。
-
-#### 6.2.4 Kotlin 侧传参
-
-`AsrSpawnChunksExecutor` 创建 `ASR_TRANSCRIBE_QUEUE` task 的 payload 追加：
-
-```kotlin
-kv("gpu_lock_path", AppUtil.Paths.gpuLockFile.toAbsolutePath().toString())
-```
-
-`MaterialAsrStartRoute` 创建 `TRANSCODE_MP4` / `EXTRACT_AUDIO` task 的 payload 追加：
-
-```kotlin
-kv("gpu_lock_path",   AppUtil.Paths.gpuLockFile.toAbsolutePath().toString())
-kv("ffmpeg_lock_path", AppUtil.Paths.ffmpegLockFile.toAbsolutePath().toString())
-```
-
-#### 6.2.5 注意事项
-
-- **阻塞**：`exclusive_file_lock` 在获取锁前会阻塞子进程，Python WebSocket 任务框架在子进程中运行 worker，因此不会阻塞 FastAPI 主线程
-- **死锁风险**：若进程崩溃（SIGKILL），文件描述符被 OS 关闭，锁自动释放，无死锁风险
-- **非 GPU 设备**：`device=cpu` 时不申请 `gpu.lock`，不影响并发的纯 CPU 任务
-- **WorkerEngine 并发控制**：WorkerEngine 的 Semaphore 仍限制同时运行的 Task 数；而 ASR 主链本身已改为单个 `ASR_TRANSCRIBE_QUEUE` 顺序消费 chunk。文件锁的作用更多是防止它与其他 GPU 任务（转码、其他 ASR、未来推理任务）互相争抢
+| `testMutualExclusion` | 两个 GPU 任务串行执行，`AtomicInteger` 并发数不超过 1 |
+| `testWaitingStatusText` | 等待锁时 `statusText` 被设为"等待 GPU 资源…" |
+| `testStatusTextClearedOnAcquire` | 获取锁后 `statusText` 被清除为 null |
+| `testNoContentionNoStatusText` | 无竞争时不写入等待提示（直接获取锁） |
 
 ---
 

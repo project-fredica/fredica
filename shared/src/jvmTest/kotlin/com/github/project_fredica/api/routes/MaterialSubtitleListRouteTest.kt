@@ -12,8 +12,10 @@ package com.github.project_fredica.api.routes
 //   L3. 非 bilibili 素材，有 transcript.srt → 返回 1 条 source=asr 条目
 //   L4. bilibili 素材，无 ASR 结果，无 bilibili 缓存 → 返回空列表
 //   L5. bilibili 素材，有 transcript.srt → 包含 source=asr 条目
-//   L6. ASR 条目字段校验：lan=asr, lan_doc=ASR 识别, type=1, subtitle_url=绝对路径
+//   L6. ASR 条目字段校验：lan=asr, lan_doc=ASR 识别 (large-v3), type=1, subtitle_url=绝对路径
 //   L7. transcript.srt 为空文件时不返回 ASR 条目
+//   L8. 多模型目录（large-v3 + medium）→ 返回 2 条 ASR 条目
+//   L9. partial 结果（有 chunk_*.srt 无 transcript.done）在 asr_results/large-v3/ 下
 // =============================================================================
 
 import com.github.project_fredica.apputil.AppUtil
@@ -82,9 +84,10 @@ class MaterialSubtitleListRouteTest {
         ))
     }
 
-    private fun writeSrt(content: String = "1\n00:00:00,000 --> 00:00:01,000\n你好\n\n") {
-        val asrDir = mediaDir.resolve("asr_result").also { it.mkdirs() }
+    private fun writeSrt(content: String = "1\n00:00:00,000 --> 00:00:01,000\n你好\n\n", modelName: String = "large-v3") {
+        val asrDir = mediaDir.resolve("asr_results").resolve(modelName).also { it.mkdirs() }
         asrDir.resolve("transcript.srt").writeText(content)
+        asrDir.resolve("transcript.done").writeText("{}")
     }
 
     private fun parseArray(result: ValidJsonString): JsonArray =
@@ -153,7 +156,7 @@ class MaterialSubtitleListRouteTest {
         val item = arr[0].jsonObject
 
         assertEquals("asr",       item["lan"]?.jsonPrimitive?.content)
-        assertEquals("ASR 识别",  item["lan_doc"]?.jsonPrimitive?.content)
+        assertEquals("ASR 识别 (large-v3)",  item["lan_doc"]?.jsonPrimitive?.content)
         assertEquals("asr",       item["source"]?.jsonPrimitive?.content)
         assertEquals(1,            item["type"]?.jsonPrimitive?.int)
 
@@ -168,10 +171,47 @@ class MaterialSubtitleListRouteTest {
     fun `L7 - empty transcript srt is not returned`() = runBlocking {
         insertMaterial(sourceType = "local")
         // 写空文件
-        val asrDir = mediaDir.resolve("asr_result").also { it.mkdirs() }
+        val asrDir = mediaDir.resolve("asr_results").resolve("large-v3").also { it.mkdirs() }
         asrDir.resolve("transcript.srt").writeText("")
 
         val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
         assertEquals(0, arr.size, "空 SRT 文件不应出现在列表中")
+    }
+
+    // ── L8 ───────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `L8 - multiple model dirs return multiple ASR items`() = runBlocking {
+        insertMaterial(sourceType = "local")
+        writeSrt(modelName = "large-v3")
+        writeSrt(modelName = "medium")
+
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val asrItems = arr.filter { it.jsonObject["source"]?.jsonPrimitive?.content == "asr" }
+        assertEquals(2, asrItems.size, "应有 2 条 ASR 条目（large-v3 + medium）")
+
+        val lanDocs = asrItems.map { it.jsonObject["lan_doc"]?.jsonPrimitive?.content }.toSet()
+        assertTrue(lanDocs.contains("ASR 识别 (large-v3)"), "应包含 large-v3 条目")
+        assertTrue(lanDocs.contains("ASR 识别 (medium)"), "应包含 medium 条目")
+    }
+
+    // ── L9 ───────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `L9 - partial result in asr_results model dir`() = runBlocking {
+        insertMaterial(sourceType = "local")
+        val modelDir = mediaDir.resolve("asr_results").resolve("large-v3").also { it.mkdirs() }
+        modelDir.resolve("chunk_0000.srt").writeText("1\n00:00:00,000 --> 00:00:01,000\n测试\n\n")
+        // 无 transcript.done
+
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        assertEquals(1, arr.size, "应有 1 条 partial ASR 条目")
+        val item = arr[0].jsonObject
+        assertEquals("asr", item["source"]?.jsonPrimitive?.content)
+        assertTrue(item["partial"]?.jsonPrimitive?.content?.toBoolean() == true, "应为 partial")
+        assertTrue(
+            item["lan_doc"]?.jsonPrimitive?.content?.contains("进行中") == true,
+            "lanDoc 应包含'进行中'"
+        )
     }
 }

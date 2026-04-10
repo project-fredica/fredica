@@ -7,7 +7,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import java.io.File
 import java.net.Proxy
@@ -107,7 +106,7 @@ object AppUtil {
 
         /**
          * 读取系统网络代理配置的 Ktor HTTP 客户端，用于访问外部网络。
-         * 代理配置由平台 actual 的 [AppUtil.readNetworkProxy] 提供。
+         * 代理配置由平台 actual 的 [AppUtil.internalReadNetworkProxy] 提供。
          */
         val ktorClientProxied
             get() = HttpClient(OkHttp) {
@@ -116,7 +115,7 @@ object AppUtil {
                         useAppKtorClientCommonConfig()
                     }
 
-                    proxy = readNetworkProxy()
+                    proxy = internalReadNetworkProxy()
                 }
             }
 
@@ -153,13 +152,13 @@ object AppUtil {
 }
 
 /** 读取当前平台的系统网络代理配置，返回 null 表示直连。由平台 actual 实现。 */
-expect fun AppUtil.readNetworkProxy(): ProxyConfig?
+expect fun AppUtil.internalReadNetworkProxy(): ProxyConfig?
 
 /**
  * 读取系统代理地址，返回 "http://host:port" 格式字符串。
  * 无代理时返回空串。由平台 actual 实现，避免依赖 toString() 格式。
  */
-expect fun AppUtil.readNetworkProxyUrl(): String
+expect fun AppUtil.internalReadNetworkProxyUrl(): String
 
 /**
  * 判断此代理配置是否为直连（无代理）。

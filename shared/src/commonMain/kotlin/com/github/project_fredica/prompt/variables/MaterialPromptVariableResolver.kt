@@ -1,23 +1,10 @@
 package com.github.project_fredica.prompt.variables
 
-import com.github.project_fredica.api.routes.MaterialSubtitleContentParam
-import com.github.project_fredica.api.routes.MaterialSubtitleContentResponse
-import com.github.project_fredica.api.routes.MaterialSubtitleContentRoute
-import com.github.project_fredica.api.routes.MaterialSubtitleItem
-import com.github.project_fredica.api.routes.MaterialSubtitleListRoute
-import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.BilibiliSubtitleUtil
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import com.github.project_fredica.asr.service.MaterialSubtitleService
 import com.github.project_fredica.apputil.createLogger
-import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.error
-import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.apputil.toJsonArray
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.MaterialVideoService
-import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonPrimitive
 
 class MaterialPromptVariableResolver : PromptVariableResolver {
     private val logger = createLogger { "MaterialPromptVariableResolver" }
@@ -58,23 +45,7 @@ class MaterialPromptVariableResolver : PromptVariableResolver {
                         if (it == "first") null else it
                     }
                     try {
-                        val fromCache = BilibiliSubtitleUtil.fetchSubtitleTextFromCache(materialId, lan)
-                        if (fromCache != null) {
-                            logger.debug(
-                                "[MaterialPromptVariableResolver] subtitle cache hit materialId=$materialId lan=$lan length=${fromCache.length}",
-                            )
-                            fromCache
-                        } else {
-                            logger.debug(
-                                "[MaterialPromptVariableResolver] subtitle cache miss materialId=$materialId lan=$lan, fallback route",
-                            )
-                            fetchSubtitleText(materialId, lan)
-                                ?: "".also {
-                                    logger.debug(
-                                        "[MaterialPromptVariableResolver] subtitle empty materialId=$materialId lan=$lan",
-                                    )
-                                }
-                        }
+                        MaterialSubtitleService.fetchSubtitleText(materialId, lan) ?: ""
                     } catch (e: Throwable) {
                         logger.error(
                             "[MaterialPromptVariableResolver] subtitle 读取失败 materialId=$materialId lan=$lan",
@@ -109,25 +80,5 @@ class MaterialPromptVariableResolver : PromptVariableResolver {
             isHappensFrequently = false, err = null,
         )
         return ""
-    }
-
-    private suspend fun fetchSubtitleText(materialId: String, language: String?): String? {
-        val queryParam = buildJsonObject {
-            put("material_id", listOf(JsonPrimitive(materialId)).toJsonArray())
-        }.toString()
-        val items = MaterialSubtitleListRoute.handler(queryParam).str
-            .loadJsonModel<List<MaterialSubtitleItem>>().getOrElse { return null }
-        if (items.isEmpty()) return null
-        val item = if (language != null) {
-            items.firstOrNull { it.lan == language } ?: return null
-        } else {
-            items.first()
-        }
-        val contentParam = AppUtil.dumpJsonStr(
-            MaterialSubtitleContentParam(subtitleUrl = item.subtitleUrl, source = item.source)
-        ).getOrThrow().str
-        return MaterialSubtitleContentRoute.handler(contentParam).str
-            .loadJsonModel<MaterialSubtitleContentResponse>().getOrNull()
-            ?.text?.takeIf { it.isNotBlank() }
     }
 }

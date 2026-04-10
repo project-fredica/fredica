@@ -13,7 +13,6 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.FredicaApiJvmInitOption
 import com.github.project_fredica.api.FredicaApiJvmService
 import com.github.project_fredica.api.init
-import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.apputil.createLogger
 import dev.datlag.kcef.KCEFBuilder
 import com.github.project_fredica.apputil.AppUtil
@@ -24,9 +23,8 @@ import com.github.project_fredica.apputil.burningwaveExportAllModule
 import com.github.project_fredica.apputil.exception
 import com.github.project_fredica.apputil.getPlatform
 import com.github.project_fredica.apputil.globalVertx
-import com.github.project_fredica.apputil.readNetworkProxy
+import com.github.project_fredica.apputil.internalReadNetworkProxy
 import com.github.project_fredica.apputil.unsafe
-import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.resources.Res
 import com.github.project_fredica.resources.icon_512x512
@@ -194,5 +192,5 @@ fun AppUtil.MonkeyPatch.hookWebviewBrowserDownloadKtorClientProxy() {
     val f = KCEFBuilder.Download.Builder.GitHub::class.java.getDeclaredField("client")
     f.isAccessible = true
     val c = f.get(null) as HttpClient
-    c.engine.config.proxy = AppUtil.readNetworkProxy()
+    c.engine.config.proxy = AppUtil.internalReadNetworkProxy()
 }

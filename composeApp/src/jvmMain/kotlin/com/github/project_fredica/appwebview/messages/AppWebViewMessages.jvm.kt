@@ -13,6 +13,4 @@ actual val AppWebViewMessages.native: List<MyJsMessageHandler>
         GetTorchMirrorVersionsJsMessageHandler(),
         GetTorchAllMirrorVariantsJsMessageHandler(),
         RefreshTorchMirrorCacheJsMessageHandler(),
-        RunFasterWhisperCompatEvalJsMessageHandler(),
-        RunFasterWhisperModelDownloadJsMessageHandler(),
     )

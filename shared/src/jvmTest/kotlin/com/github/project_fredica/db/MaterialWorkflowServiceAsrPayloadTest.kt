@@ -7,24 +7,25 @@ package com.github.project_fredica.db
 // 被测对象：MaterialWorkflowService.startWhisperTranscribe() 生成的 Task payload
 //
 // 设计说明：
-//   startWhisperTranscribe 是 subtitle-export-asr.md 的最小线性实现（Phase 1–3）：
-//     - EXTRACT_AUDIO 使用 chunk_duration_sec=300（5分钟/段），FFmpeg 产出多个 chunk_XXXX.m4a
-//     - 当前 TRANSCRIBE 只处理 chunk_0000.m4a（即视频前 5 分钟）
-//     - 完整多 chunk 方案（Phase 4–6）待后续实现：
-//       EXTRACT_AUDIO → ASR_SPAWN_CHUNKS → ASR_TRANSCRIBE_QUEUE → ASR_MERGE_SUBTITLE
+//   startWhisperTranscribe 创建两步任务链：
+//     - EXTRACT_AUDIO：使用 chunk_duration_sec=300（5分钟/段），FFmpeg 产出多个 chunk_XXXX.m4a
+//     - ASR_SPAWN_CHUNKS：读取 EXTRACT_AUDIO 的 result，动态创建 N 个 TRANSCRIBE 任务
 //
-//   注意：此函数与"字幕导出"（SRT Export，纯前端下载）无关，
-//   两者是 subtitle-export-asr.md 中独立的两个功能。
+//   TRANSCRIBE 任务由 AsrSpawnChunksExecutor 在运行时动态创建，不在此测试范围内。
 //
 // 测试矩阵：
-//   P1. TRANSCRIBE audio_path 指向 chunk_0000.m4a（FFmpeg segment 实际产出的文件名）
-//   P2. TRANSCRIBE audio_path 与 EXTRACT_AUDIO output_dir 在同一目录下（路径衔接正确）
-//   P3. EXTRACT_AUDIO output_dir（asr_audio/）与 TRANSCRIBE output_path 的父目录（asr_result/）不同
+//   P1. ASR_SPAWN_CHUNKS payload 包含正确的 extract_audio_task_id（指向 EXTRACT_AUDIO 任务）
+//   P2. EXTRACT_AUDIO output_dir（asr_audio/）与 ASR_SPAWN_CHUNKS output_dir（asr_result/）不同
+//   P3. ASR_SPAWN_CHUNKS payload 包含正确的 language / model_size / chunk_duration_sec
 //   P4. 幂等检查：已有活跃任务时返回 AlreadyActive，不重复创建
+//   P5. ASR_SPAWN_CHUNKS 依赖 EXTRACT_AUDIO（dependsOn 正确）
 // =============================================================================
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.ktorm.database.Database
@@ -77,64 +78,64 @@ class MaterialWorkflowServiceAsrPayloadTest {
         assertTrue(result is MaterialWorkflowService.StartResult.Started, "应成功创建工作流")
         val tasks = TaskStatusService.listAll(materialId = matId, pageSize = 20).items
         val extract = tasks.first { it.type == "EXTRACT_AUDIO" }
-        val transcribe = tasks.first { it.type == "TRANSCRIBE" }
-        return extract to transcribe
+        val spawnChunks = tasks.first { it.type == "ASR_SPAWN_CHUNKS" }
+        return extract to spawnChunks
     }
 
     // ── P1 ───────────────────────────────────────────────────────────────────
 
     @Test
-    fun `P1 - TRANSCRIBE audio_path points to chunk_0000 not full_audio`() = runBlocking {
+    fun `P1 - ASR_SPAWN_CHUNKS payload contains correct extract_audio_task_id`() = runBlocking {
         val matId = "asr-p1-${System.nanoTime()}"
-        val (_, transcribeTask) = startAndGetTasks(matId)
+        val (extractTask, spawnTask) = startAndGetTasks(matId)
 
-        val audioPath = Json.parseToJsonElement(transcribeTask.payload)
-            .jsonObject["audio_path"]!!.jsonPrimitive.content
+        val spawnPayload = Json.parseToJsonElement(spawnTask.payload).jsonObject
+        val extractAudioTaskId = spawnPayload["extract_audio_task_id"]!!.jsonPrimitive.content
 
-        assertTrue(
-            audioPath.endsWith("chunk_0000.m4a"),
-            "audio_path 应指向 chunk_0000.m4a（FFmpeg segment 实际产出的文件名），实际=$audioPath"
+        assertEquals(
+            extractTask.id,
+            extractAudioTaskId,
+            "ASR_SPAWN_CHUNKS 的 extract_audio_task_id 应指向 EXTRACT_AUDIO 任务"
         )
     }
 
     // ── P2 ───────────────────────────────────────────────────────────────────
 
     @Test
-    fun `P2 - TRANSCRIBE audio_path is inside EXTRACT_AUDIO output_dir`() = runBlocking {
+    fun `P2 - EXTRACT_AUDIO output_dir and ASR_SPAWN_CHUNKS output_dir are in separate dirs`() = runBlocking {
         val matId = "asr-p2-${System.nanoTime()}"
-        val (extractTask, transcribeTask) = startAndGetTasks(matId)
+        val (extractTask, spawnTask) = startAndGetTasks(matId)
 
-        val outputDir = Json.parseToJsonElement(extractTask.payload)
+        val extractOutputDir = Json.parseToJsonElement(extractTask.payload)
             .jsonObject["output_dir"]!!.jsonPrimitive.content
-        val audioPath = Json.parseToJsonElement(transcribeTask.payload)
-            .jsonObject["audio_path"]!!.jsonPrimitive.content
+        val spawnOutputDir = Json.parseToJsonElement(spawnTask.payload)
+            .jsonObject["output_dir"]!!.jsonPrimitive.content
 
-        assertEquals(
-            File(outputDir).absolutePath,
-            File(audioPath).parentFile.absolutePath,
-            "TRANSCRIBE audio_path 的父目录应与 EXTRACT_AUDIO output_dir 一致"
+        assertTrue(
+            File(extractOutputDir).absolutePath != File(spawnOutputDir).absolutePath,
+            "音频目录（asr_audio）与转录结果目录（asr_results/{model}）应分开，" +
+                "实际 audioDir=$extractOutputDir transcriptDir=$spawnOutputDir"
+        )
+        assertTrue(
+            spawnOutputDir.replace("\\", "/").contains("asr_results/large-v3"),
+            "转录结果目录应包含 asr_results/large-v3，实际=$spawnOutputDir"
         )
     }
 
     // ── P3 ───────────────────────────────────────────────────────────────────
 
     @Test
-    fun `P3 - EXTRACT_AUDIO output_dir and TRANSCRIBE output_path are in separate dirs`() = runBlocking {
+    fun `P3 - ASR_SPAWN_CHUNKS payload has correct language model_size chunk_duration_sec`() = runBlocking {
         val matId = "asr-p3-${System.nanoTime()}"
-        val (extractTask, transcribeTask) = startAndGetTasks(matId)
+        val (_, spawnTask) = startAndGetTasks(matId)
 
-        val outputDir = Json.parseToJsonElement(extractTask.payload)
-            .jsonObject["output_dir"]!!.jsonPrimitive.content
-        val outputPath = Json.parseToJsonElement(transcribeTask.payload)
-            .jsonObject["output_path"]!!.jsonPrimitive.content
+        val payload = Json.parseToJsonElement(spawnTask.payload).jsonObject
 
-        val audioParent = File(outputDir).absolutePath
-        val transcriptParent = File(outputPath).parentFile.absolutePath
-
-        assertTrue(
-            audioParent != transcriptParent,
-            "音频目录（asr_audio）与转录结果目录（asr_result）应分开，实际 audioDir=$audioParent transcriptDir=$transcriptParent"
-        )
+        assertEquals("zh", payload["language"]!!.jsonPrimitive.content, "默认语言应为 zh")
+        assertEquals("large-v3", payload["model_size"]!!.jsonPrimitive.content, "默认模型应为 large-v3")
+        assertEquals(300, payload["chunk_duration_sec"]!!.jsonPrimitive.int, "chunk_duration_sec 应为 300")
+        assertEquals(60, payload["overlap_sec"]!!.jsonPrimitive.int, "overlap_sec 应为 60")
+        assertEquals(false, payload["allow_download"]!!.jsonPrimitive.boolean, "默认 allow_download 应为 false")
     }
 
     // ── P4 ───────────────────────────────────────────────────────────────────
@@ -149,5 +150,17 @@ class MaterialWorkflowServiceAsrPayloadTest {
 
         val second = MaterialWorkflowService.startWhisperTranscribe(material)
         assertTrue(second is MaterialWorkflowService.StartResult.AlreadyActive, "第二次应返回 AlreadyActive")
+    }
+
+    // ── P5 ───────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `P5 - ASR_SPAWN_CHUNKS depends on EXTRACT_AUDIO`() = runBlocking {
+        val matId = "asr-p5-${System.nanoTime()}"
+        val (extractTask, spawnTask) = startAndGetTasks(matId)
+
+        val dependsOn = Json.parseToJsonElement(spawnTask.dependsOn ?: "[]").jsonArray
+        assertTrue(dependsOn.any { it.jsonPrimitive.content == extractTask.id },
+            "ASR_SPAWN_CHUNKS 应依赖 EXTRACT_AUDIO，dependsOn=${spawnTask.dependsOn}")
     }
 }

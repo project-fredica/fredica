@@ -1,8 +1,7 @@
 package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.toValidJson
-import com.github.project_fredica.apputil.readNetworkProxyUrl
+import com.github.project_fredica.apputil.internalReadNetworkProxyUrl
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
@@ -12,7 +11,7 @@ import com.multiplatform.webview.web.WebViewNavigator
 /**
  * 读取系统当前检测到的网络代理，返回代理地址字符串。
  *
- * 使用 [AppUtil.readNetworkProxyUrl] 获取地址，该函数通过 InetSocketAddress.getHostString()
+ * 使用 [AppUtil.internalReadNetworkProxyUrl] 获取地址，该函数通过 InetSocketAddress.getHostString()
  * 直接取主机名，避免 toString() 产生 "<unresolved>" 后缀的问题。
  *
  * JS 调用：
@@ -29,7 +28,7 @@ class GetSystemProxyJsMessageHandler : MyJsMessageHandler() {
         callback: (String) -> Unit,
     ) {
         val addr = try {
-            AppUtil.readNetworkProxyUrl()
+            AppUtil.internalReadNetworkProxyUrl()
         } catch (e: Throwable) {
             logger.warn("[GetSystemProxyJsMessageHandler] failed to read system proxy", isHappensFrequently = false, err = e)
             ""

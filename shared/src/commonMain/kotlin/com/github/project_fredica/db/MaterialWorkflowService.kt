@@ -1,6 +1,7 @@
 package com.github.project_fredica.db
 
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.asr.material_workflow_ext.startWhisperTranscribe2
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -31,6 +32,7 @@ object MaterialWorkflowService {
             val transcodeTaskId: String? = null,
             val extractAudioTaskId: String? = null,
             val transcribeTaskId: String? = null,
+            val spawnChunksTaskId: String? = null,
         ) : StartResult
     }
 
@@ -132,81 +134,13 @@ object MaterialWorkflowService {
 
     // ── whisper_transcribe ────────────────────────────────────────────────────
 
-    /**
-     * 启动本地 Whisper 语音识别流程（与"字幕导出"无关，字幕导出是纯前端 SRT 下载）。
-     *
-     * ## 当前任务链（最小线性实现）
-     *   EXTRACT_AUDIO（5分钟/段）→ TRANSCRIBE（仅转录 chunk_0000）
-     *
-     * @param model    模型名称，为空时使用 "large-v3"
-     * @param language 语言代码，为空时使用 "zh"
-     */
+    /** 委托到 [startWhisperTranscribe2] 扩展函数（asr/material_workflow_ext）。 */
     suspend fun startWhisperTranscribe(
         material: MaterialVideo,
         model: String? = null,
         language: String? = null,
         allowDownload: Boolean = false,
-    ): StartResult {
-        val hasActive = TaskStatusService.listAll(materialId = material.id, pageSize = 200)
-            .items.any {
-                it.type in setOf("DOWNLOAD_WHISPER_MODEL", "EXTRACT_AUDIO", "TRANSCRIBE") &&
-                it.status in ACTIVE_STATUSES
-            }
-        if (hasActive) return StartResult.AlreadyActive
-
-        val modelName = model?.takeIf { it.isNotBlank() } ?: "large-v3"
-        val langCode = language?.takeIf { it.isNotBlank() } ?: "zh"
-        val mediaDir = AppUtil.Paths.materialMediaDir(material.id)
-        val inputVideoPath = material.localVideoPath.ifBlank { mediaDir.resolve("video.mp4").absolutePath }
-        val audioDir = mediaDir.resolve("asr_audio")
-        val transcriptDir = mediaDir.resolve("asr_result")
-        val extractAudioTaskId = TaskId.random()
-        val transcribeTaskId = TaskId.random()
-
-        val extractAudioPayload = buildJsonObject {
-            put("input_video_path", inputVideoPath)
-            put("output_dir", audioDir.absolutePath)
-            put("chunk_duration_sec", 300)
-        }.toString()
-
-        val transcribePayload = buildJsonObject {
-            put("audio_path", audioDir.resolve("chunk_0000.m4a").absolutePath)
-            put("language", langCode)
-            put("model_size", modelName)
-            put("output_path", transcriptDir.resolve("transcript.json").absolutePath)
-            put("allow_download", allowDownload)
-        }.toString()
-
-        val tasks = buildList {
-            add(CommonWorkflowService.TaskDef(
-                id = extractAudioTaskId,
-                type = "EXTRACT_AUDIO",
-                materialId = material.id,
-                payload = extractAudioPayload,
-                maxRetries = 0,
-            ))
-            add(CommonWorkflowService.TaskDef(
-                id = transcribeTaskId,
-                type = "TRANSCRIBE",
-                materialId = material.id,
-                payload = transcribePayload,
-                dependsOnIds = listOf(extractAudioTaskId),
-                maxRetries = 0,
-            ))
-        }
-
-        val workflowRunId = CommonWorkflowService.createWorkflow(
-            template = "whisper_transcribe",
-            materialId = material.id,
-            tasks = tasks,
-        )
-
-        return StartResult.Started(
-            workflowRunId = workflowRunId,
-            extractAudioTaskId = extractAudioTaskId.value,
-            transcribeTaskId = transcribeTaskId.value,
-        )
-    }
+    ): StartResult = startWhisperTranscribe2(material, model, language, allowDownload)
 
     // ── 工作流查询 ────────────────────────────────────────────────────────────
 

@@ -1,5 +1,9 @@
 package com.github.project_fredica.db
 
+import com.github.project_fredica.asr.model.BilibiliSubtitleBodyCache
+import com.github.project_fredica.asr.db.BilibiliSubtitleBodyCacheRepo
+import com.github.project_fredica.asr.db.BilibiliSubtitleMetaCacheRepo
+import com.github.project_fredica.asr.model.BilibiliSubtitleMetaCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.ktorm.database.Database

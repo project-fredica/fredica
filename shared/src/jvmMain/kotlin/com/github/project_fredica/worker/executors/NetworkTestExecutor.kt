@@ -5,7 +5,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.apputil.readNetworkProxyUrl
+import com.github.project_fredica.apputil.internalReadNetworkProxyUrl
 import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.worker.ExecuteResult
@@ -72,7 +72,7 @@ object NetworkTestExecutor : TaskExecutor {
         logger.info("NetworkTestExecutor: 开始测试 [taskId=${task.id}, urls=${payload.urls.size}, timeout=${payload.timeoutMs}ms]")
 
         // 读取系统代理 URL（"http://host:port" 或 ""）
-        val proxyUrlStr = AppUtil.readNetworkProxyUrl()
+        val proxyUrlStr = AppUtil.internalReadNetworkProxyUrl()
         val proxyConfigured = proxyUrlStr.isNotBlank()
         val javaProxy: Proxy? = if (proxyConfigured) buildProxy(proxyUrlStr) else null
 

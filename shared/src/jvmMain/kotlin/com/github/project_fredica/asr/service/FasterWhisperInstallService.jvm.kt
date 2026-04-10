@@ -1,10 +1,11 @@
-package com.github.project_fredica.python
+package com.github.project_fredica.asr.service
 
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
+import com.github.project_fredica.python.PythonUtil
 import kotlinx.coroutines.CancellationException
 
-object FasterWhisperInstallService {
+actual object FasterWhisperInstallService {
     private val logger = createLogger { "FasterWhisperInstallService" }
 
     @Volatile private var installed = false
@@ -19,7 +20,7 @@ object FasterWhisperInstallService {
      *
      * @return null 表示成功；非 null 字符串为错误信息
      */
-    suspend fun ensureInstalled(): String? {
+    actual suspend fun ensureInstalled(): String? {
         if (installed) return null
         return try {
             PythonUtil.Py314Embed.installPackage("faster-whisper==1.2.1")

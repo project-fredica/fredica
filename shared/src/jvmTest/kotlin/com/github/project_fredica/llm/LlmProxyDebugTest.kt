@@ -66,7 +66,7 @@ package com.github.project_fredica.llm
 // =============================================================================
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.readNetworkProxy
+import com.github.project_fredica.apputil.internalReadNetworkProxy
 import com.github.project_fredica.testutil.TestAppConfig
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
@@ -131,7 +131,7 @@ class LlmProxyDebugTest {
             .filterNotNull()
             .filter { it.type() != Proxy.Type.DIRECT }
 
-        val appProxy = AppUtil.readNetworkProxy()
+        val appProxy = AppUtil.internalReadNetworkProxy()
 
         if (systemProxies.isEmpty() && appProxy == null) {
             println("  未检测到系统代理。此测试用于诊断代理开启时的问题，请先开启代理再运行。")

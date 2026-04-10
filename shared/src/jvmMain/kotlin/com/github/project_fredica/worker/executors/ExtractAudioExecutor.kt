@@ -15,10 +15,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
 import java.security.MessageDigest
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * 提取视频音频并按时长切段（约 5 分钟/段）。
@@ -50,12 +55,14 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
         @SerialName("input_video_path")   val inputVideoPath: String,
         @SerialName("output_dir")         val outputDir: String,
         @SerialName("chunk_duration_sec") val chunkDurationSec: Int = 300,
+        @SerialName("overlap_sec")        val overlapSec: Int = 60,
     )
 
     @Serializable
     private data class DoneFile(
         @SerialName("input_hash") val inputHash: String,
         @SerialName("chunk_duration_sec") val chunkDurationSec: Int,
+        @SerialName("overlap_sec") val overlapSec: Int = 0,
     )
 
     private fun sha256(file: File): String {
@@ -66,6 +73,39 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
             while (ins.read(buf).also { n = it } != -1) digest.update(buf, 0, n)
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * 扫描 outputDir 中已有的 chunk_XXXX.m4a 文件，重建 chunks JSON 结果。
+     * 用于 canSkip / 加锁后二次检查命中缓存时，返回与 Python 端一致的 result 格式，
+     * 使 AsrSpawnChunksExecutor 能正确读取 chunks 列表。
+     */
+    private fun rebuildChunksResult(outputDir: File, chunkDurationSec: Int, overlapSec: Int): String {
+        val chunkFiles = outputDir.listFiles { f -> f.name.matches(Regex("""chunk_\d{4}\.m4a""")) }
+            ?.sortedBy { it.name }
+            ?: emptyList()
+        val nChunks = chunkFiles.size
+        // 需要知道总时长来计算最后一个 chunk 的 core_end，但 done 文件不记录总时长。
+        // 用 nChunks * chunkDurationSec 作为估算上界（最后一个 chunk 的 core_end 可能偏大，
+        // 但 TranscribeExecutor 合并时最后一个 chunk 用闭区间，不会丢 segment）。
+        val estimatedDuration = nChunks.toDouble() * chunkDurationSec
+        val chunks = JsonArray(chunkFiles.mapIndexed { i, f ->
+            val coreStart = i.toDouble() * chunkDurationSec
+            val coreEnd = min((i + 1).toDouble() * chunkDurationSec, estimatedDuration)
+            val actualStart = max(0.0, coreStart - overlapSec)
+            buildJsonObject {
+                put("path", f.absolutePath)
+                put("index", i)
+                put("core_start_sec", coreStart)
+                put("core_end_sec", coreEnd)
+                put("actual_start_sec", actualStart)
+            }
+        })
+        return buildJsonObject {
+            put("type", "done")
+            put("skipped", true)
+            put("chunks", chunks)
+        }.toString()
     }
 
     override suspend fun canSkip(task: Task): Boolean {
@@ -88,11 +128,12 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
         val currentHash = withContext(Dispatchers.IO) { sha256(inputFile) }
         val hashMatch = done.inputHash == currentHash
         val durationMatch = done.chunkDurationSec == payload.chunkDurationSec
+        val overlapMatch = done.overlapSec == payload.overlapSec
         logger.debug(
-            "ExtractAudioExecutor.canSkip: hashMatch=$hashMatch durationMatch=$durationMatch" +
+            "ExtractAudioExecutor.canSkip: hashMatch=$hashMatch durationMatch=$durationMatch overlapMatch=$overlapMatch" +
             " storedHash=${done.inputHash.take(12)}… currentHash=${currentHash.take(12)}…"
         )
-        return hashMatch && durationMatch
+        return hashMatch && durationMatch && overlapMatch
     }
 
     override suspend fun executeWithSignals(
@@ -115,9 +156,9 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
                 val done = doneFile.readText().loadJsonModel<DoneFile>().getOrNull()
                 if (done != null) {
                     val currentHash = sha256(inputFile)
-                    if (done.inputHash == currentHash && done.chunkDurationSec == payload.chunkDurationSec) {
+                    if (done.inputHash == currentHash && done.chunkDurationSec == payload.chunkDurationSec && done.overlapSec == payload.overlapSec) {
                         logger.debug("ExtractAudioExecutor: 加锁后二次检查命中缓存，跳过 [taskId=${task.id}]")
-                        return@withLock ExecuteResult(result = "{\"skipped\":true}")
+                        return@withLock ExecuteResult(result = rebuildChunksResult(File(payload.outputDir), payload.chunkDurationSec, payload.overlapSec))
                     }
                 }
             }
@@ -128,6 +169,7 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
                 put("video_path", payload.inputVideoPath)
                 put("output_dir", payload.outputDir)
                 put("chunk_duration_sec", payload.chunkDurationSec)
+                put("overlap_sec", payload.overlapSec)
             }.toString()
 
             logger.info("ExtractAudioExecutor: 开始提取音频 input=${payload.inputVideoPath} [taskId=${task.id}]")
@@ -151,6 +193,7 @@ object ExtractAudioExecutor : WebSocketTaskExecutor() {
                         val doneContent = buildJsonObject {
                             put("input_hash", hash)
                             put("chunk_duration_sec", payload.chunkDurationSec)
+                            put("overlap_sec", payload.overlapSec)
                         }.toString()
                         doneFile.writeText(doneContent)
                         logger.debug("ExtractAudioExecutor: 写入 done 文件 hash=${hash.take(12)}… [taskId=${task.id}]")

@@ -10,7 +10,7 @@ actual fun S3File.Companion.createHttpClientEngine(): HttpClientEngine? {
     return aws.smithy.kotlin.runtime.http.engine.okhttp.OkHttpEngine {
         this.proxySelector = ProxySelector { url ->
             logger.debug("select s3 client proxy for url : $url")
-            val proxy = AppUtil.readNetworkProxy()
+            val proxy = AppUtil.internalReadNetworkProxy()
             if (proxy.isDirect()) {
                 logger.debug("s3 proxy is direct")
                 return@ProxySelector aws.smithy.kotlin.runtime.http.engine.ProxyConfig.Direct

@@ -18,9 +18,9 @@ import java.net.ProxySelector
 import java.net.Socket
 import java.net.URI
 
-actual fun AppUtil.readNetworkProxy(): ProxyConfig? {
+actual fun AppUtil.internalReadNetworkProxy(): ProxyConfig? {
 //    val logger = createLogger()
-    val res = readNetworkProxy0()
+    val res = internalReadNetworkProxy0()
 //    logger.debug("readNetworkProxy : $res")
     return res
 }
@@ -31,9 +31,12 @@ actual fun AppUtil.readNetworkProxy(): ProxyConfig? {
  *
  * 直接使用 [InetSocketAddress.getHostString] + [InetSocketAddress.getPort]，
  * 避免依赖 toString() 的格式（如 "/127.0.0.1/<unresolved>:7890"）。
+ *
+ * **注意**：此方法仅读取系统级代理，不感知用户在 App 设置中填写的覆盖代理。
+ * 业务代码应使用 [AppProxyService.readProxyUrl] 代替。
  */
-actual fun AppUtil.readNetworkProxyUrl(): String {
-    val proxy = readNetworkProxy0() ?: return ""
+actual fun AppUtil.internalReadNetworkProxyUrl(): String {
+    val proxy = internalReadNetworkProxy0() ?: return ""
     return try {
         val inetAddr = proxy.address() as? java.net.InetSocketAddress
             ?: return ""
@@ -46,7 +49,7 @@ actual fun AppUtil.readNetworkProxyUrl(): String {
     }
 }
 
-private fun AppUtil.readNetworkProxy0(): ProxyConfig? {
+private fun AppUtil.internalReadNetworkProxy0(): ProxyConfig? {
     val targetURI = URI("https://www.google.com")
     val proxies: MutableList<Proxy?>? = ProxySelector.getDefault().select(targetURI)
 

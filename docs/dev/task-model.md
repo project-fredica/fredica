@@ -409,6 +409,68 @@ flowchart TD
 
 对应函数：`CommonWorkflowService.createWorkflow()`
 
+### 8.3 运行时动态展开：ASR 转录流水线
+
+并非所有工作流都能在创建时确定全部任务。**ASR 语音识别**就是一个典型场景：音频需要先切段，切出多少段取决于音频时长，只有切段完成后才知道。
+
+Fredica 用**三级任务链**解决这个问题：
+
+```mermaid
+flowchart TD
+    A[EXTRACT_AUDIO] --> B[ASR_SPAWN_CHUNKS]
+    B --> C1[TRANSCRIBE chunk_0000]
+    B --> C2[TRANSCRIBE chunk_0001]
+    B --> C3[TRANSCRIBE chunk_0002]
+    B --> CN[TRANSCRIBE chunk_N...]
+```
+
+#### 创建阶段（静态）
+
+`MaterialWorkflowService.startWhisperTranscribe()` 只创建**两个**任务：
+
+1. **EXTRACT_AUDIO**：FFmpeg 将视频切为多段音频（chunk_0000.m4a, chunk_0001.m4a, ...）
+2. **ASR_SPAWN_CHUNKS**：`dependsOn = [EXTRACT_AUDIO]`，负责读取切段结果并动态创建后续任务
+
+此时 chunk 数量未知，无法预先创建 TRANSCRIBE 任务。
+
+#### 展开阶段（运行时）
+
+`AsrSpawnChunksExecutor` 执行时：
+
+1. 从 `EXTRACT_AUDIO` 任务的 `result` 字段读取 `chunks` 数组，获得实际切段列表
+2. 为每个 chunk 创建一个 `TRANSCRIBE` 任务，payload 包含 `audio_path`、`chunk_index`、`core_start_sec`、`core_end_sec` 等
+3. 所有 TRANSCRIBE 任务的 `dependsOn = [ASR_SPAWN_CHUNKS.id]`
+4. 调用 `TaskStatusService.createAll()` 批量写入
+
+```mermaid
+sequenceDiagram
+    participant WE as WorkerEngine
+    participant EA as EXTRACT_AUDIO
+    participant SC as ASR_SPAWN_CHUNKS
+    participant DB as TaskDb
+
+    WE->>EA: 执行 FFmpeg 切段
+    EA-->>DB: result = {chunks: [{path, core_start, core_end}, ...]}
+    WE->>SC: 执行（读取 EA.result）
+    SC->>DB: createAll(N 个 TRANSCRIBE 任务)
+    Note over DB: N 个 TRANSCRIBE 进入 pending
+    WE->>DB: claimNext() 逐个认领 TRANSCRIBE
+```
+
+#### 为什么这样设计
+
+- **静态创建不可行**：chunk 数量取决于音频时长和 `chunk_duration_sec` 参数，创建工作流时无法预知
+- **复用 DAG 调度**：动态创建的 TRANSCRIBE 任务同样通过 `depends_on` + `claimNext()` 调度，无需额外编排器
+- **天然支持并行**：多个 TRANSCRIBE 任务互不依赖，WorkerEngine 可并发执行
+- **幂等与缓存**：每个 TRANSCRIBE 任务通过 `canSkip()` 检查 `chunk_XXXX.done` 文件（SHA-256 hash + model_size + language），已完成的 chunk 自动跳过
+
+对应函数：
+
+- 静态创建：`MaterialWorkflowService.startWhisperTranscribe()`
+- 动态展开：`AsrSpawnChunksExecutor.execute()`
+- 转录执行：`TranscribeExecutor.execute()`
+- 结果合并：`TranscribeExecutor.tryMergeChunks()`
+
 ---
 
 ## 9. WorkerEngine：调度与执行中枢

@@ -9,6 +9,7 @@ import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.ExecuteResult
+import com.github.project_fredica.worker.GpuResourceLock
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.TaskPauseResumeChannels
 import com.github.project_fredica.worker.TaskPauseResumeService
@@ -169,47 +170,55 @@ object TranscodeMp4Executor : WebSocketTaskExecutor() {
 
         logger.info("TranscodeMp4Executor: 开始转码 $resolvedInputVideo → ${payload.outputPath} [accel=$resolvedAccel, ffmpeg=$ffmpegPath, taskId=${task.id}]")
 
-        val paramJson = buildJsonObject {
-            put("input_video", resolvedInputVideo)
-            put("output_path", payload.outputPath)
-            put("hw_accel", resolvedAccel)
-            put("ffmpeg_path", ffmpegPath)
-            if (resolvedInputAudio != null) {
-                put("input_audio", resolvedInputAudio)
-            }
-        }.toString()
+        val runTask: suspend () -> ExecuteResult = {
+            val paramJson = buildJsonObject {
+                put("input_video", resolvedInputVideo)
+                put("output_path", payload.outputPath)
+                put("hw_accel", resolvedAccel)
+                put("ffmpeg_path", ffmpegPath)
+                if (resolvedInputAudio != null) {
+                    put("input_audio", resolvedInputAudio)
+                }
+            }.toString()
 
-        return@withContext try {
-            val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
-                pth = "/transcode/mp4-task",
-                paramJson = paramJson,
-                onProgress = { pct ->
-                    logger.debug("TranscodeMp4Executor: 转码进度 $pct% [taskId=${task.id}]")
-                    TaskService.repo.updateProgress(task.id, pct)
-                },
-                onPausable = { pausable ->
-                    TaskService.repo.updatePausable(task.id, pausable)
-                },
-                cancelSignal = cancelSignal,
-                pauseChannel = pauseResumeChannels.pause,
-                resumeChannel = pauseResumeChannels.resume,
-            )
-            if (result == null) {
-                logger.info("TranscodeMp4Executor: 转码已取消 [taskId=${task.id}]")
-                ExecuteResult(error = "用户已取消转码", errorType = "CANCELLED")
-            } else {
-                logger.info("TranscodeMp4Executor: 转码完成 → ${payload.outputPath} [taskId=${task.id}]")
-                ExecuteResult(result = result)
+            try {
+                val result = PythonUtil.Py314Embed.PyUtilServer.websocketTask(
+                    pth = "/transcode/mp4-task",
+                    paramJson = paramJson,
+                    onProgress = { pct ->
+                        logger.debug("TranscodeMp4Executor: 转码进度 $pct% [taskId=${task.id}]")
+                        TaskService.repo.updateProgress(task.id, pct)
+                    },
+                    onPausable = { pausable ->
+                        TaskService.repo.updatePausable(task.id, pausable)
+                    },
+                    cancelSignal = cancelSignal,
+                    pauseChannel = pauseResumeChannels.pause,
+                    resumeChannel = pauseResumeChannels.resume,
+                )
+                if (result == null) {
+                    logger.info("TranscodeMp4Executor: 转码已取消 [taskId=${task.id}]")
+                    ExecuteResult(error = "用户已取消转码", errorType = "CANCELLED")
+                } else {
+                    logger.info("TranscodeMp4Executor: 转码完成 → ${payload.outputPath} [taskId=${task.id}]")
+                    ExecuteResult(result = result)
+                }
+            } catch (e: Throwable) {
+                // 取消信号已触发时，WebSocket 关闭可能抛出异常，视为用户主动取消
+                if (cancelSignal.isCompleted) {
+                    logger.info("TranscodeMp4Executor: 取消信号已触发，忽略异常 [taskId=${task.id}]: ${e.message}")
+                    ExecuteResult(error = "用户已取消转码", errorType = "CANCELLED")
+                } else {
+                    logger.error("TranscodeMp4Executor: 转码失败 [taskId=${task.id}]: ${e.message}")
+                    ExecuteResult(error = "Transcode failed: ${e.message}", errorType = "TRANSCODE_ERROR")
+                }
             }
-        } catch (e: Throwable) {
-            // 取消信号已触发时，WebSocket 关闭可能抛出异常，视为用户主动取消
-            if (cancelSignal.isCompleted) {
-                logger.info("TranscodeMp4Executor: 取消信号已触发，忽略异常 [taskId=${task.id}]: ${e.message}")
-                ExecuteResult(error = "用户已取消转码", errorType = "CANCELLED")
-            } else {
-                logger.error("TranscodeMp4Executor: 转码失败 [taskId=${task.id}]: ${e.message}")
-                ExecuteResult(error = "Transcode failed: ${e.message}", errorType = "TRANSCODE_ERROR")
-            }
+        }
+
+        return@withContext if (resolvedAccel != "cpu") {
+            GpuResourceLock.withGpuLock(task.id) { runTask() }
+        } else {
+            runTask()
         }
     }
 

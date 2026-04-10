@@ -12,8 +12,7 @@ import { startMaterialWorkflow } from "~/util/materialWorkflowApi";
 import { reportHttpError, print_error } from "~/util/error_handler";
 import {
     ALL_WHISPER_MODELS, WHISPER_MODEL_VRAM_HINT, WHISPER_LANGUAGES,
-    parseCompatJson, pickDefaultModel,
-    type WhisperModelCompat, type WhisperCompatParsed,
+    pickDefaultModel,
 } from "~/util/asrConfig";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,6 +25,8 @@ interface SubtitleApiItem {
     queried_at: number;   // Unix seconds
     subtitle_url: string;
     type: number;         // 0=human, 1=AI
+    model_size?: string;  // ASR model name (e.g. "large-v3")
+    partial?: boolean;    // true if transcription is incomplete
 }
 
 const SOURCE_LABEL: Record<string, { text: string; cls: string }> = {
@@ -40,15 +41,30 @@ const SOURCE_LABEL: Record<string, { text: string; cls: string }> = {
 function SubtitleChip({ sub }: { sub: SubtitleApiItem }) {
     const badge = SOURCE_LABEL[sub.source] ?? { text: sub.source, cls: 'bg-gray-100 text-gray-500' };
     const dateStr = new Date(sub.queried_at * 1000).toLocaleDateString('zh-CN');
-    return (
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs">
-            <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+    const aiLabel = sub.type === 1
+        ? (sub.model_size ? `AI(${sub.model_size})` : 'AI')
+        : null;
+
+    const inner = (
+        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs ${
+            sub.source === "asr" ? "hover:border-violet-300 cursor-pointer" : ""
+        }`}>
+            {sub.partial
+                ? <Loader className="w-3 h-3 text-amber-500 animate-spin flex-shrink-0" />
+                : <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+            }
             <span className="font-medium text-gray-800">{sub.lan_doc || sub.lan}</span>
-            {sub.type === 1 && <span className="text-gray-400">AI</span>}
+            {aiLabel && <span className="text-gray-400">{aiLabel}</span>}
             <span className={`px-1 py-0.5 rounded font-medium ${badge.cls}`}>{badge.text}</span>
             <span className="text-gray-400">{dateStr}</span>
+            {sub.source === "asr" && <ChevronRight className="w-3 h-3 text-gray-400" />}
         </div>
     );
+
+    if (sub.source === "asr") {
+        return <Link to={`../subtitle-asr?model_size=${encodeURIComponent(sub.model_size || 'large-v3')}`} relative="path">{inner}</Link>;
+    }
+    return inner;
 }
 
 // ─── Scheme panel ─────────────────────────────────────────────────────────────
@@ -109,20 +125,9 @@ function SchemeCard({ scheme, selected, onSelect }: { scheme: SchemeConfig; sele
 
 // ─── ASR scheme detail ────────────────────────────────────────────────────────
 
-// ─── Whisper compat info types ────────────────────────────────────────────────
-
-interface WhisperCompatInfo {
-    model: string;
-    compute_type: string;
-    device: string;
-    compat_json: string;  // JSON string from EvaluateFasterWhisperCompatExecutor
-}
-
 // ─── ASR model picker modal ───────────────────────────────────────────────────
 
 function AsrModelPickerModal({
-    compatInfo,
-    compatLoading,
     selectedModel,
     selectedLanguage,
     selectedAllowDownload,
@@ -130,8 +135,6 @@ function AsrModelPickerModal({
     onSelect,
     onClose,
 }: {
-    compatInfo: WhisperCompatInfo | null;
-    compatLoading: boolean;
     selectedModel: string;
     selectedLanguage: string;
     selectedAllowDownload: boolean;
@@ -167,18 +170,9 @@ function AsrModelPickerModal({
         if (typeof langGuessState !== "object") return;
         const detectedLang = langGuessState.lang;
         setLanguage(detectedLang);
-        if (!compatInfo) return;
-        const parsed = parseCompatJson(compatInfo.compat_json ?? "{}");
-        const picked = pickDefaultModel(detectedLang, parsed);
-        if (picked) setModel(picked);
+        setModel(pickDefaultModel(detectedLang));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [langGuessState]);
-
-    const compat = parseCompatJson(compatInfo?.compat_json ?? "{}");
-    const recommended = compat.recommended_model;
-    const vramGb = compat.vram_gb;
-    const modelCompat: Record<string, WhisperModelCompat> = {};
-    compat.models.forEach(m => { modelCompat[m.name] = m; });
 
     return (
         <div
@@ -189,12 +183,7 @@ function AsrModelPickerModal({
             <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                    <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-semibold text-gray-800">语音识别配置</h3>
-                        {vramGb != null && (
-                            <span className="text-xs text-gray-400">显存 {vramGb} GB</span>
-                        )}
-                    </div>
+                    <h3 className="text-sm font-semibold text-gray-800">语音识别配置</h3>
                     <div className="flex items-center gap-1">
                         <a
                             href="https://github.com/SYSTRAN/faster-whisper#benchmark"
@@ -215,69 +204,35 @@ function AsrModelPickerModal({
                     {/* Model list */}
                     <div>
                         <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">模型</p>
-                        {compatLoading ? (
-                            <div className="flex items-center gap-2 py-2 text-xs text-gray-400">
-                                <Loader className="w-3.5 h-3.5 animate-spin" />
-                                <span>加载兼容性信息…</span>
-                            </div>
-                        ) : (
-                            <div ref={modelListRef} className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-100 rounded-lg p-1">
-                                {ALL_WHISPER_MODELS.map(m => {
-                                    const mc = modelCompat[m];
-                                    const isRecommended = !compat.torch_missing && m === recommended;
-                                    const isOom = mc != null && !mc.ok;
-                                    const isSelected = model === m;
-                                    return (
-                                        <button
-                                            key={m}
-                                            data-model={m}
-                                            onClick={() => setModel(m)}
-                                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-colors ${
-                                                isSelected
-                                                    ? "border-violet-400 bg-violet-50"
-                                                    : isOom
-                                                        ? "border-gray-100 bg-gray-50 opacity-50"
-                                                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                                            }`}
-                                        >
-                                            <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
-                                                isSelected ? "border-violet-500 bg-violet-500" : "border-gray-300"
-                                            }`} />
-                                            <span className={`text-xs font-medium flex-1 ${isSelected ? "text-violet-800" : "text-gray-700"}`}>{m}</span>
-                                            <div className="flex items-center gap-1">
-                                                {isRecommended && <span className="text-[10px] px-1 py-0.5 bg-violet-100 text-violet-600 rounded">推荐</span>}
-                                                {mc?.isEnOnly && <span className="text-[10px] px-1 py-0.5 bg-blue-50 text-blue-500 rounded">仅英语</span>}
-                                                {mc?.vram_required != null && mc.vram_required > 0 && <span className="text-[10px] text-gray-400">{mc.vram_required}GB</span>}
-                                                {isOom && <span className="text-[10px] px-1 py-0.5 bg-amber-50 text-amber-600 rounded">显存不足</span>}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
+                        <div ref={modelListRef} className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-100 rounded-lg p-1">
+                            {ALL_WHISPER_MODELS.map(m => {
+                                const isEnOnly = m.endsWith(".en") || m.startsWith("distil-");
+                                const vram = WHISPER_MODEL_VRAM_HINT[m];
+                                const isSelected = model === m;
+                                return (
+                                    <button
+                                        key={m}
+                                        data-model={m}
+                                        onClick={() => setModel(m)}
+                                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-colors ${
+                                            isSelected
+                                                ? "border-violet-400 bg-violet-50"
+                                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                                        }`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
+                                            isSelected ? "border-violet-500 bg-violet-500" : "border-gray-300"
+                                        }`} />
+                                        <span className={`text-xs font-medium flex-1 ${isSelected ? "text-violet-800" : "text-gray-700"}`}>{m}</span>
+                                        <div className="flex items-center gap-1">
+                                            {isEnOnly && <span className="text-[10px] px-1 py-0.5 bg-blue-50 text-blue-500 rounded">仅英语</span>}
+                                            {vram != null && vram > 0 && <span className="text-[10px] text-gray-400">{vram}GB</span>}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
-
-                    {/* Selected model hint */}
-                    {!compatLoading && (() => {
-                        if (compat.torch_missing) return (
-                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 leading-relaxed">
-                                ⚠ 服主尚未安装 PyTorch，暂时无法评估哪个模型适合服务器设备。<br />
-                                服主可前往<span className="font-medium">桌面服务器设置 → PyTorch 环境</span>完成安装。PyTorch 未安装不影响 faster-whisper 的正常使用，可直接选择模型开始识别。
-                            </p>
-                        );
-                        const mc = modelCompat[model];
-                        if (mc != null && !mc.ok) return (
-                            <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                                ⚠ 当前显存（{vramGb != null ? `${vramGb} GB` : "未知"}）可能不足以运行 {model}，建议选择推荐模型。
-                            </p>
-                        );
-                        if (model === recommended) return (
-                            <p className="text-[11px] text-violet-600 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">
-                                ✓ {model} 是当前设备的推荐模型。
-                            </p>
-                        );
-                        return null;
-                    })()}
 
                     {/* Language */}
                     <div>
@@ -346,8 +301,6 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
     const [language, setLanguage] = useState("auto");
     const [allowDownload, setAllowDownload] = useState(true);
     const [showModal, setShowModal] = useState(false);
-    const [compatInfo, setCompatInfo] = useState<WhisperCompatInfo | null>(null);
-    const [compatLoading, setCompatLoading] = useState(false);
     const [starting, setStarting] = useState(false);
     const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
     const [startError, setStartError] = useState<string | null>(null);
@@ -396,22 +349,13 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
     }, [materialId]);
 
     const openModal = () => {
-        if (compatInfo) { setShowModal(true); return; }
-        if (compatLoading) return;
-        setCompatLoading(true);
-        apiFetch<WhisperCompatInfo>("/api/v1/FasterWhisperConfigInfoRoute", { method: "GET" }, { silent: true })
-            .then(({ data }) => { if (data) setCompatInfo(data); })
-            .catch(e => { print_error({ reason: "加载 ASR 兼容性信息失败", err: e }); })
-            .finally(() => { setCompatLoading(false); setShowModal(true); });
+        setShowModal(true);
     };
 
     // 每次渲染时计算模态框的初始模型（避免 setModel 异步更新导致模态框拿到旧值）
-    const modalInitialModel = (() => {
-        if (!compatInfo) return model;
-        const parsed = parseCompatJson(compatInfo.compat_json ?? "{}");
-        const guessedLang = typeof langGuessState === "object" ? langGuessState.lang : language;
-        return pickDefaultModel(guessedLang, parsed) ?? model;
-    })();
+    const modalInitialModel = model || pickDefaultModel(
+        typeof langGuessState === "object" ? langGuessState.lang : language,
+    );
 
     const handleStart = async (chosenModel: string, chosenLanguage: string, chosenAllowDownload: boolean) => {
         setModel(chosenModel);
@@ -472,18 +416,16 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
             ) : (
                 <button
                     onClick={openModal}
-                    disabled={starting || compatLoading}
+                    disabled={starting}
                     className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                    {(starting || compatLoading) ? <Loader className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
-                    {starting ? "启动中…" : compatLoading ? "加载配置…" : "配置并开始语音识别"}
+                    {starting ? <Loader className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
+                    {starting ? "启动中…" : "配置并开始语音识别"}
                 </button>
             )}
             <p className="text-xs text-gray-400">识别完成后可在「已有字幕」中查看结果</p>
             {showModal && (
                 <AsrModelPickerModal
-                    compatInfo={compatInfo}
-                    compatLoading={compatLoading}
                     selectedModel={modalInitialModel}
                     selectedLanguage={language}
                     selectedAllowDownload={allowDownload}
@@ -581,8 +523,8 @@ export default function SubtitlePage() {
                     <p className="text-sm text-gray-400">暂无缓存字幕，可通过下方方式获取。</p>
                 ) : (
                     <div className="flex flex-wrap gap-2">
-                        {subtitles.map(s => (
-                            <SubtitleChip key={`${s.lan}-${s.source}`} sub={s} />
+                        {subtitles.map((s, i) => (
+                            <SubtitleChip key={`${s.lan}-${s.source}-${s.model_size ?? ''}-${i}`} sub={s} />
                         ))}
                     </div>
                 )}

@@ -1,39 +1,29 @@
-package com.github.project_fredica.db
+package com.github.project_fredica.asr.service
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
-import com.github.project_fredica.api.routes.BilibiliVideoSubtitleBodyRoute
-import com.github.project_fredica.api.routes.BilibiliVideoSubtitleRoute
 import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
-import com.github.project_fredica.apputil.BilibiliSubtitleUtil
 import com.github.project_fredica.apputil.PyCallGuard
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJson
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import com.github.project_fredica.asr.model.BilibiliSubtitleMetaCache
+import com.github.project_fredica.asr.db.BilibiliSubtitleMetaCacheRepo
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
-/** 字幕元信息缓存（subtitle_meta，不含字幕内容） */
-@Serializable
-data class BilibiliSubtitleMetaCache(
-    val id: Long = 0,
-    val bvid: String,
-    @SerialName("page_index") val pageIndex: Int = 0,
-    @SerialName("queried_at") val queriedAt: Long,
-    @SerialName("raw_result") val rawResult: String,
-    @SerialName("is_success") val isSuccess: Boolean,
-)
-
-interface BilibiliSubtitleMetaCacheRepo {
-    suspend fun insert(entry: BilibiliSubtitleMetaCache)
-    suspend fun queryBest(bvid: String, pageIndex: Int): BilibiliSubtitleMetaCache?
-}
-
+/**
+ * Bilibili 字幕元信息缓存服务。
+ *
+ * 通过 [PyCallGuard] 两级锁保护，同一 bvid:pageIndex 的并发请求只有第一个穿透到 Python，
+ * 其余等锁后命中缓存。缓存写入 `bilibili_subtitle_meta_cache` 表。
+ *
+ * isSuccess 判定包含三重校验（code=0 + subtitles 非 null + 无凭据时空列表视为失败），
+ * 防止把"未登录时空字幕"误缓存为成功。
+ */
 object BilibiliSubtitleMetaCacheService {
     private var _repo: BilibiliSubtitleMetaCacheRepo? = null
     val repo: BilibiliSubtitleMetaCacheRepo
@@ -93,7 +83,7 @@ object BilibiliSubtitleMetaCacheService {
      * 通过缓存+锁保护获取 Bilibili 字幕元信息。
      *
      * 封装 [BilibiliSubtitleMetaCacheService.fetchOrLoad] 的 loader 参数，
-     * 避免在 [BilibiliVideoSubtitleRoute] 和 [FetchSubtitleExecutor] 中重复构建凭据和 isSuccess 判定逻辑。
+     * 避免在 BilibiliVideoSubtitleRoute 中重复构建凭据和 isSuccess 判定逻辑。
      *
      * @param bvid      Bilibili BV 号
      * @param pageIndex 分P下标（0-based）
@@ -157,98 +147,4 @@ object BilibiliSubtitleMetaCacheService {
 
         true
     }.getOrDefault(false)
-}
-
-/** 字幕内容缓存（单条字幕 body，按 url_key 索引） */
-@Serializable
-data class BilibiliSubtitleBodyCache(
-    val id: Long = 0,
-    @SerialName("url_key") val urlKey: String,
-    @SerialName("queried_at") val queriedAt: Long,
-    @SerialName("raw_result") val rawResult: String,
-    @SerialName("is_success") val isSuccess: Boolean,
-)
-
-interface BilibiliSubtitleBodyCacheRepo {
-    suspend fun insert(entry: BilibiliSubtitleBodyCache)
-    suspend fun queryBest(urlKey: String): BilibiliSubtitleBodyCache?
-}
-
-object BilibiliSubtitleBodyCacheService {
-    private var _repo: BilibiliSubtitleBodyCacheRepo? = null
-    val repo: BilibiliSubtitleBodyCacheRepo
-        get() = _repo ?: error("BilibiliSubtitleBodyCacheService 未初始化")
-
-    fun initialize(repo: BilibiliSubtitleBodyCacheRepo) {
-        _repo = repo
-    }
-
-    private val logger = createLogger { "BilibiliSubtitleBodyCacheService" }
-    private val guard = PyCallGuard()
-
-    /**
-     * 两级锁缓存加载：
-     *   Level 1（锁外）：快速路径，无锁直接命中缓存即返回。
-     *   Level 2（锁内）：double-check，防止前一个请求已写入缓存后重复调用 Python。
-     * 同一 urlKey 的并发请求只有第一个会穿透到 Python，其余等锁后命中缓存。
-     */
-    private suspend fun fetchOrLoad(
-        urlKey: String,
-        isUpdate: Boolean,
-        loader: suspend () -> Pair<String, Boolean>,
-    ): String {
-        // Level 1：锁外快速命中
-        if (!isUpdate) {
-            val l1 = repo.queryBest(urlKey)
-            l1?.let {
-                logger.debug("L1缓存命中 urlKey=$urlKey queried_at=${it.queriedAt}")
-                return it.rawResult
-            }
-        }
-        // 获取 per-resource 锁，串行化同一资源的并发请求
-        logger.debug("等待资源锁 urlKey=$urlKey")
-        return guard.withLock(urlKey) {
-            // Level 2：锁内 double-check（前一个请求可能已写入缓存）
-            if (!isUpdate) {
-                repo.queryBest(urlKey)?.let {
-                    logger.debug("L2缓存命中（锁内）urlKey=$urlKey queried_at=${it.queriedAt}")
-                    return@withLock it.rawResult
-                }
-            }
-            logger.debug("缓存未命中，调用 Python urlKey=$urlKey")
-            val (raw, isSuccess) = loader()
-            repo.insert(
-                BilibiliSubtitleBodyCache(
-                    urlKey = urlKey,
-                    queriedAt = System.currentTimeMillis() / 1000L,
-                    rawResult = raw, isSuccess = isSuccess,
-                )
-            )
-            logger.info("已写入缓存 urlKey=$urlKey is_success=$isSuccess raw_len=${raw.length}")
-            raw
-        }
-    }
-
-    suspend fun fetchBilibiliSubtitleBody(
-        subtitleUrlFieldValue: String,
-        isUpdate: Boolean,
-    ): String {
-        val urlKey = BilibiliSubtitleUtil.extractSubtitleUrlKey(subtitleUrlFieldValue)
-        logger.debug("请求 urlKey=$urlKey is_update=${isUpdate} original_url=${subtitleUrlFieldValue}")
-        val res = fetchOrLoad(urlKey, isUpdate) {
-            val pyBody = buildJsonObject { put("subtitle_url", subtitleUrlFieldValue) }
-            logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
-            val row = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.toString(), timeoutMs = 5 * 60_000L)
-            row to computeIsSuccess(row)
-        }
-        logger.debug("返回结果 urlKey=$urlKey")
-        return res
-    }
-
-    private fun computeIsSuccess(raw: String): Boolean =
-        runCatching {
-            val obj = raw.loadJson().getOrThrow() as? JsonObject
-            val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
-            code == 0
-        }.getOrDefault(false)
 }

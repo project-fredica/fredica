@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toValidJson
+import com.github.project_fredica.asr.material_workflow_ext.handleWhisperTranscribe
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.MaterialWorkflowService
 import kotlinx.serialization.SerialName
@@ -42,19 +43,7 @@ object MaterialWorkflowRoute : FredicaApi.Route {
                         }.toValidJson()
                 }
             }
-            "whisper_transcribe" -> {
-                if (p.model.isNullOrBlank()) return buildJsonObject { put("error", "MODEL_REQUIRED") }.toValidJson()
-                when (val r = MaterialWorkflowService.startWhisperTranscribe(material, model = p.model, language = p.language, allowDownload = p.allowDownload)) {
-                    is MaterialWorkflowService.StartResult.AlreadyActive ->
-                        buildJsonObject { put("error", "TASK_ALREADY_ACTIVE") }.toValidJson()
-                    is MaterialWorkflowService.StartResult.Started ->
-                        buildJsonObject {
-                            put("workflow_run_id", r.workflowRunId)
-                            if (r.extractAudioTaskId != null) put("extract_audio_task_id", r.extractAudioTaskId)
-                            if (r.transcribeTaskId != null) put("transcribe_task_id", r.transcribeTaskId)
-                        }.toValidJson()
-                }
-            }
+            "whisper_transcribe" -> handleWhisperTranscribe(p, material)
             else -> buildJsonObject { put("error", "UNKNOWN_TEMPLATE") }.toValidJson()
         }
     }

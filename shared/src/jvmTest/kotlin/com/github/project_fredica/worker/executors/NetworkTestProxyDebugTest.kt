@@ -57,7 +57,7 @@ package com.github.project_fredica.worker.executors
 // =============================================================================
 
 import com.github.project_fredica.apputil.AppUtil
-import com.github.project_fredica.apputil.readNetworkProxy
+import com.github.project_fredica.apputil.internalReadNetworkProxy
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -90,7 +90,7 @@ class NetworkTestProxyDebugTest {
         val systemProxies =
             setOf(
                 *ProxySelector.getDefault().select(targetUri).toTypedArray().ifEmpty { arrayOf() },
-                AppUtil.readNetworkProxy()
+                AppUtil.internalReadNetworkProxy()
             ).filterNotNull()
 
 

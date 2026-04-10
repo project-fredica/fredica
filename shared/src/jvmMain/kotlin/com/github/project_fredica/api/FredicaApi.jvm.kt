@@ -3,7 +3,9 @@ package com.github.project_fredica.api
 import com.github.project_fredica.api.FredicaApiJvmService.init
 import com.github.project_fredica.api.routes.*
 import com.github.project_fredica.apputil.*
-import com.github.project_fredica.apputil.readNetworkProxy
+import com.github.project_fredica.apputil.internalReadNetworkProxy
+import com.github.project_fredica.asr.service.BilibiliSubtitleBodyCacheService
+import com.github.project_fredica.asr.service.BilibiliSubtitleMetaCacheService
 import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.llm.LlmRequestServiceHolder
@@ -11,6 +13,8 @@ import com.github.project_fredica.llm.LlmRequestServiceImpl
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
+import com.github.project_fredica.asr.executor.AsrSpawnChunksExecutor
+import com.github.project_fredica.asr.executor.TranscribeExecutor
 import com.github.project_fredica.worker.executors.*
 import inet.ipaddr.AddressStringException
 import inet.ipaddr.IPAddressString
@@ -180,9 +184,8 @@ object FredicaApiJvmService {
                 DownloadBilibiliVideoExecutor,
                 TranscodeMp4Executor,
                 ExtractAudioExecutor,
+                AsrSpawnChunksExecutor,
                 TranscribeExecutor,
-                DownloadWhisperModelExecutor,
-                EvaluateFasterWhisperCompatExecutor,
                 DownloadTorchExecutor,
             ),
         )
@@ -350,7 +353,7 @@ object FredicaApiJvmService {
                 // 检测 SocketException + 系统代理组合，附加修复建议字段供前端 toast 提示。
                 // 根本原因：Clash HTTP 模式下 OkHttp 发送 CONNECT 隧道请求被中止（WSAECONNABORTED）。
                 // 详细诊断过程与修复方案见 LlmProxyDebugTest。
-                val hasProxy = AppUtil.readNetworkProxy() != null
+                val hasProxy = AppUtil.internalReadNetworkProxy() != null
                 val fixAdvice = if (hasProxy &&
                     (err.message?.contains("中止了一个已建立的连接") == true ||
                      err.message?.contains("connection aborted", ignoreCase = true) == true ||

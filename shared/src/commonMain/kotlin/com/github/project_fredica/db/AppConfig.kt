@@ -39,8 +39,6 @@ data class AppConfig(
     @SerialName("faster_whisper_compute_type") val fasterWhisperComputeType: String = "auto",
     @SerialName("faster_whisper_device") val fasterWhisperDevice: String = "auto",
     @SerialName("faster_whisper_init_json") val fasterWhisperInitJson: String = "{}",
-    // 兼容性评估结果（只读，由 EvaluateWhisperCompatExecutor 写入）
-    @SerialName("faster_whisper_compat_json") val fasterWhisperCompatJson: String = "{}",
     @SerialName("faster_whisper_models_dir") val fasterWhisperModelsDir: String = "",
     // torch 检测结果（只读，启动时自动写入）
     @SerialName("torch_recommended_variant") val torchRecommendedVariant: String = "",
