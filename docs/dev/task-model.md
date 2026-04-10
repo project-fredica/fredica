@@ -112,15 +112,15 @@ WorkflowRun（一次业务流程）
 
 ```mermaid
 flowchart TD
-    A[React 页面/组件\nstartMaterialWorkflow()] --> B[MaterialWorkflowRoute]
-    B --> C[MaterialWorkflowService.startBilibiliDownloadTranscode()]
-    C --> D[CommonWorkflowService.createWorkflow()]
+    A["React 页面/组件\nstartMaterialWorkflow()"] --> B[MaterialWorkflowRoute]
+    B --> C["MaterialWorkflowService.startBilibiliDownloadTranscode()"]
+    C --> D["CommonWorkflowService.createWorkflow()"]
     D --> E[写入 workflow_run]
-    D --> F[写入 task\nDOWNLOAD_BILIBILI_VIDEO]
-    D --> G[写入 task\nTRANSCODE_MP4\ndepends_on=DOWNLOAD_BILIBILI_VIDEO]
-    F --> H[WorkerEngine.claimNext()]
+    D --> F["写入 task\nDOWNLOAD_BILIBILI_VIDEO"]
+    D --> G["写入 task\nTRANSCODE_MP4\ndepends_on=DOWNLOAD_BILIBILI_VIDEO"]
+    F --> H["WorkerEngine.claimNext()"]
     G --> H
-    H --> I[TaskExecutor.execute(task)]
+    H --> I["TaskExecutor.execute(task)"]
     I --> J[本地逻辑 / PythonUtil 调 Python]
 ```
 
@@ -383,14 +383,14 @@ Route -> xxxWorkflowService -> CommonWorkflowService.createWorkflow()
 
 ```mermaid
 flowchart TD
-    A[startBilibiliDownloadTranscode()] --> B{已有活跃任务?}
+    A["startBilibiliDownloadTranscode()"] --> B{已有活跃任务?}
     B -- 是 --> C[返回 AlreadyActive]
     B -- 否 --> D[生成 downloadTaskId / transcodeTaskId]
     D --> E[构造 payload]
-    E --> F[createWorkflow()]
+    E --> F["createWorkflow()"]
     F --> G[create WorkflowRun]
     F --> H[create DOWNLOAD_BILIBILI_VIDEO]
-    F --> I[create TRANSCODE_MP4\ndependsOnIds=[downloadTaskId]]
+    F --> I["create TRANSCODE_MP4\ndependsOnIds=[downloadTaskId]"]
 ```
 
 对应函数：
@@ -490,23 +490,23 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[start()] --> B[runStartupRecovery()]
-    B --> C[claimNext(WORKER_ID)]
+    A["start()"] --> B["runStartupRecovery()"]
+    B --> C["claimNext(WORKER_ID)"]
     C -->|无任务| D[退避轮询]
     C -->|有任务| E[Semaphore 限流]
-    E --> F[dispatch(task)]
+    E --> F["dispatch(task)"]
     F --> G{找到 executor?}
-    G -- 否 --> H[finishFailed()]
+    G -- 否 --> H["finishFailed()"]
     G -- 是 --> I{check_skip && canSkip?}
     I -- 是 --> J[completed skipped]
-    I -- 否 --> K[updateStatus(running)]
-    K --> L[executor.execute(task)]
+    I -- 否 --> K["updateStatus(running)"]
+    K --> L["executor.execute(task)"]
     L --> M{结果}
     M -- success --> N[completed]
     M -- cancelled --> O[cancelled]
     M -- retry --> P[pending + retry_count+1]
     M -- final fail --> Q[failed]
-    N --> R[afterTaskFinished()]
+    N --> R["afterTaskFinished()"]
     O --> R
     P --> R
     Q --> R
@@ -561,12 +561,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[WorkerEngine.dispatch()] --> B[TaskExecutor.execute(task)]
+    A["WorkerEngine.dispatch()"] --> B["TaskExecutor.execute(task)"]
     B --> C[纯 Kotlin / JVM 本地逻辑]
-    B --> D[WebSocketTaskExecutor.execute()]
+    B --> D["WebSocketTaskExecutor.execute()"]
     D --> E[注册 cancelSignal / pauseResumeChannels]
-    E --> F[executeWithSignals()]
-    F --> G[PythonUtil.PyUtilServer.websocketTask()]
+    E --> F["executeWithSignals()"]
+    F --> G["PythonUtil.PyUtilServer.websocketTask()"]
     G --> H[Python TaskEndpoint]
 ```
 
@@ -634,7 +634,7 @@ Python 端不是裸写 WebSocket，而是统一继承 `TaskEndpoint` 基类。
 flowchart TD
     A[TaskEndpoint] --> B[TaskEndpointInEventLoopThread]
     A --> C[TaskEndpointInSubProcess]
-    B --> D[_run(param)]
+    B --> D["_run(param)"]
     C --> E[spawn 子进程]
     E --> F[status_queue / cancel_event / resume_event]
 ```
@@ -853,11 +853,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[WorkerEngine.start()] --> B[snapshotNonTerminalTasks()]
-    B --> C[resetStaleTasks()]
-    C --> D[recordRestartSession()]
-    D --> E[failOrphanedTasks()]
-    E --> F[reconcileNonTerminal()]
+    A["WorkerEngine.start()"] --> B["snapshotNonTerminalTasks()"]
+    B --> C["resetStaleTasks()"]
+    C --> D["recordRestartSession()"]
+    D --> E["failOrphanedTasks()"]
+    E --> F["reconcileNonTerminal()"]
     F --> G[开始正常轮询]
 ```
 
@@ -883,11 +883,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[具体页面 / 业务组件] --> B[startMaterialWorkflow()]
+    A[具体页面 / 业务组件] --> B["startMaterialWorkflow()"]
     A --> C[WorkflowInfoPanel]
     B --> D[MaterialWorkflowRoute]
     C --> E[WorkerTaskListRoute]
-    C --> F[TaskPauseRoute / TaskResumeRoute / TaskCancelRoute]
+    C --> F["TaskPauseRoute / TaskResumeRoute / TaskCancelRoute"]
 ```
 
 ### 15.1 `materialWorkflowApi.ts`
