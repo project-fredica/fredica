@@ -11,7 +11,8 @@ import com.github.project_fredica.asr.model.AsrTranscriptMeta
 import com.github.project_fredica.asr.model.MaterialSubtitleContentResponse
 import com.github.project_fredica.asr.model.MaterialSubtitleItem
 import com.github.project_fredica.asr.model.BilibiliMaterialExtra
-import com.github.project_fredica.asr.model.parseSrtBlocks
+import com.github.project_fredica.asr.srt.ParseSrtBlocksResult
+import com.github.project_fredica.asr.srt.SrtUtil
 import com.github.project_fredica.db.MaterialVideoService
 import java.io.File
 
@@ -31,10 +32,11 @@ object MaterialSubtitleService {
 
     // ── SRT 解析 ──────────────────────────────────────────────────────────────
 
-    /** 解析 SRT 文本为分段列表（委托 [parseSrtBlocks] 共享解析逻辑） */
+    /** 解析 SRT 文本为分段列表（委托 [SrtUtil.parseSrtBlocks] 共享解析逻辑） */
     fun parseSrt(text: String): List<AsrSubtitleSegment> =
-        parseSrtBlocks(text).map { (start, end, content) ->
-            AsrSubtitleSegment(from = start, to = end, content = content)
+        when (val result = SrtUtil.parseSrtBlocks(text)) {
+            is ParseSrtBlocksResult.Ok -> result.blocks.map { AsrSubtitleSegment(from = it.startSec, to = it.endSec, content = it.content) }
+            is ParseSrtBlocksResult.Empty -> emptyList()
         }
 
     // ── Meta 读取 ─────────────────────────────────────────────────────────────

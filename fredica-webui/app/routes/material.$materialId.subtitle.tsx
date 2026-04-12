@@ -129,10 +129,17 @@ function SchemeCard({ scheme, selected, onSelect }: { scheme: SchemeConfig; sele
 
 // ─── ASR model picker modal ───────────────────────────────────────────────────
 
+const PRIORITY_OPTIONS = [
+    { value: "high",   label: "高" },
+    { value: "medium", label: "中" },
+    { value: "low",    label: "低" },
+] as const;
+
 function AsrModelPickerModal({
     selectedModel,
     selectedLanguage,
     selectedAllowDownload,
+    selectedPriority,
     langGuessState,
     availableModels,
     adminAllowDownload,
@@ -142,15 +149,17 @@ function AsrModelPickerModal({
     selectedModel: string;
     selectedLanguage: string;
     selectedAllowDownload: boolean;
+    selectedPriority: string;
     langGuessState: "idle" | "loading" | { lang: string; label: string } | "failed";
     availableModels: string[];
     adminAllowDownload: boolean;
-    onSelect: (model: string, language: string, allowDownload: boolean) => void;
+    onSelect: (model: string, language: string, allowDownload: boolean, priority: string) => void;
     onClose: () => void;
 }) {
     const [model, setModel] = useState(selectedModel);
     const [language, setLanguage] = useState(selectedLanguage);
     const [allowDownload, setAllowDownload] = useState(selectedAllowDownload);
+    const [priority, setPriority] = useState(selectedPriority);
     const [langHighlight, setLangHighlight] = useState(false);
     const overlayRef = useRef<HTMLDivElement>(null);
     const modelListRef = useRef<HTMLDivElement>(null);
@@ -286,6 +295,27 @@ function AsrModelPickerModal({
                             </span>
                         </div>
                     )}
+
+                    {/* Priority */}
+                    <div>
+                        <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">优先级</p>
+                        <div className="flex gap-1.5">
+                            {PRIORITY_OPTIONS.map(opt => (
+                                <button
+                                    key={opt.value}
+                                    onClick={() => setPriority(opt.value)}
+                                    className={`flex-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                        priority === opt.value
+                                            ? "border-violet-400 bg-violet-50 text-violet-700"
+                                            : "border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50"
+                                    }`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">高优先级任务将优先获得 GPU 资源</p>
+                    </div>
                 </div>
 
                 {/* Footer */}
@@ -294,7 +324,7 @@ function AsrModelPickerModal({
                         取消
                     </button>
                     <button
-                        onClick={() => { onSelect(model, language, adminAllowDownload ? allowDownload : false); onClose(); }}
+                        onClick={() => { onSelect(model, language, adminAllowDownload ? allowDownload : false, priority); onClose(); }}
                         disabled={!model}
                         title={!model ? "请先选择模型" : undefined}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
@@ -321,6 +351,7 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
     const [model, setModel] = useState("");
     const [language, setLanguage] = useState("auto");
     const [allowDownload, setAllowDownload] = useState(true);
+    const [priority, setPriority] = useState("medium");
     const [showModal, setShowModal] = useState(false);
     const [starting, setStarting] = useState(false);
     const [workflowRunId, setWorkflowRunId] = useState<string | null>(null);
@@ -416,10 +447,11 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
         typeof langGuessState === "object" ? langGuessState.lang : language,
     );
 
-    const handleStart = async (chosenModel: string, chosenLanguage: string, chosenAllowDownload: boolean) => {
+    const handleStart = async (chosenModel: string, chosenLanguage: string, chosenAllowDownload: boolean, chosenPriority: string) => {
         setModel(chosenModel);
         setLanguage(chosenLanguage);
         setAllowDownload(chosenAllowDownload);
+        setPriority(chosenPriority);
         setStarting(true);
         setStartError(null);
         try {
@@ -427,6 +459,7 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
                 model: chosenModel,
                 language: chosenLanguage,
                 allow_download: chosenAllowDownload,
+                priority: chosenPriority,
             }).then(r => r as unknown as { resp: Response; data: unknown });
             if (!resp.ok) { reportHttpError("启动 ASR 工作流失败", resp); return; }
             const result = data as { workflow_run_id?: string; error?: string } | null;
@@ -488,6 +521,7 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
                     selectedModel={modalInitialModel}
                     selectedLanguage={language}
                     selectedAllowDownload={allowDownload}
+                    selectedPriority={priority}
                     langGuessState={langGuessState}
                     availableModels={availableModels}
                     adminAllowDownload={asrAdminConfig.allow_download}

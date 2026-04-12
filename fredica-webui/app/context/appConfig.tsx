@@ -107,7 +107,24 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     );
 }
 
-/** 获取应用配置 Context，需在 `AppConfigProvider` 内使用。 */
+/**
+ * 获取应用配置 Context，需在 `AppConfigProvider` 内使用。
+ *
+ * 返回 `{ appConfig, setAppConfig, isStorageLoaded }`，**不是**配置字段本身。
+ * 必须先解构出 `appConfig`，再从中取字段：
+ *
+ * ```ts
+ * // ✅ 正确：先取 appConfig，再取字段
+ * const { appConfig } = useAppConfig();
+ * const url = `${appConfig.webserver_schema}://${appConfig.webserver_domain}:${appConfig.webserver_port}`;
+ *
+ * // ✅ 需要 setAppConfig 或 isStorageLoaded 时一起解构
+ * const { appConfig, setAppConfig, isStorageLoaded } = useAppConfig();
+ *
+ * // ❌ 错误：直接解构配置字段（会得到 undefined）
+ * const { webserver_domain } = useAppConfig();
+ * ```
+ */
 export function useAppConfig() {
     return useContext(AppConfigContext);
 }

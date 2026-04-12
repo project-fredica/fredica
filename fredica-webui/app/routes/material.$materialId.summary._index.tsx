@@ -32,7 +32,7 @@ function useOverviewData(materialId: string) {
                 return [] as MaterialSubtitleItem[];
             }),
             apiFetch(`/api/v1/WebenSourceListRoute?material_id=${encodeURIComponent(materialId)}`, { method: "GET" }, { silent: true })
-                .then(({ data }) => (Array.isArray(data) ? data as WebenSource[] : []))
+                .then(({ data }) => (Array.isArray(data) ? data as unknown as WebenSource[] : []))
                 .catch(e => { print_error({ reason: "Weben 来源加载失败", err: e }); return [] as WebenSource[]; }),
         ]).then(async ([subs, sources]) => {
             if (cancelled) return;

@@ -7,8 +7,8 @@ package com.github.project_fredica.db
  * | 范围   | 用途                     |
  * |--------|--------------------------|
  * | 0      | 最低优先级               |
- * | 1-10   | 重型 GPU 任务（ASR/转录）|
- * | 11-20  | 轻型 GPU 任务（转码等）  |
+ * | 1-10   | 重型 CPU/GPU 任务（ASR/转录）|
+ * | 11-20  | 轻型任务  |
  *
  * 数字越大越优先；同优先级按 created_at 升序（先进先出）。
  *
@@ -20,7 +20,7 @@ object TaskPriority {
     /** 最低优先级 */
     const val LOWEST = 0
 
-    // ── 重型 GPU 任务（ASR/转录，1-10）──────────────────────────────────────
+    // ── 重型 CPU/GPU 任务（ASR/转录，1-10）──────────────────────────────────────
 
     /** TRANSCRIBE 低优先级 */
     const val TRANSCRIBE_LOW = 3
@@ -33,21 +33,19 @@ object TaskPriority {
 
     // EXTRACT_AUDIO / ASR_SPAWN_CHUNKS 继承 ASR 工作流的 priority 参数，无独立常量。
 
-    // ── 轻型 GPU 任务（转码等，11-20）───────────────────────────────────────
+    // ── 轻型任务（转码等，11-20）───────────────────────────────────────
 
     /** TRANSCODE_MP4 默认优先级 */
     const val TRANSCODE_MP4 = 14
 
-    /** DOWNLOAD_BILIBILI_VIDEO 默认优先级（与转码同级） */
-    const val DOWNLOAD_BILIBILI_VIDEO = 14
-
-    // ── CPU / 系统任务（不占 GPU 锁，优先级仅影响调度顺序）────────────────
+    /** DOWNLOAD_BILIBILI_VIDEO 默认优先级 */
+    const val DOWNLOAD_BILIBILI_VIDEO = 18
 
     /** NETWORK_TEST 中等优先级 */
-    const val NETWORK_TEST = 5
+    const val NETWORK_TEST = 16
 
     /** DOWNLOAD_TORCH 等系统后台任务 */
-    const val DOWNLOAD_TORCH = 0
+    const val DOWNLOAD_TORCH = 16
 
     // ── 测试专用 ─────────────────────────────────────────────────────────
 

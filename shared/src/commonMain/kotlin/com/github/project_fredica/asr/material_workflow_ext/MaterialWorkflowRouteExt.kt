@@ -29,7 +29,7 @@ suspend fun MaterialWorkflowRoute.handleWhisperTranscribe(
     // 权限覆盖：服主配置的 allowDownload 优先于请求参数
     val effectiveAllowDownload = AsrConfigService.isDownloadAllowed() && p.allowDownload
 
-    return when (val r = MaterialWorkflowService.startWhisperTranscribe2(material, model = p.model, language = p.language, allowDownload = effectiveAllowDownload, priority = p.priority ?: TaskPriority.TRANSCRIBE_MEDIUM)) {
+    return when (val r = MaterialWorkflowService.startWhisperTranscribe2(material, model = p.model, language = p.language, allowDownload = effectiveAllowDownload, priority = TaskPriority.asrPriority(p.priority))) {
         is MaterialWorkflowService.StartResult.AlreadyActive ->
             buildJsonObject { put("error", "TASK_ALREADY_ACTIVE") }.toValidJson()
         is MaterialWorkflowService.StartResult.Started ->

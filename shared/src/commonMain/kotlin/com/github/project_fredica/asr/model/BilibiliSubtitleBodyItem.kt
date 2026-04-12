@@ -1,5 +1,6 @@
 package com.github.project_fredica.asr.model
 
+import com.github.project_fredica.asr.srt.toSrtTimestamp
 import kotlinx.serialization.Serializable
 
 /** Bilibili 字幕 body 中的单条字幕行（含时间范围和文本）。 */

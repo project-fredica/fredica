@@ -1,6 +1,9 @@
 package com.github.project_fredica.asr.model
 
 import com.github.project_fredica.apputil.toFixed
+import com.github.project_fredica.asr.srt.ParseSrtBlocksResult
+import com.github.project_fredica.asr.srt.SrtTimestamp
+import com.github.project_fredica.asr.srt.SrtUtil
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -33,10 +36,11 @@ data class TranscribeSegment(val start: Double, val end: Double, val text: Strin
             }
         }
 
-        /** 解析 SRT 文本为 Segment 列表（委托 [parseSrtBlocks] 共享解析逻辑） */
+        /** 解析 SRT 文本为 Segment 列表（委托 [SrtUtil.parseSrtBlocks] 共享解析逻辑） */
         fun parseSrt(text: String): List<TranscribeSegment> =
-            parseSrtBlocks(text).map { (start, end, content) ->
-                TranscribeSegment(start, end, content)
+            when (val result = SrtUtil.parseSrtBlocks(text)) {
+                is ParseSrtBlocksResult.Ok -> result.blocks.map { TranscribeSegment(it.startSec, it.endSec, it.content) }
+                is ParseSrtBlocksResult.Empty -> emptyList()
             }
     }
 }

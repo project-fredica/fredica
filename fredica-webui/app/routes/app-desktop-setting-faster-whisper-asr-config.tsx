@@ -14,11 +14,18 @@ export function meta({}: Route.MetaArgs) {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** 完整配置（仅 jsBridge 返回） */
 interface AsrConfig {
     allow_download: boolean;
     disallowed_models: string;
     test_audio_path: string;
     test_wave_count: number;
+}
+
+/** 公开配置（HTTP route 返回，不含服主测试参数） */
+interface AsrConfigPublic {
+    allow_download: boolean;
+    disallowed_models: string;
 }
 
 // ─── Model grouping by VRAM ──────────────────────────────────────────────────
@@ -154,34 +161,20 @@ export default function AsrConfigPage() {
                 test_audio_path: testAudioPath,
                 test_wave_count: testWaveCount,
             };
-            // Try bridge first
-            const raw = await callBridgeOrNull("save_asr_config", JSON.stringify(param));
-            if (raw) {
-                const res = json_parse<AsrConfig & { error?: string }>(raw);
-                if (res?.error) {
-                    print_error({ reason: `保存 ASR 配置失败: ${res.error}` });
-                    setSaving(false);
-                    return;
-                }
-                setSaved(true);
-                setTimeout(() => setSaved(false), 2000);
-                setSaving(false);
-                return;
-            }
-            // Fallback to HTTP API
-            const { resp } = await apiFetch("/api/v1/AsrConfigSaveRoute", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(param),
-            });
-            if (!resp.ok) {
-                reportHttpError("保存 ASR 配置失败", resp);
-                setSaving(false);
+            // ASR 配置只能通过 jsBridge 保存（仅服主桌面端可用）
+            const raw = await callBridge("save_asr_config", JSON.stringify(param));
+            const res = json_parse<AsrConfig & { error?: string }>(raw);
+            if (res?.error) {
+                print_error({ reason: `保存 ASR 配置失败: ${res.error}` });
                 return;
             }
             setSaved(true);
             setTimeout(() => setSaved(false), 2000);
         } catch (e) {
+            if (e instanceof BridgeUnavailableError) {
+                print_error({ reason: "保存 ASR 配置仅限桌面端（服主）操作" });
+                return;
+            }
             print_error({ reason: "保存 ASR 配置异常", err: e });
         } finally {
             setSaving(false);

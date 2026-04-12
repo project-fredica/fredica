@@ -109,9 +109,12 @@ vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
 
 **`useAppConfig` mock**
 
+`useAppConfig()` 返回的是 `{ appConfig, setAppConfig, isStorageLoaded }`，配置字段在 `appConfig` 内部。mock 时需保持这个两层结构，业务代码中也必须先解构 `appConfig` 再取字段（详见 `appConfig.tsx` JSDoc）：
+
 ```typescript
 vi.mock("~/context/appConfig", () => ({
     useAppConfig: () => ({
+        // ⚠️ 注意：配置字段嵌套在 appConfig 内，不是顶层
         appConfig: {
             webserver_schema: "http",
             webserver_domain: "localhost",

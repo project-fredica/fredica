@@ -107,7 +107,7 @@ cd fredica-webui && npm install && npm run dev
 | 文件 | 主要 API |
 |------|---------|
 | `util/app_fetch.ts` | `useAppFetch`、`useImageProxyUrl`、`parseJsonBody`、`buildAuthHeaders` |
-| `context/appConfig.tsx` | 应用配置 Context（持久化到 localStorage；WebView 通过 bridge `get_server_info` 初始化） |
+| `context/appConfig.tsx` | `useAppConfig()` → `{ appConfig, setAppConfig, isStorageLoaded }`；**注意先取 `appConfig` 再取字段**，不可直接解构 |
 | `util/bridge.ts` | `callBridge(method, params)` · `callBridgeOrNull(method, params)` · 详见 [docs/dev/frontend-backend-bridge.md](docs/dev/frontend-backend-bridge.md) |
 | `util/llm.ts` | `llmChat(params): AsyncGenerator<string>`（direct/router/bridge 三模式） |
 
@@ -135,6 +135,7 @@ cd fredica-webui && npm install && npm run dev
 - `kv()` / `obj()` 已删除，改用 `buildJsonObject { put(...) }`
 - `PromptGraphDb` / `PromptGraphEngine` 在 commonMain（非 jvmMain）
 - `assertNotNull(x)` 返回 `T`（非 Unit），作为 runBlocking 末尾语句需加 `Unit`
+- **前端 `useAppConfig()` 返回 `{ appConfig, setAppConfig, isStorageLoaded }`，不能直接解构出配置字段**。正确写法：`const { appConfig } = useAppConfig();` 再从 `appConfig` 取字段。错误写法：~~`const { webserver_domain } = useAppConfig()`~~
 
 ### 错误处理约定
 

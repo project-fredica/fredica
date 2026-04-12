@@ -16,6 +16,7 @@ package com.github.project_fredica.asr.model
 //   S7. buildSrt - 文本含特殊字符不被转义
 // =============================================================================
 
+import com.github.project_fredica.asr.srt.SrtTimestamp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

@@ -1,6 +1,6 @@
 package com.github.project_fredica.asr.executor
 
-import com.github.project_fredica.asr.model.SrtTimestamp
+import com.github.project_fredica.asr.srt.SrtTimestamp
 import com.github.project_fredica.asr.model.TranscribeChunkDoneFile
 import com.github.project_fredica.asr.model.TranscribeChunkMeta
 import com.github.project_fredica.asr.model.TranscribeChunkStartInfo
