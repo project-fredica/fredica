@@ -20,6 +20,9 @@ object AppWebViewMessages {
             CheckBilibiliCredentialJsMessageHandler(),
             TryRefreshBilibiliCredentialJsMessageHandler(),
             GetSystemProxyJsMessageHandler(),
+            GetAsrConfigJsMessageHandler(),
+            SaveAsrConfigJsMessageHandler(),
+            SelectAudioFileJsMessageHandler(),
             *native.toTypedArray()
         )
     }

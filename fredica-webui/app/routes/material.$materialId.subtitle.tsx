@@ -12,8 +12,10 @@ import { startMaterialWorkflow } from "~/util/materialWorkflowApi";
 import { reportHttpError, print_error } from "~/util/error_handler";
 import {
     ALL_WHISPER_MODELS, WHISPER_MODEL_VRAM_HINT, WHISPER_LANGUAGES,
-    pickDefaultModel,
+    pickDefaultModel, filterDisallowedModels,
 } from "~/util/asrConfig";
+import { callBridgeOrNull } from "~/util/bridge";
+import { json_parse } from "~/util/json";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,6 +134,8 @@ function AsrModelPickerModal({
     selectedLanguage,
     selectedAllowDownload,
     langGuessState,
+    availableModels,
+    adminAllowDownload,
     onSelect,
     onClose,
 }: {
@@ -139,6 +143,8 @@ function AsrModelPickerModal({
     selectedLanguage: string;
     selectedAllowDownload: boolean;
     langGuessState: "idle" | "loading" | { lang: string; label: string } | "failed";
+    availableModels: string[];
+    adminAllowDownload: boolean;
     onSelect: (model: string, language: string, allowDownload: boolean) => void;
     onClose: () => void;
 }) {
@@ -205,7 +211,7 @@ function AsrModelPickerModal({
                     <div>
                         <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">模型</p>
                         <div ref={modelListRef} className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-100 rounded-lg p-1">
-                            {ALL_WHISPER_MODELS.map(m => {
+                            {availableModels.map(m => {
                                 const isEnOnly = m.endsWith(".en") || m.startsWith("distil-");
                                 const vram = WHISPER_MODEL_VRAM_HINT[m];
                                 const isSelected = model === m;
@@ -258,19 +264,28 @@ function AsrModelPickerModal({
                         )}
                     </div>
 
-                    {/* Allow download */}
-                    <label className="flex items-start gap-2 cursor-pointer select-none">
-                        <input
-                            type="checkbox"
-                            checked={allowDownload}
-                            onChange={e => setAllowDownload(e.target.checked)}
-                            className="mt-0.5 accent-violet-600"
-                        />
-                        <span className="text-[11px] text-gray-600 leading-relaxed">
-                            允许在线下载模型
-                            <span className="block text-gray-400">若本地无缓存，将从 HuggingFace 下载所选模型。未勾选时仅使用本地已有模型。</span>
-                        </span>
-                    </label>
+                    {/* Allow download — 管理员禁用时隐藏 */}
+                    {adminAllowDownload ? (
+                        <label className="flex items-start gap-2 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={allowDownload}
+                                onChange={e => setAllowDownload(e.target.checked)}
+                                className="mt-0.5 accent-violet-600"
+                            />
+                            <span className="text-[11px] text-gray-600 leading-relaxed">
+                                允许在线下载模型
+                                <span className="block text-gray-400">若本地无缓存，将从 HuggingFace 下载所选模型。未勾选时仅使用本地已有模型。</span>
+                            </span>
+                        </label>
+                    ) : (
+                        <div className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg border border-amber-200">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                            <span className="text-[11px] text-amber-700 leading-relaxed">
+                                管理员已禁用模型在线下载，仅可使用本地已有模型。
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}
@@ -279,7 +294,7 @@ function AsrModelPickerModal({
                         取消
                     </button>
                     <button
-                        onClick={() => { onSelect(model, language, allowDownload); onClose(); }}
+                        onClick={() => { onSelect(model, language, adminAllowDownload ? allowDownload : false); onClose(); }}
                         disabled={!model}
                         title={!model ? "请先选择模型" : undefined}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
@@ -295,6 +310,12 @@ function AsrModelPickerModal({
 
 // ─── ASR scheme detail ────────────────────────────────────────────────────────
 
+/** ASR 配置（从 bridge 或 HTTP API 读取） */
+interface AsrAdminConfig {
+    allow_download: boolean;
+    disallowed_models: string;
+}
+
 function AsrSchemeDetail({ materialId }: { materialId: string }) {
     const { apiFetch } = useAppFetch();
     const [model, setModel] = useState("");
@@ -308,6 +329,44 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
     const [langGuessState, setLangGuessState] = useState<
         "idle" | "loading" | { lang: string; label: string } | "failed"
     >("idle");
+    const [asrAdminConfig, setAsrAdminConfig] = useState<AsrAdminConfig>({
+        allow_download: true,
+        disallowed_models: "",
+    });
+
+    // On mount: fetch ASR admin config (bridge → HTTP fallback)
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                // 优先 bridge（桌面端）
+                const raw = await callBridgeOrNull("get_asr_config");
+                if (raw) {
+                    const cfg = json_parse<AsrAdminConfig & { error?: string }>(raw);
+                    if (!cancelled && cfg && !cfg.error) {
+                        setAsrAdminConfig({ allow_download: cfg.allow_download, disallowed_models: cfg.disallowed_models });
+                        return;
+                    }
+                }
+                // 回退 HTTP API（浏览器开发模式）
+                const { data } = await apiFetch<AsrAdminConfig>(
+                    "/api/v1/AsrConfigGetRoute",
+                    { method: "GET" },
+                    { silent: true },
+                );
+                if (!cancelled && data) {
+                    setAsrAdminConfig({ allow_download: data.allow_download, disallowed_models: data.disallowed_models });
+                }
+            } catch (e) {
+                print_error({ reason: "读取 ASR 配置失败", err: e });
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // 根据黑名单过滤可用模型
+    const availableModels = filterDisallowedModels(ALL_WHISPER_MODELS, asrAdminConfig.disallowed_models);
 
     // On mount: LLM language guess
     useEffect(() => {
@@ -430,6 +489,8 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
                     selectedLanguage={language}
                     selectedAllowDownload={allowDownload}
                     langGuessState={langGuessState}
+                    availableModels={availableModels}
+                    adminAllowDownload={asrAdminConfig.allow_download}
                     onSelect={handleStart}
                     onClose={() => setShowModal(false)}
                 />

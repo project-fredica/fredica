@@ -82,3 +82,19 @@ export function isEnglishLang(lang: string): boolean {
 export function pickDefaultModel(lang: string): string {
     return isEnglishLang(lang) ? "distil-large-v2" : "medium";
 }
+
+/**
+ * 根据黑名单过滤模型。
+ * 空字符串 → 返回全部；否则按逗号分隔排除。
+ */
+export function filterDisallowedModels(
+    allModels: string[],
+    disallowedModelsStr: string,
+): string[] {
+    const trimmed = disallowedModelsStr.trim();
+    if (!trimmed) return allModels;
+    const disallowed = new Set(
+        trimmed.split(",").map((s) => s.trim()).filter(Boolean),
+    );
+    return allModels.filter((m) => !disallowed.has(m));
+}

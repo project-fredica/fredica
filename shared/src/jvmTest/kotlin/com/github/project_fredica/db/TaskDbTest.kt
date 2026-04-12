@@ -4,12 +4,13 @@ package com.github.project_fredica.db
 // TaskDbTest —— task 表基础 CRUD 与并发认领的单元测试
 // =============================================================================
 //
-// 测试范围：TaskDb 的五个核心行为
+// 测试范围：TaskDb 的核心行为
 //   1. createAll / listAll      — 批量写入与全量读取
 //   2. idempotency_key 去重     — 相同幂等键只保留一条记录
 //   3. claimNext 原子性          — 并发情况下每个任务最多被认领一次
 //   4. updateStatus 持久化       — 状态、结果、时间戳均正确落库
 //   5. listByWorkflowRun 隔离性 — 按工作流运行实例 ID 过滤，不同实例数据不干扰
+//   6. claimNext 优先级排序      — priority DESC + created_at ASC
 //
 // 测试环境：每个测试用例独立的 SQLite 临时文件（@BeforeTest 重新创建）。
 //
@@ -30,6 +31,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import com.github.project_fredica.db.TaskPriority
 
 class TaskDbTest {
 
@@ -83,6 +85,7 @@ class TaskDbTest {
             Task(
                 id = "task-$i", type = "DOWNLOAD_VIDEO",
                 workflowRunId = "wr-1", materialId = "material-1",
+                priority = TaskPriority.DEV_TEST_DEFAULT,
                 createdAt = nowSec(),
             )
         }
@@ -113,6 +116,7 @@ class TaskDbTest {
         val t1 = Task(
             id = "idem-1", type = "EXTRACT_AUDIO",
             workflowRunId = "wr-1", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             idempotencyKey = "key-abc",
             createdAt = nowSec(),
         )
@@ -154,6 +158,7 @@ class TaskDbTest {
             Task(
                 id = "atomic-$i", type = "SPLIT_AUDIO",
                 workflowRunId = "wr-1", materialId = "material-1",
+                priority = TaskPriority.DEV_TEST_DEFAULT,
                 createdAt = nowSec() + i, // 时间戳递增确保排序稳定
             )
         }
@@ -200,6 +205,7 @@ class TaskDbTest {
         val t = Task(
             id = "upd-1", type = "MERGE_TRANSCRIPTION",
             workflowRunId = "wr-1", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             createdAt = nowSec(),
         )
         taskDb.create(t)
@@ -237,10 +243,10 @@ class TaskDbTest {
         )
 
         // wr-1 的 2 个任务
-        taskDb.create(Task(id = "wr1t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()))
-        taskDb.create(Task(id = "wr1t2", type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()))
+        taskDb.create(Task(id = "wr1t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()))
+        taskDb.create(Task(id = "wr1t2", type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()))
         // wr-2 的 1 个任务
-        taskDb.create(Task(id = "wr2t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-2", materialId = "material-2", createdAt = nowSec()))
+        taskDb.create(Task(id = "wr2t1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-2", materialId = "material-2", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()))
 
         val wr1Tasks = taskDb.listByWorkflowRun("wr-1")
         assertEquals(2, wr1Tasks.size, "wr-1 应返回 2 个任务")
@@ -284,16 +290,19 @@ class TaskDbTest {
         val runningTask = Task(
             id = "stale-running", type = "DOWNLOAD_VIDEO",
             workflowRunId = "wr-stale", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             createdAt = nowSec(),
         )
         val claimedTask = Task(
             id = "stale-claimed", type = "EXTRACT_AUDIO",
             workflowRunId = "wr-stale", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             createdAt = nowSec(),
         )
         val pendingTask = Task(
             id = "stale-pending", type = "TRANSCRIBE",
             workflowRunId = "wr-stale", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             createdAt = nowSec(),
         )
         taskDb.createAll(listOf(runningTask, claimedTask, pendingTask))
@@ -313,6 +322,7 @@ class TaskDbTest {
         val completedTask = Task(
             id = "done-task", type = "DOWNLOAD_VIDEO",
             workflowRunId = "wr-done", materialId = "material-1",
+            priority = TaskPriority.DEV_TEST_DEFAULT,
             createdAt = nowSec(),
         )
         taskDb.create(completedTask)
@@ -350,10 +360,10 @@ class TaskDbTest {
     fun testSnapshotNonTerminalTasks() = runBlocking {
         // 准备：写入各种状态的任务
         taskDb.createAll(listOf(
-            Task(id = "snap-pending",   type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
-            Task(id = "snap-claimed",   type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
-            Task(id = "snap-running",   type = "TRANSCODE_MP4",  workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
-            Task(id = "snap-completed", type = "FETCH_SUBTITLE", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
+            Task(id = "snap-pending",   type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()),
+            Task(id = "snap-claimed",   type = "EXTRACT_AUDIO",  workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()),
+            Task(id = "snap-running",   type = "TRANSCODE_MP4",  workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()),
+            Task(id = "snap-completed", type = "FETCH_SUBTITLE", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()),
         ))
         taskDb.updateStatus("snap-claimed",   "claimed")
         taskDb.updateStatus("snap-running",   "running")
@@ -393,10 +403,10 @@ class TaskDbTest {
     @Test
     fun testCancelBlockedTasks_chainPropagation() = runBlocking {
         // 准备：A → B → C，D 无依赖
-        val taskA = Task(id = "chain-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "chain-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["chain-a"]""", createdAt = nowSec() + 1)
-        val taskC = Task(id = "chain-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["chain-b"]""", createdAt = nowSec() + 2)
-        val taskD = Task(id = "chain-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 3)
+        val taskA = Task(id = "chain-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "chain-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["chain-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "chain-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["chain-b"]""", createdAt = nowSec() + 2)
+        val taskD = Task(id = "chain-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 3)
         taskDb.createAll(listOf(taskA, taskB, taskC, taskD))
 
         // A 执行失败
@@ -431,8 +441,8 @@ class TaskDbTest {
      */
     @Test
     fun testCancelBlockedTasks_cancelledDependency() = runBlocking {
-        val taskA = Task(id = "dep-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "dep-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dep-a"]""", createdAt = nowSec() + 1)
+        val taskA = Task(id = "dep-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "dep-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dep-a"]""", createdAt = nowSec() + 1)
         taskDb.createAll(listOf(taskA, taskB))
 
         taskDb.updateStatus("dep-a", "cancelled")
@@ -456,9 +466,9 @@ class TaskDbTest {
      */
     @Test
     fun testCancelBlockedTasks_doesNotAffectUnblockedTasks() = runBlocking {
-        val taskA = Task(id = "safe-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "safe-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["safe-a"]""", createdAt = nowSec() + 1)
-        val taskC = Task(id = "safe-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
+        val taskA = Task(id = "safe-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "safe-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["safe-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "safe-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 2)
         taskDb.createAll(listOf(taskA, taskB, taskC))
 
         // A 完成，B 依赖 A(completed)，C 无依赖
@@ -498,10 +508,10 @@ class TaskDbTest {
      */
     @Test
     fun testCancelBlockedTasks_diamondDependency() = runBlocking {
-        val taskA = Task(id = "dia-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "dia-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-a"]""",         createdAt = nowSec() + 1)
-        val taskC = Task(id = "dia-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-a"]""",         createdAt = nowSec() + 2)
-        val taskD = Task(id = "dia-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["dia-b","dia-c"]""", createdAt = nowSec() + 3)
+        val taskA = Task(id = "dia-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "dia-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dia-a"]""",         createdAt = nowSec() + 1)
+        val taskC = Task(id = "dia-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dia-a"]""",         createdAt = nowSec() + 2)
+        val taskD = Task(id = "dia-d", type = "STEP_D", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dia-b","dia-c"]""", createdAt = nowSec() + 3)
         taskDb.createAll(listOf(taskA, taskB, taskC, taskD))
 
         taskDb.updateStatus("dia-a", "failed", error = "根节点失败")
@@ -537,9 +547,9 @@ class TaskDbTest {
      */
     @Test
     fun testCancelBlockedTasks_partialDependencyFailed() = runBlocking {
-        val taskA = Task(id = "part-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskX = Task(id = "part-x", type = "STEP_X", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 1)
-        val taskB = Task(id = "part-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["part-a","part-x"]""", createdAt = nowSec() + 2)
+        val taskA = Task(id = "part-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskX = Task(id = "part-x", type = "STEP_X", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 1)
+        val taskB = Task(id = "part-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["part-a","part-x"]""", createdAt = nowSec() + 2)
         taskDb.createAll(listOf(taskA, taskX, taskB))
 
         taskDb.updateStatus("part-a", "failed")
@@ -566,13 +576,13 @@ class TaskDbTest {
     @Test
     fun testCancelBlockedTasks_mixedChains_successChainUnaffected() = runBlocking {
         // 失败链
-        val taskF1 = Task(id = "mix-f1", type = "FAIL_STEP", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskF2 = Task(id = "mix-f2", type = "FAIL_DOWN", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["mix-f1"]""", createdAt = nowSec() + 1)
+        val taskF1 = Task(id = "mix-f1", type = "FAIL_STEP", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskF2 = Task(id = "mix-f2", type = "FAIL_DOWN", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["mix-f1"]""", createdAt = nowSec() + 1)
         // 成功链
-        val taskS1 = Task(id = "mix-s1", type = "OK_STEP",   workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
-        val taskS2 = Task(id = "mix-s2", type = "OK_DOWN",   workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["mix-s1"]""", createdAt = nowSec() + 3)
+        val taskS1 = Task(id = "mix-s1", type = "OK_STEP",   workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 2)
+        val taskS2 = Task(id = "mix-s2", type = "OK_DOWN",   workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["mix-s1"]""", createdAt = nowSec() + 3)
         // 独立任务
-        val taskI  = Task(id = "mix-i",  type = "INDEP",     workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 4)
+        val taskI  = Task(id = "mix-i",  type = "INDEP",     workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 4)
         taskDb.createAll(listOf(taskF1, taskF2, taskS1, taskS2, taskI))
 
         taskDb.updateStatus("mix-f1", "failed")
@@ -605,11 +615,11 @@ class TaskDbTest {
         )
 
         // wr-1 的任务链
-        val taskA1 = Task(id = "iso-a1", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB1 = Task(id = "iso-b1", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["iso-a1"]""", createdAt = nowSec() + 1)
+        val taskA1 = Task(id = "iso-a1", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB1 = Task(id = "iso-b1", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["iso-a1"]""", createdAt = nowSec() + 1)
         // wr-2 的任务链（结构相同，但属于不同 WF）
-        val taskA2 = Task(id = "iso-a2", type = "STEP_A", workflowRunId = "wr-2", materialId = "material-2", createdAt = nowSec())
-        val taskB2 = Task(id = "iso-b2", type = "STEP_B", workflowRunId = "wr-2", materialId = "material-2", dependsOn = """["iso-a2"]""", createdAt = nowSec() + 1)
+        val taskA2 = Task(id = "iso-a2", type = "STEP_A", workflowRunId = "wr-2", materialId = "material-2", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB2 = Task(id = "iso-b2", type = "STEP_B", workflowRunId = "wr-2", materialId = "material-2", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["iso-a2"]""", createdAt = nowSec() + 1)
         taskDb.createAll(listOf(taskA1, taskB1, taskA2, taskB2))
 
         taskDb.updateStatus("iso-a1", "failed")
@@ -640,9 +650,9 @@ class TaskDbTest {
      */
     @Test
     fun testClaimNext_doesNotClaimBlockedTask() = runBlocking {
-        val taskA = Task(id = "blk-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "blk-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["blk-a"]""", createdAt = nowSec() + 1)
-        val taskC = Task(id = "blk-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2)
+        val taskA = Task(id = "blk-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "blk-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["blk-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "blk-c", type = "STEP_C", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 2)
         taskDb.createAll(listOf(taskA, taskB, taskC))
 
         taskDb.updateStatus("blk-a", "failed")
@@ -665,8 +675,8 @@ class TaskDbTest {
      */
     @Test
     fun testCancelBlockedTasks_idempotent() = runBlocking {
-        val taskA = Task(id = "idem2-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "idem2-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", dependsOn = """["idem2-a"]""", createdAt = nowSec() + 1)
+        val taskA = Task(id = "idem2-a", type = "STEP_A", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "idem2-b", type = "STEP_B", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["idem2-a"]""", createdAt = nowSec() + 1)
         taskDb.createAll(listOf(taskA, taskB))
         taskDb.updateStatus("idem2-a", "failed")
 
@@ -691,9 +701,9 @@ class TaskDbTest {
     @Test
     fun testListByType() = runBlocking {
         taskDb.createAll(listOf(
-            Task(id = "type-a1", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec()),
-            Task(id = "type-a2", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 1),
-            Task(id = "type-b1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", createdAt = nowSec() + 2),
+            Task(id = "type-a1", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()),
+            Task(id = "type-a2", type = "DOWNLOAD_TORCH", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 1),
+            Task(id = "type-b1", type = "DOWNLOAD_VIDEO", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 2),
         ))
 
         val torchTasks = taskDb.listByType("DOWNLOAD_TORCH")
@@ -706,6 +716,80 @@ class TaskDbTest {
 
         val emptyTasks = taskDb.listByType("NONEXISTENT")
         assertTrue(emptyTasks.isEmpty(), "不存在的 type 应返回空列表")
+    }
+
+    // ── 测试 18：claimNext 按优先级降序认领 ─────────────────────────────────
+
+    /**
+     * 证明目的：claimNext() 严格按 priority DESC 顺序认领任务。
+     *
+     * 证明过程：
+     *   1. 插入 4 个不同 priority 的 pending 任务（乱序插入，排除插入顺序干扰）。
+     *   2. 连续调用 claimNext() 4 次，记录认领顺序。
+     *   3. 断言认领顺序严格为 priority 降序：14 → 9 → 6 → 3。
+     *   4. 第 5 次调用返回 null（队列已空）。
+     */
+    @Test
+    fun testClaimNext_priorityDescOrder() = runBlocking {
+        val base = nowSec()
+        // 乱序插入，排除插入顺序对结果的影响
+        taskDb.createAll(listOf(
+            Task(id = "prio-medium", type = "TRANSCRIBE",     workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_MEDIUM, createdAt = base),
+            Task(id = "prio-high",   type = "TRANSCRIBE",     workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_HIGH,   createdAt = base),
+            Task(id = "prio-low",    type = "TRANSCRIBE",     workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_LOW,    createdAt = base),
+            Task(id = "prio-top",    type = "TRANSCODE_MP4",  workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCODE_MP4,     createdAt = base),
+        ))
+
+        val claimOrder = mutableListOf<String>()
+        repeat(4) {
+            val claimed = taskDb.claimNext("worker-prio")
+            assertNotNull(claimed, "第 ${it + 1} 次 claimNext 应认领到任务")
+            claimOrder.add(claimed.id)
+        }
+
+        assertEquals(
+            listOf("prio-top", "prio-high", "prio-medium", "prio-low"),
+            claimOrder,
+            "claimNext 应严格按 priority DESC 顺序认领（实际顺序=$claimOrder）"
+        )
+
+        // 队列已空
+        val fifth = taskDb.claimNext("worker-prio")
+        assertTrue(fifth == null, "所有任务已被认领，claimNext 应返回 null")
+    }
+
+    // ── 测试 19：claimNext 同优先级按创建时间 FIFO ────────────────────────────
+
+    /**
+     * 证明目的：同 priority 的任务按 created_at ASC（先到先得）顺序认领。
+     *
+     * 证明过程：
+     *   1. 插入 3 个相同 priority 但 created_at 不同的任务（乱序插入）。
+     *   2. 连续调用 claimNext() 3 次。
+     *   3. 断言认领顺序与 created_at 升序一致。
+     */
+    @Test
+    fun testClaimNext_samePriorityFifoOrder() = runBlocking {
+        val base = nowSec()
+        // 乱序插入，created_at 分别为 base+2, base, base+1
+        taskDb.createAll(listOf(
+            Task(id = "fifo-third",  type = "TRANSCRIBE", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_MEDIUM, createdAt = base + 2),
+            Task(id = "fifo-first",  type = "TRANSCRIBE", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_MEDIUM, createdAt = base),
+            Task(id = "fifo-second", type = "TRANSCRIBE", workflowRunId = "wr-1", materialId = "material-1", priority = TaskPriority.TRANSCRIBE_MEDIUM, createdAt = base + 1),
+        ))
+
+        val claimOrder = mutableListOf<String>()
+        repeat(3) {
+            val claimed = taskDb.claimNext("worker-fifo")
+            assertNotNull(claimed, "第 ${it + 1} 次 claimNext 应认领到任务")
+            claimOrder.add(claimed.id)
+        }
+
+        assertEquals(
+            listOf("fifo-first", "fifo-second", "fifo-third"),
+            claimOrder,
+            "同优先级应按 created_at ASC 顺序认领（实际顺序=$claimOrder）"
+        )
     }
 
     // ── 辅助方法 ──────────────────────────────────────────────────────────────

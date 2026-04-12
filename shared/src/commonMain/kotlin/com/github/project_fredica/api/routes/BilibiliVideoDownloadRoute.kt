@@ -11,6 +11,7 @@ import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
 import com.github.project_fredica.db.Task
+import com.github.project_fredica.db.TaskPriority
 import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -70,6 +71,7 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
                 workflowRunId = workflowRunId,
                 materialId    = material.id,
                 payload       = payload,
+                priority      = TaskPriority.DOWNLOAD_BILIBILI_VIDEO,
                 maxRetries    = 3,
                 createdAt     = nowSec,
             )

@@ -30,6 +30,7 @@ object CommonWorkflowService {
      * @param type         任务类型字符串，如 "DOWNLOAD_BILIBILI_VIDEO"
      * @param materialId   关联素材 ID
      * @param payload      任务参数 JSON 字符串
+     * @param priority     调度优先级（0-20），详见 [TaskPriority]
      * @param dependsOnIds 前置任务 ID 列表（[TaskId]），非空时写入 `dependsOn` JSON 数组
      * @param maxRetries   最大重试次数
      */
@@ -38,6 +39,7 @@ object CommonWorkflowService {
         val type: String,
         val materialId: String,
         val payload: String,
+        val priority: Int,
         val dependsOnIds: List<TaskId> = emptyList(),
         val maxRetries: Int = 3,
     )
@@ -75,6 +77,7 @@ object CommonWorkflowService {
                     workflowRunId = workflowRunId,
                     materialId    = td.materialId,
                     payload       = td.payload,
+                    priority      = td.priority,
                     dependsOn     = if (td.dependsOnIds.isEmpty()) "[]"
                                     else td.dependsOnIds.joinToString(
                                         prefix = "[\"", separator = "\",\"", postfix = "\"]"

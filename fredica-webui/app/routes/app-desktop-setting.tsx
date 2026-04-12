@@ -1028,6 +1028,40 @@ export default function Component({ }: Route.ComponentProps) {
                     </button>
                 </div>
 
+                {/* ASR 模型配置入口 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    padding: "20px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                }}>
+                    <div>
+                        <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: 600, color: "#111827" }}>ASR 模型配置</p>
+                        <p style={{ margin: 0, fontSize: "13px", color: "#9ca3af" }}>管理 faster-whisper 模型的下载权限、黑名单，配置模型测试参数。</p>
+                    </div>
+                    <button
+                        onClick={() => navigate("/app-desktop-setting-faster-whisper-asr-config")}
+                        style={{
+                            flexShrink: 0,
+                            padding: "8px 16px",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            color: "#2563eb",
+                            backgroundColor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        进入配置 →
+                    </button>
+                </div>
+
                 <p style={{ textAlign: "center", fontSize: "12px", color: "#9ca3af", marginTop: "8px" }}>
                     部分设置需要重启应用后生效
                 </p>

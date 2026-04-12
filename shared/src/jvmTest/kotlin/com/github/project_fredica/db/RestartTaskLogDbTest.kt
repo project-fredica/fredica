@@ -14,6 +14,7 @@ package com.github.project_fredica.db
 //   7. testSnapshotNonTerminalTasks（在 TaskDbTest 中追加，此处引用说明）
 // =============================================================================
 
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
@@ -227,6 +228,7 @@ class RestartTaskLogDbTest {
         workflowRunId = workflowRunId,
         materialId    = materialId,
         status        = status,
+        priority      = TaskPriority.DEV_TEST_DEFAULT,
         payload       = payload,
         progress      = progress,
         createdAt     = nowSec(),

@@ -59,4 +59,6 @@ data class MaterialWorkflowParam(
     val language: String? = null,
     /** whisper_transcribe 专用：是否允许在线下载模型（默认 false，仅使用本地缓存） */
     @SerialName("allow_download") val allowDownload: Boolean = false,
+    /** 任务优先级（可选），null 时由各模板决定默认值 */
+    val priority: Int? = null,
 )

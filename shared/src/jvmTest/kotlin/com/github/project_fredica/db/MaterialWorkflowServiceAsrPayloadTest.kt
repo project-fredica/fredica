@@ -21,6 +21,7 @@ package com.github.project_fredica.db
 //   P5. ASR_SPAWN_CHUNKS 依赖 EXTRACT_AUDIO（dependsOn 正确）
 // =============================================================================
 
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
@@ -74,7 +75,7 @@ class MaterialWorkflowServiceAsrPayloadTest {
     )
 
     private suspend fun startAndGetTasks(matId: String): Pair<Task, Task> {
-        val result = MaterialWorkflowService.startWhisperTranscribe(makeMaterial(matId))
+        val result = MaterialWorkflowService.startWhisperTranscribe(makeMaterial(matId), priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(result is MaterialWorkflowService.StartResult.Started, "应成功创建工作流")
         val tasks = TaskStatusService.listAll(materialId = matId, pageSize = 20).items
         val extract = tasks.first { it.type == "EXTRACT_AUDIO" }
@@ -145,10 +146,10 @@ class MaterialWorkflowServiceAsrPayloadTest {
         val matId = "asr-p4-${System.nanoTime()}"
         val material = makeMaterial(matId)
 
-        val first = MaterialWorkflowService.startWhisperTranscribe(material)
+        val first = MaterialWorkflowService.startWhisperTranscribe(material, priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(first is MaterialWorkflowService.StartResult.Started, "第一次应成功创建")
 
-        val second = MaterialWorkflowService.startWhisperTranscribe(material)
+        val second = MaterialWorkflowService.startWhisperTranscribe(material, priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(second is MaterialWorkflowService.StartResult.AlreadyActive, "第二次应返回 AlreadyActive")
     }
 

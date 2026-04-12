@@ -91,14 +91,12 @@ export default function Component({ }: Route.ComponentProps) {
     const { appConfig } = useAppConfig();
     const [models, setModels] = useState<LlmModelConfig[]>([]);
     const [roles, setRoles] = useState<LlmDefaultRoles>(EMPTY_ROLES);
-    const [testConfig, setTestConfig] = useState({ api_key: "", base_url: "", model: "" });
     const [editingModel, setEditingModel] = useState<LlmModelConfig | null>(null);
     const [isNew, setIsNew] = useState(false);
     const [showDiscover, setShowDiscover] = useState(false);
     const [testingModel, setTestingModel] = useState<LlmModelConfig | null>(null);
     const [exportJson, setExportJson] = useState<string | null>(null);
     const [rolesSaved, setRolesSaved] = useState(false);
-    const [testSaved, setTestSaved] = useState(false);
     const [lastSuccessfulTestModelId, setLastSuccessfulTestModelId] = useState<string | null>(null);
     const [queryingModel, setQueryingModel] = useState<LlmModelConfig | null>(null);
     const [queryResult, setQueryResult] = useState<ModelParamQueryResult | null>(null);
@@ -108,13 +106,6 @@ export default function Component({ }: Route.ComponentProps) {
     useEffect(() => {
         bridgeCall("get_llm_models", "{}").then(v => { if (Array.isArray(v)) setModels(v); }).catch(err => print_error({ reason: "加载模型列表失败", err }));
         bridgeCall("get_llm_default_roles", "{}").then(v => { if (v && typeof v === "object" && !Array.isArray(v)) setRoles(v); }).catch(err => print_error({ reason: "加载默认角色失败", err }));
-        bridgeCall("get_app_config", "{}").then(cfg => {
-            setTestConfig({
-                api_key: cfg.llm_test_api_key ?? "",
-                base_url: cfg.llm_test_base_url ?? "",
-                model: cfg.llm_test_model ?? "",
-            });
-        }).catch(err => print_error({ reason: "加载测试配置失败", err }));
     }, []);
 
     const handleSaveModel = async (m: LlmModelConfig, options?: { keepOpen?: boolean }): Promise<LlmModelConfig | null> => {
@@ -247,18 +238,6 @@ export default function Component({ }: Route.ComponentProps) {
         } catch (err) { print_error({ reason: "保存默认角色失败", err }); }
     };
 
-    const handleSaveTestConfig = async () => {
-        try {
-            await bridgeCall("save_app_config", JSON.stringify({
-                llm_test_api_key: testConfig.api_key,
-                llm_test_base_url: testConfig.base_url,
-                llm_test_model: testConfig.model,
-            }));
-            setTestSaved(true);
-            setTimeout(() => setTestSaved(false), 2000);
-        } catch (err) { print_error({ reason: "保存测试配置失败", err }); }
-    };
-
     const handleReorder = async (ids: string[]) => {
         try {
             const updated = await bridgeCall("reorder_llm_models", JSON.stringify({ ids }));
@@ -339,12 +318,6 @@ export default function Component({ }: Route.ComponentProps) {
                         onImport={handleImport}
                     />
 
-                    <TestConfigSection
-                        config={testConfig}
-                        onChange={setTestConfig}
-                        onSave={handleSaveTestConfig}
-                        saved={testSaved}
-                    />
                 </div>
 
                 {editingModel && (
@@ -376,72 +349,6 @@ export default function Component({ }: Route.ComponentProps) {
             </div>
             {exportJson !== null && <JsonPreviewModal json={exportJson} onClose={() => setExportJson(null)} />}
         </>
-    );
-}
-
-// ─── 测试令牌区块 ─────────────────────────────────────────────────────────────
-
-function TestConfigSection({ config, onChange, onSave, saved }: {
-    config: { api_key: string; base_url: string; model: string };
-    onChange: (c: { api_key: string; base_url: string; model: string }) => void;
-    onSave: () => void;
-    saved: boolean;
-}) {
-    const [open, setOpen] = useState(false);
-    const [showApiKey, setShowApiKey] = useState(false);
-    return (
-        <div style={{ backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-            <button onClick={() => setOpen(v => !v)} style={{
-                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "14px 20px", background: "#f9fafb", border: "none", borderBottom: open ? "1px solid #f3f4f6" : "none",
-                cursor: "pointer", fontSize: "14px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase" as const, letterSpacing: "0.05em",
-            }}>
-                测试令牌配置
-                <span style={{ fontSize: "12px", color: "#9ca3af" }}>{open ? "▲" : "▼"}</span>
-            </button>
-            {open && (
-                <div style={{ padding: "16px 20px" }}>
-                    <p style={{ margin: "0 0 12px 0", fontSize: "12px", color: "#9ca3af" }}>
-                        测试令牌仅用于开发阶段验证 SSE 客户端，不参与业务流程。无令牌时 LlmSseClientTest 自动跳过。
-                    </p>
-                    {[
-                        { key: "base_url" as const, label: "Base URL", placeholder: "https://api.openai.com/v1", type: "text" },
-                        { key: "model" as const, label: "模型名称", placeholder: "gpt-4o-mini", type: "text" },
-                    ].map(({ key, label, placeholder, type }) => (
-                        <div key={key} style={{ marginBottom: "10px" }}>
-                            <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>{label}</label>
-                            <input type={type} value={config[key]} placeholder={placeholder}
-                                onChange={e => onChange({ ...config, [key]: e.target.value })}
-                                className="llm-input"
-                                style={{ width: "100%", padding: "7px 10px", fontSize: "13px", border: "1px solid #d1d5db", borderRadius: "6px", boxSizing: "border-box" as const }} />
-                        </div>
-                    ))}
-                    <div style={{ marginBottom: "10px" }}>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "4px" }}>API Key</label>
-                        <div style={{ position: "relative" }}>
-                            <input type={showApiKey ? "text" : "password"} value={config.api_key} placeholder="sk-..."
-                                onChange={e => onChange({ ...config, api_key: e.target.value })}
-                                className="llm-input"
-                                style={{ width: "100%", padding: "7px 36px 7px 10px", fontSize: "13px", border: "1px solid #d1d5db", borderRadius: "6px", boxSizing: "border-box" as const }} />
-                            <button type="button" onClick={() => setShowApiKey(v => !v)} style={{
-                                position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)",
-                                background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: "2px",
-                                display: "flex", alignItems: "center",
-                            }}>
-                                {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                            </button>
-                        </div>
-                    </div>
-                    <button onClick={onSave} style={{
-                        display: "flex", alignItems: "center", gap: "6px", padding: "7px 16px",
-                        fontSize: "13px", fontWeight: 500, color: "#fff",
-                        backgroundColor: saved ? "#16a34a" : "#2563eb", border: "none", borderRadius: "6px", cursor: "pointer",
-                    }}>
-                        <Save size={13} /> {saved ? "已保存" : "保存测试配置"}
-                    </button>
-                </div>
-            )}
-        </div>
     );
 }
 

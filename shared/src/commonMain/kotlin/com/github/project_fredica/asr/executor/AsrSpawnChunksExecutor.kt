@@ -123,6 +123,7 @@ object AsrSpawnChunksExecutor : TaskExecutor {
                 workflowRunId = task.workflowRunId,
                 materialId = task.materialId,
                 payload = transcribePayload,
+                priority = task.priority,
                 dependsOn = "[\"${task.id}\"]",
                 maxRetries = 0,
                 createdAt = System.currentTimeMillis() / 1000L,

@@ -47,6 +47,7 @@ package com.github.project_fredica.db
 //    每个 @Test 使用独立的 SQLite 临时文件，完全隔离，@BeforeTest 重建表结构。
 // =============================================================================
 
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
@@ -688,7 +689,7 @@ class TaskReconcileTest {
 
     private fun makeTask(id: String, wfId: String, status: String = "pending") = Task(
         id = id, type = "TEST_TASK", workflowRunId = wfId,
-        materialId = "mat-1", status = status, createdAt = nowSec()
+        materialId = "mat-1", status = status, priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec()
     )
 
     /**

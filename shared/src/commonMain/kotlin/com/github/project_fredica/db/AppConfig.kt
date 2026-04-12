@@ -30,16 +30,17 @@ data class AppConfig(
     // LLM 模型配置
     @SerialName("llm_models_json") val llmModelsJson: String = "[]",
     @SerialName("llm_default_roles_json") val llmDefaultRolesJson: String = "{}",
-    // LLM 测试令牌（已废弃，由计算属性从 llmModelsJson + llmDefaultRolesJson 派生）
-    @SerialName("llm_test_api_key") val llmTestApiKeyLegacy: String = "",
-    @SerialName("llm_test_base_url") val llmTestBaseUrlLegacy: String = "",
-    @SerialName("llm_test_model") val llmTestModelLegacy: String = "",
     // faster-whisper 本地语音识别配置
     @SerialName("faster_whisper_model") val fasterWhisperModel: String = "",
     @SerialName("faster_whisper_compute_type") val fasterWhisperComputeType: String = "auto",
     @SerialName("faster_whisper_device") val fasterWhisperDevice: String = "auto",
     @SerialName("faster_whisper_init_json") val fasterWhisperInitJson: String = "{}",
     @SerialName("faster_whisper_models_dir") val fasterWhisperModelsDir: String = "",
+    // ASR 权限与测试配置（服主管理）
+    @SerialName("asr_allow_download") val asrAllowDownload: Boolean = true,
+    @SerialName("asr_disallowed_models") val asrDisallowedModels: String = "",
+    @SerialName("asr_test_audio_path") val asrTestAudioPath: String = "",
+    @SerialName("asr_test_wave_count") val asrTestWaveCount: Int = 10,
     // torch 检测结果（只读，启动时自动写入）
     @SerialName("torch_recommended_variant") val torchRecommendedVariant: String = "",
     @SerialName("torch_recommendation_json") val torchRecommendationJson: String = "",

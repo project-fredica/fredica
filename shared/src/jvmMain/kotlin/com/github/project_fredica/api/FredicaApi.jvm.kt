@@ -177,7 +177,7 @@ object FredicaApiJvmService {
         val engineScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         CurrentInstanceHandler.engineScope = engineScope
         WorkerEngine.start(
-            maxWorkers = 2,
+            maxWorkers = 32,
             scope = engineScope,
             executors = listOf(
                 NetworkTestExecutor,

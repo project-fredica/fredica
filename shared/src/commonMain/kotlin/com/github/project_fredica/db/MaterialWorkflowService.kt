@@ -112,6 +112,7 @@ object MaterialWorkflowService {
                     type       = "DOWNLOAD_BILIBILI_VIDEO",
                     materialId = material.id,
                     payload    = downloadPayload,
+                    priority   = TaskPriority.DOWNLOAD_BILIBILI_VIDEO,
                     maxRetries = 3,
                 ),
                 CommonWorkflowService.TaskDef(
@@ -119,6 +120,7 @@ object MaterialWorkflowService {
                     type         = "TRANSCODE_MP4",
                     materialId   = material.id,
                     payload      = transcodePayload,
+                    priority     = TaskPriority.TRANSCODE_MP4,
                     dependsOnIds = listOf(downloadTaskId),
                     maxRetries   = 3,
                 ),
@@ -140,7 +142,8 @@ object MaterialWorkflowService {
         model: String? = null,
         language: String? = null,
         allowDownload: Boolean = false,
-    ): StartResult = startWhisperTranscribe2(material, model, language, allowDownload)
+        priority: Int,
+    ): StartResult = startWhisperTranscribe2(material, model, language, allowDownload, priority)
 
     // ── 工作流查询 ────────────────────────────────────────────────────────────
 

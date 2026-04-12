@@ -22,6 +22,7 @@ package com.github.project_fredica.db
 //   Q7. queryHistory - 分页返回正确子集
 // =============================================================================
 
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
@@ -86,6 +87,7 @@ class MaterialWorkflowServiceQueryTest {
                 workflowRunId = wfId,
                 materialId    = materialId,
                 status        = status,
+                priority      = TaskPriority.DEV_TEST_DEFAULT,
                 createdAt     = nowSec(),
             )
         )

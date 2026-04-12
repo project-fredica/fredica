@@ -64,6 +64,19 @@ const tick = (ms = 1100) => act(async () => {
 const WORKFLOW_RUN_ID = "wf-0001";
 const TASK_ID = "task-0001";
 
+const CONFIG_URLS = [
+    "https://www.baidu.com",
+    "https://github.com",
+    "https://huggingface.co",
+    "https://api.openai.com",
+];
+
+/** 组件 mount 时 GET /api/v1/NetworkTestConfigRoute 的响应 */
+const makeConfigResp = () => ({
+    resp: new Response("{}", { status: 200 }),
+    data: { urls: CONFIG_URLS },
+});
+
 const makeCreateResp = () => ({
     resp: new Response("{}", { status: 200 }),
     data: { workflow_run_id: WORKFLOW_RUN_ID, task_id: TASK_ID },
@@ -92,6 +105,8 @@ beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     vi.clearAllTimers();
+    // 组件 mount 时会 GET /api/v1/NetworkTestConfigRoute，默认返回配置
+    mockApiFetch.mockResolvedValueOnce(makeConfigResp());
 });
 
 afterEach(() => {
@@ -101,14 +116,16 @@ afterEach(() => {
 // ── N1: 初始渲染 ──────────────────────────────────────────────────────────────
 
 describe("N1 – initial render", () => {
-    it("shows '开始测试' button and no result table", () => {
+    it("shows '开始测试' button and no result table", async () => {
         render(<NetworkTestPage />);
+        await flush();
         expect(screen.getByRole("button", { name: /开始测试/ })).toBeTruthy();
         expect(screen.queryByText(/测试结果/)).toBeNull();
     });
 
-    it("lists the four default target URLs", () => {
+    it("lists the four default target URLs", async () => {
         render(<NetworkTestPage />);
+        await flush();
         expect(screen.getByText("https://www.baidu.com")).toBeTruthy();
         expect(screen.getByText("https://github.com")).toBeTruthy();
     });
@@ -118,10 +135,11 @@ describe("N1 – initial render", () => {
 
 describe("N2 – clicking start button posts task", () => {
     it("calls POST /api/v1/NetworkTestRoute", async () => {
-        // 永不 resolve，让组件停在 creating 阶段
+        // config GET 已在 beforeEach 中 mock；后续调用永不 resolve，让组件停在 creating 阶段
         mockApiFetch.mockReturnValue(new Promise(() => {}));
 
         render(<NetworkTestPage />);
+        await flush();
 
         // fireEvent.click 同步执行 handleStart 直到第一个 await
         // act(async) 刷新 React 状态批处理
@@ -139,6 +157,7 @@ describe("N2 – clicking start button posts task", () => {
         mockApiFetch.mockReturnValue(new Promise(() => {}));
 
         render(<NetworkTestPage />);
+        await flush();
         await act(async () => {
             fireEvent.click(screen.getByRole("button", { name: /开始测试/ }));
         });

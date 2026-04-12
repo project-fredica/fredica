@@ -26,6 +26,7 @@ import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskDb
+import com.github.project_fredica.db.TaskPriority
 import com.github.project_fredica.db.TaskService
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
@@ -251,6 +252,7 @@ class DagEngineTest {
     private fun task(id: String, dependsOn: String = "[]") = Task(
         id = id, type = "DOWNLOAD_VIDEO",
         workflowRunId = "wr-dag", materialId = "mat-1",
+        priority = TaskPriority.DEV_TEST_DEFAULT,
         dependsOn = dependsOn,
         createdAt = nowSec(),
     )

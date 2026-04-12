@@ -35,6 +35,7 @@ package com.github.project_fredica.worker.executors
 import com.github.project_fredica.asr.executor.TranscribeExecutor
 import com.github.project_fredica.asr.model.TranscribeSegment
 import com.github.project_fredica.db.Task
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -471,6 +472,7 @@ class TranscribeExecutorFileTest {
         type = "TRANSCRIBE",
         workflowRunId = "wf-test",
         materialId = "mat-test",
+        priority = TaskPriority.DEV_TEST_DEFAULT,
         createdAt = System.currentTimeMillis() / 1000,
         payload = buildString {
             append("{")

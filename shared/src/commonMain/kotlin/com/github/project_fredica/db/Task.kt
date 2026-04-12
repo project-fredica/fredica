@@ -41,8 +41,8 @@ data class Task(
     /** 当前状态：pending / claimed / running / completed / failed / cancelled */
     val status: String = "pending",
 
-    /** 调度优先级，数字越大越优先；同优先级按 created_at 升序（先进先出） */
-    val priority: Int = 0,
+    /** 调度优先级（0-20），数字越大越优先；同优先级按 created_at 升序（先进先出）。详见 [TaskPriority] */
+    val priority: Int,
 
     /** 前置任务 ID 列表（JSON 数组字符串），全部 completed 才允许认领本任务 */
     @SerialName("depends_on") val dependsOn: String = "[]",

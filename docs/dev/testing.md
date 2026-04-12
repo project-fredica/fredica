@@ -28,7 +28,10 @@ fredica-webui/tests/
 cd fredica-webui
 
 # 首次运行前安装依赖
-npm install
+npm install -D
+
+# 运行类型检查
+npx tsc --noEmit
 
 # 一次性跑完所有测试（CI 模式）
 npm test

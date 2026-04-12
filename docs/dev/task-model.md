@@ -362,6 +362,58 @@ flowchart TD
 - 被阻塞任务取消：`TaskRepo.cancelBlockedTasks()`
 - 工作流汇总：`WorkflowRunDb.recalculate()`
 
+### 7.3 优先级策略
+
+#### 范围与分区
+
+| 范围   | 用途                     | 示例                                          |
+|--------|--------------------------|-----------------------------------------------|
+| 0      | 最低优先级               | `DOWNLOAD_TORCH`、测试默认值                  |
+| 1–10   | 重型 GPU 任务（ASR/转录）| `TRANSCRIBE`、`EXTRACT_AUDIO`、`ASR_SPAWN_CHUNKS` |
+| 11–20  | 轻型 GPU 任务（转码等）  | `TRANSCODE_MP4`、`DOWNLOAD_BILIBILI_VIDEO`    |
+
+数字越大越优先；同优先级按 `created_at` 升序（先进先出）。
+
+非 GPU 任务不调用 `GpuResourceLock.withGpuLock()`，其 priority 值仅影响 `claimNext()` 调度顺序。
+
+#### 各任务类型默认优先级
+
+所有常量集中定义在 `TaskPriority` 对象中（`shared/.../db/TaskPriority.kt`）。
+
+| 任务类型                 | 默认 priority | 常量                              | 说明                                |
+|--------------------------|--------------|-----------------------------------|-------------------------------------|
+| TRANSCRIBE (Low)         | 3            | `TaskPriority.TRANSCRIBE_LOW`     | 用户可选                            |
+| TRANSCRIBE (Medium)      | 6            | `TaskPriority.TRANSCRIBE_MEDIUM`  | 默认                                |
+| TRANSCRIBE (High)        | 9            | `TaskPriority.TRANSCRIBE_HIGH`    | 用户可选                            |
+| EXTRACT_AUDIO            | 继承         | —                                 | 继承 ASR 工作流的 priority 参数     |
+| ASR_SPAWN_CHUNKS         | 继承         | —                                 | 继承 ASR 工作流的 priority 参数     |
+| TRANSCODE_MP4            | 14           | `TaskPriority.TRANSCODE_MP4`      | 轻型 GPU 任务                       |
+| DOWNLOAD_BILIBILI_VIDEO  | 14           | `TaskPriority.DOWNLOAD_BILIBILI_VIDEO` | 与转码同优先级                 |
+| NETWORK_TEST             | 5            | `TaskPriority.NETWORK_TEST`       | CPU 任务，中等优先级                |
+| DOWNLOAD_TORCH           | 0            | `TaskPriority.DOWNLOAD_TORCH`     | 系统后台任务                        |
+
+ASR 优先级档位转换：`TaskPriority.asrPriority(level)` 将 `"low"/"medium"/"high"` 映射为 3/6/9。
+
+#### 优先级传播链
+
+```
+前端 → MaterialWorkflowParam.priority
+  → MaterialWorkflowRouteExt.handleWhisperTranscribe()
+    → startWhisperTranscribe2(priority)
+      → CommonWorkflowService.TaskDef(priority = priority)
+        → Task.priority
+          → GpuResourceLock.withGpuLock(task.id, task.priority)
+```
+
+动态创建：`ASR_SPAWN_CHUNKS` → `TRANSCRIBE` 任务继承 `task.priority`。
+
+#### 设计原则
+
+- `TaskDef.priority` **无默认值**，强制每个调用点显式指定
+- `Task.priority` **无默认值**，编译器暴露所有创建点
+- `GpuResourceLock.withGpuLock()` 的 `priority` **无默认值**
+- 所有硬编码优先级统一使用 `TaskPriority` 常量，禁止裸数字
+
 ---
 
 ## 8. 工作流是如何创建出来的

@@ -34,6 +34,7 @@ suspend fun MaterialWorkflowService.startWhisperTranscribe2(
     model: String? = null,
     language: String? = null,
     allowDownload: Boolean = false,
+    priority: Int,
 ): MaterialWorkflowService.StartResult {
     val hasActive = TaskStatusService.listAll(materialId = material.id, pageSize = 200)
         .items.any {
@@ -77,6 +78,7 @@ suspend fun MaterialWorkflowService.startWhisperTranscribe2(
             type = "EXTRACT_AUDIO",
             materialId = material.id,
             payload = extractAudioPayload,
+            priority = priority,
             maxRetries = 0,
         ),
         CommonWorkflowService.TaskDef(
@@ -84,6 +86,7 @@ suspend fun MaterialWorkflowService.startWhisperTranscribe2(
             type = "ASR_SPAWN_CHUNKS",
             materialId = material.id,
             payload = spawnChunksPayload,
+            priority = priority,
             dependsOnIds = listOf(extractAudioTaskId),
             maxRetries = 0,
         ),

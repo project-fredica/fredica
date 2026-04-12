@@ -9,6 +9,7 @@ import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.db.Task
+import com.github.project_fredica.db.TaskPriority
 import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.db.TorchMirrorCacheService
 import com.github.project_fredica.db.TorchMirrorVersionsCacheService
@@ -231,6 +232,7 @@ object TorchService {
                 workflowRunId = workflowRunId,
                 materialId = "",
                 payload = payload,
+                priority = TaskPriority.DOWNLOAD_TORCH,
                 createdAt = nowSec,
             )
         )

@@ -23,6 +23,7 @@ import kotlinx.serialization.json.put
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
 import com.github.project_fredica.db.Task
+import com.github.project_fredica.db.TaskPriority
 import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -65,7 +66,7 @@ object NetworkTestRoute : FredicaApi.Route {
             workflowRunId = workflowRunId,
             materialId = "system",          // 系统任务不关联素材
             status = "pending",
-            priority = 5,                 // 中等优先级，不抢占媒体处理任务
+            priority = TaskPriority.NETWORK_TEST,
             payload = taskPayload,
             createdAt = nowSec,
         )

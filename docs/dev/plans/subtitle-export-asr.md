@@ -135,8 +135,8 @@ import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 
 | 文件 | 改动 |
 |------|------|
-| `fredica-webui/app/util/subtitleExport.ts` | **新建**：SRT 转换 + 下载工具函数 ✅ |
-| `fredica-webui/app/components/bilibili/BilibiliSubtitlePanel.tsx` | 新增"导出 SRT"按钮 ✅ |
+| `fredica-webui/app/util/subtitleExport.ts` | **新建**：SRT 转换 + 下载工具函数 <Badge type="tip" text="已完成" /> |
+| `fredica-webui/app/components/bilibili/BilibiliSubtitlePanel.tsx` | 新增"导出 SRT"按钮 <Badge type="tip" text="已完成" /> |
 | `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | 可选：纯文本导出入口 |
 
 ---
@@ -242,9 +242,9 @@ object FasterWhisperInstallService {
 |------|------|
 | `shared/src/jvmMain/.../python/PythonUtil.kt` | `Py314Embed` 新增公共 `installPackage(packageSpec)` 方法 |
 | `shared/src/jvmMain/.../python/FasterWhisperInstallService.kt` | **新建**：进程内 `@Volatile` flag（并发锁由 `installPackage` 负责） |
-| `shared/src/commonMain/.../db/MaterialWorkflowService.kt` | `startWhisperTranscribe()` 最小线性工作流（EXTRACT_AUDIO → TRANSCRIBE） ✅ |
-| `shared/src/commonMain/.../api/routes/MaterialWorkflowRoute.kt` | `whisper_transcribe` 模板分发 ✅ |
-| `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | ASR 方案入口接入工作流，启动后展示 `WorkflowInfoPanel` ✅ |
+| `shared/src/commonMain/.../db/MaterialWorkflowService.kt` | `startWhisperTranscribe()` 最小线性工作流（EXTRACT_AUDIO → TRANSCRIBE） <Badge type="tip" text="已完成" /> |
+| `shared/src/commonMain/.../api/routes/MaterialWorkflowRoute.kt` | `whisper_transcribe` 模板分发 <Badge type="tip" text="已完成" /> |
+| `fredica-webui/app/routes/material.$materialId.subtitle.tsx` | ASR 方案入口接入工作流，启动后展示 `WorkflowInfoPanel` <Badge type="tip" text="已完成" /> |
 
 ---
 
@@ -1277,24 +1277,24 @@ export function pickDefaultModel(lang: string, compat: WhisperCompatParsed): str
 
 | Phase | 目标 | 关键产物 | 依赖 | 本阶段边界 |
 |------|------|---------|------|-----------|
-| 1 | 字幕导出 | `subtitleExport.ts` + Bilibili 字幕页导出按钮 | 无 | 只做前端 SRT 转换与下载，不引入后端改动 ✅ |
-| 1.5 | ASR 工作流最小闭环 + UX 改进 | `MaterialWorkflowService.startWhisperTranscribe()` + `MaterialWorkflowRoute` whisper_transcribe 模板 + `material.$materialId.subtitle.tsx` ASR 入口；`asrConfig.ts` + `MaterialLanguageGuessRoute` + 模态框滚动 + torch 缺失行为修正 + LLM 语言猜测 + 自动选模型 | 1 | 最小线性流程：EXTRACT_AUDIO → TRANSCRIBE（仅 chunk_0000.m4a）；前端可启动并展示进度 ✅；UX 改进见 §2.8（进行中） |
-| 2 | 基础设施 | `AppUtil.Paths.asrOutputDir()`、锁文件路径、`file_lock_util.py`、`TranscodeMp4Service` | 无 | 先把路径、锁、转码复用层稳定下来 |
-| 3 | Python 子进程与模型检查 | `transcribe.py` 落盘语义、下载 hook、`asr_model_check.py` | 2 | 先解决模型加载、下载补全、进度 hook |
-| 4 | 队列编排 | `AsrSpawnChunksExecutor` + `AsrTranscribeQueueExecutor` | 2,3 | 落地顺序转录、chunk 级缓存、暂停/恢复/取消 |
-| 5 | 合并与写库 | `AsrMergeSubtitleExecutor` | 4 | 只做 chunk JSON → SRT / DB 的收敛 |
-| 6 | 启动 API 与工作流收口 | `MaterialAsrStartRoute` + `DownloadWhisperModelExecutor.canSkip` | 3,4,5 | 把完整工作流真正串起来 |
-| 7 | 前端 ASR 页面 | `asr.ts` + `subtitle.tsx` ASR UI | 6 | 展示配置、进度、历史结果 |
+| 1 | 字幕导出 | `subtitleExport.ts` + Bilibili 字幕页导出按钮 | 无 | 只做前端 SRT 转换与下载，不引入后端改动 <Badge type="tip" text="已完成" /> |
+| 1.5 | ASR 工作流最小闭环 + UX 改进 | `MaterialWorkflowService.startWhisperTranscribe()` + `MaterialWorkflowRoute` whisper_transcribe 模板 + `material.$materialId.subtitle.tsx` ASR 入口；`asrConfig.ts` + `MaterialLanguageGuessRoute` + 模态框滚动 + torch 缺失行为修正 + LLM 语言猜测 + 自动选模型 | 1 | 最小线性流程：EXTRACT_AUDIO → TRANSCRIBE（仅 chunk_0000.m4a）；前端可启动并展示进度 <Badge type="tip" text="已完成" />；UX 改进见 §2.8（进行中） |
+| 2 | 基础设施 | `AppUtil.Paths.asrOutputDir()`、锁文件路径、`file_lock_util.py`、`TranscodeMp4Service` | 无 | 先把路径、锁、转码复用层稳定下来 <Badge type="tip" text="已完成" /> |
+| 3 | Python 子进程与模型检查 | `transcribe.py` 落盘语义、下载 hook、`asr_model_check.py` | 2 | 先解决模型加载、下载补全、进度 hook <Badge type="tip" text="已完成" /> |
+| 4 | 队列编排 | N×`TRANSCRIBE` Task + `TranscribeExecutor.tryMergeChunks()` | 2,3 | 落地顺序转录、chunk 级缓存、暂停/恢复/取消 <Badge type="tip" text="已完成" />（实际采用 N×TRANSCRIBE 方案，非文档原设计的 ASR_TRANSCRIBE_QUEUE） |
+| 5 | 合并与写库 | `TranscribeExecutor.tryMergeChunks()` | 4 | chunk JSON → SRT 合并在 TranscribeExecutor 内完成 <Badge type="tip" text="已完成" /> |
+| 6 | 启动 API 与工作流收口 | `MaterialWorkflowRoute` whisper_transcribe 模板 + `FasterWhisperInstallService` | 3,4,5 | 把完整工作流真正串起来 <Badge type="tip" text="已完成" /> |
+| 7 | 前端 ASR 页面 | `asrConfig.ts` + `subtitle.tsx` ASR UI + `AsrModelPickerModal` | 6 | 展示配置、进度、历史结果 <Badge type="tip" text="已完成" /> |
 | 8 | 本地资源管理页 | `local-resources*` + jsBridge handlers | 5,6,7 | **最后开发**，集中处理跨素材与 bridge 文件系统能力 |
+| 9 | ASR 配置管理页面 | `AsrConfigService` + 桌面设置页 + Bridge Handlers | 7 | 服主权限管理（下载开关、模型白名单）；详见 §10 |
+| 10 | 模型预下载与测试 | `AsrModelTestService` + Python `/asr/test-model-task` | 9 | 自定义音频、多模型选择、可配推理波数；详见 §11 |
+| 11 | 优先级 GPU 资源锁 | `GpuResourceLock` 优先级队列重写 | 无 | 0-20 优先级 + 时间序；详见 §12 |
 
 **并行建议**：
-- Phase 1 / Phase 1.5 已完成
-- Phase 1.5 可与 Phase 2 并行（已完成）
-- Phase 3 依赖 Phase 2
-- Phase 4 依赖 Phase 2/3
-- Phase 5 依赖 Phase 4
-- Phase 6 依赖 Phase 3/4/5
-- Phase 7 依赖 Phase 6
+- Phase 1 ~ 7 已全部完成 <Badge type="tip" text="已完成" />
+- Phase 9 依赖 Phase 7（ASR 前端页面已稳定）
+- Phase 10 依赖 Phase 9（配置服务就绪后才能做测试）
+- Phase 11 独立于 Phase 9/10，可并行开发
 - **Phase 8 建议最后开发**：这是跨页面、跨素材、跨 bridge / file-system 边界的整理型模块，依赖前面各阶段先把结果目录结构、字幕写库、ASR 元信息、bridge 基础能力稳定下来；否则很容易边做边返工
 
 ---
@@ -1307,7 +1307,12 @@ export function pickDefaultModel(lang: string, compat: WhisperCompatParsed): str
 
 ### 4.2 为什么采用 `ASR_TRANSCRIBE_QUEUE` 而不是 N 个独立 `TRANSCRIBE` Task？
 
-因为当前约束已经从“追求最大吞吐”变成“显存受限下的稳定顺序执行”：
+> **⚠️ 实际实现偏差**：最终采用了 **N×独立 `TRANSCRIBE` Task** 方案，而非本节描述的单队列模式。
+> 每个 chunk 对应一个独立的 `TRANSCRIBE` Task，合并逻辑在 `TranscribeExecutor.tryMergeChunks()` 中完成。
+> `GpuResourceLock`（Semaphore(1) 互斥锁）保证同一时刻只有一个 GPU 推理任务运行，
+> 因此”顺序执行”和”显存安全”仍然得到保证。下方原始设计保留作为决策记录。
+
+因为当前约束已经从”追求最大吞吐”变成”显存受限下的稳定顺序执行”：
 - **顺序运行更省显存**：家庭用户机器通常只适合同一时刻跑一个 faster-whisper 推理
 - **暂停/取消语义更自然**：一个 Task 就代表整段 ASR 转录流程，直接复用 `task-model.md` 的 Task 级控制
 - **中途可预览**：每完成一个 chunk 就落盘；即使后半段取消，前半段结果依然可读
@@ -1867,6 +1872,8 @@ class TestErrorClassification:
 
 ## 六、显存独占文件锁
 
+> **已完成**：`GpuResourceLock` 已升级为 `Mutex` + `PriorityQueue` 优先级锁（0-20 范围），详见 **§12 优先级 GPU 资源锁**。
+
 ### 6.1 问题背景
 
 家庭用户 GPU 显存有限，以下进程同时运行会 OOM 或严重降速：
@@ -1910,7 +1917,8 @@ object GpuResourceLock {
 |----------|---------|------|
 | `TranscribeExecutor` | **始终** | faster-whisper 推理始终占用 GPU |
 | `TranscodeMp4Executor` | `hw_accel ≠ "cpu"` 时 | 纯 CPU 转码不需要 GPU 锁 |
-| `EvaluateFasterWhisperCompatExecutor` | **始终** | GPU 兼容性测试需要独占 GPU |
+
+> **注**：`EvaluateFasterWhisperCompatExecutor` 已在后续重构中移除，兼容性检测改由 `FasterWhisperInstallService` 处理。
 
 **TranscodeMp4Executor 条件持锁示例**：
 
@@ -2568,7 +2576,7 @@ cd fredica-webui && npx vitest run tests/util/subtitleExport.test.ts
 
 ---
 
-### 9.1.5 Phase 1.5 — ASR 工作流最小闭环（Kotlin 侧）✅
+### 9.1.5 Phase 1.5 — ASR 工作流最小闭环（Kotlin 侧） <Badge type="tip" text="已完成" />
 
 #### 9.1.5.1 测试目标
 
@@ -2601,7 +2609,7 @@ cd fredica-webui && npx vitest run tests/util/subtitleExport.test.ts
 
 #### 9.1.5.3 测试文件 B：工作流 payload 路径衔接
 
-`shared/src/jvmTest/kotlin/com/github/project_fredica/db/MaterialWorkflowServiceAsrPayloadTest.kt` ✅
+`shared/src/jvmTest/kotlin/com/github/project_fredica/db/MaterialWorkflowServiceAsrPayloadTest.kt` <Badge type="tip" text="已完成" />
 
 已实现，测试矩阵：
 
@@ -3681,6 +3689,359 @@ cd fredica-webui && npx vitest run tests/routes/local-resources.test.tsx tests/r
 
 ⑤ commit（wip 或 feat）
 ```
+
+---
+
+## 十、ASR 配置管理页面（Phase 9）
+
+> 对应需求：服主权限管理（允许下载开关、允许模型列表）+ 桌面设置入口。
+
+### 10.1 功能概述
+
+在桌面设置页面新增 **FasterWhisper ASR 配置** 入口，提供以下管理能力：
+
+1. **允许下载开关**（`asrAllowDownload`）：控制运行时是否允许下载新模型
+2. **禁用模型黑名单**（`asrDisallowedModels`）：禁止用户使用的模型列表（空 = 全部允许）
+3. **模型测试入口**：跳转到模型预下载与测试功能（详见 §11）
+
+### 10.2 数据模型
+
+#### AppConfig 新增字段
+
+| 字段 | SerialName | 类型 | 默认值 | 用途 |
+|------|-----------|------|--------|------|
+| `asrAllowDownload` | `asr_allow_download` | `Boolean` | `true` | 是否允许运行时下载模型 |
+| `asrDisallowedModels` | `asr_disallowed_models` | `String` | `""` | 禁止使用的模型黑名单（逗号分隔，空=全部允许） |
+| `asrTestAudioPath` | `asr_test_audio_path` | `String` | `""` | 模型测试用音频文件路径 |
+| `asrTestWaveCount` | `asr_test_wave_count` | `Int` | `10` | 模型测试推理波数 |
+
+**3 处 lockstep 更新**：`AppConfig.kt` 字段 + `AppConfigDb.kt` 的 `defaultKv`/`toKvMap()`/`toAppConfig()`
+
+#### ASR 配置响应/请求模型
+
+**文件**：`shared/src/commonMain/.../asr/model/AsrConfigModels.kt`
+
+```kotlin
+@Serializable
+data class AsrConfigResponse(
+    @SerialName("allow_download") val allowDownload: Boolean,
+    @SerialName("disallowed_models") val disallowedModels: String,
+    @SerialName("test_audio_path") val testAudioPath: String,
+    @SerialName("test_wave_count") val testWaveCount: Int,
+)
+
+@Serializable
+data class AsrConfigSaveParam(
+    @SerialName("allow_download") val allowDownload: Boolean? = null,
+    @SerialName("disallowed_models") val disallowedModels: String? = null,
+    @SerialName("test_audio_path") val testAudioPath: String? = null,
+    @SerialName("test_wave_count") val testWaveCount: Int? = null,
+)
+```
+
+### 10.3 服务层：AsrConfigService
+
+**文件**：`shared/src/commonMain/.../asr/service/AsrConfigService.kt`
+
+**架构原则**：所有 ASR 配置业务逻辑放在 `asr/service/` 下，bridge handler 和 route 只做薄层委托。
+
+```kotlin
+object AsrConfigService {
+    /** 读取 ASR 配置（从 AppConfigService 提取 ASR 相关字段） */
+    fun getAsrConfig(): AsrConfigResponse
+
+    /** 保存 ASR 配置（部分更新） */
+    suspend fun saveAsrConfig(param: AsrConfigSaveParam)
+
+    /** 检查模型是否被允许使用（空黑名单=全部允许，非空时黑名单内禁用） */
+    fun isModelAllowed(model: String): Boolean
+
+    /** 从候选模型列表中排除黑名单中的模型 */
+    fun filterDisallowedModels(allModels: List<String>): List<String>
+
+    /** 检查是否允许下载（服主配置优先） */
+    fun isDownloadAllowed(): Boolean
+}
+```
+
+### 10.4 API 层
+
+#### Route Extension（HTTP API，供 Web 模式使用）
+
+**文件**：`shared/src/commonMain/.../asr/route_ext/AsrConfigRouteExt.kt`
+
+| 方法 | 路径 | 委托 |
+|------|------|------|
+| GET | `/api/asr/config` | `AsrConfigService.getAsrConfig()` |
+| POST | `/api/asr/config` | `AsrConfigService.saveAsrConfig(param)` |
+
+#### Bridge Handlers（桌面端 jsBridge，薄层委托）
+
+**文件**：`composeApp/src/commonMain/.../appwebview/messages/`
+
+| Handler | JS 方法名 | 委托 |
+|---------|----------|------|
+| `GetAsrConfigJsMessageHandler` | `get_asr_config` | `AsrConfigService.getAsrConfig()` |
+| `SaveAsrConfigJsMessageHandler` | `save_asr_config` | `AsrConfigService.saveAsrConfig(param)` |
+| `SelectAudioFileJsMessageHandler` | `select_audio_file` | 系统文件选择对话框（expect/actual，纯 UI 操作） |
+
+### 10.5 权限执行点
+
+权限检查通过 `AsrConfigService` 统一执行，分布在以下位置：
+
+#### 后端执行点
+
+1. **`MaterialWorkflowRouteExt.handleWhisperTranscribe()`**：
+   - `AsrConfigService.isModelAllowed(model)` → 不允许则返回 error
+   - `AsrConfigService.isDownloadAllowed()` → 覆盖请求中的 allowDownload
+
+2. **`TranscribeExecutor`**：
+   - 在 `FasterWhisperInstallService.ensureInstalled()` 前检查 `AsrConfigService.isDownloadAllowed()`
+
+#### 前端执行点
+
+3. **`asrConfig.ts`** 新增 `filterDisallowedModels(allModels, disallowedModelsStr)`：
+   - 空字符串 → 返回全部；否则按逗号分隔排除黑名单中的模型
+
+4. **`material.$materialId.subtitle.tsx` AsrModelPickerModal**：
+   - 从 API/bridge 读取 ASR 配置，过滤模型列表
+   - 控制 allowDownload checkbox 可见性
+
+### 10.6 前端页面
+
+#### 设置页入口
+
+**文件**：`fredica-webui/app/routes/app-desktop-setting.tsx`
+
+在 PyTorch 配置卡片之后添加 ASR 配置入口卡片，点击跳转到配置页面。
+
+#### 配置页面
+
+**新建**：`fredica-webui/app/routes/app-desktop-setting-faster-whisper-asr-config.tsx`
+
+参考 `app-desktop-setting-torch-config.tsx` 模式。通过 `callBridgeOrNull("get_asr_config")` 读取配置（bridge 不可用时回退到 HTTP API `GET /api/asr/config`）。
+
+**页面结构**：
+1. **权限配置区** — 下载开关 + 允许模型多选
+2. **模型测试区** — 音频路径 + 推理波数 + 模型多选 + 测试结果表格（详见 §11）
+
+---
+
+## 十一、模型预下载与测试（Phase 10）
+
+> 对应需求：自定义音频、可配推理波数、多模型选择、部分退出保留结果。
+
+### 11.1 功能概述
+
+在 ASR 配置页面的"模型测试区"中，用户可以：
+
+1. **指定测试音频**：通过文件选择对话框选择本地音频文件
+2. **配置推理波数**：设置每个模型的推理次数（默认 10），用于评估性能稳定性
+3. **多模型选择**：从允许列表中选择多个模型进行对比测试
+4. **部分退出保留结果**：测试过程中可随时取消，已完成的模型结果保留显示
+
+### 11.2 服务层：AsrModelTestService
+
+**文件**：`shared/src/commonMain/.../asr/service/AsrModelTestService.kt`（expect/actual）
+
+```kotlin
+expect object AsrModelTestService {
+    /**
+     * 启动模型测试任务，返回结果流。
+     *
+     * @param models 待测试的模型列表
+     * @param audioPath 测试音频文件路径
+     * @param waveCount 每个模型的推理波数
+     * @param onProgress 进度回调（每完成一个模型/一波推理时调用）
+     * @param cancelSignal 取消信号（触发后停止后续模型测试，已完成结果保留）
+     * @return 所有已完成模型的测试结果列表
+     */
+    suspend fun startModelTest(
+        models: List<String>,
+        audioPath: String,
+        waveCount: Int,
+        onProgress: suspend (AsrModelTestProgress) -> Unit,
+        cancelSignal: CompletableDeferred<Unit>?,
+    ): List<AsrModelTestResult>
+}
+```
+
+**jvmMain actual**：调用 `PythonUtil.websocketTask("/asr/test-model-task", ...)` 实现。
+
+### 11.3 数据模型
+
+```kotlin
+@Serializable
+data class AsrModelTestProgress(
+    val model: String,           // 当前测试的模型名
+    val wave: Int,               // 当前推理波次（1-based）
+    val totalWaves: Int,         // 总推理波数
+    val modelIndex: Int,         // 当前模型索引（0-based）
+    val totalModels: Int,        // 总模型数
+    val status: String,          // "loading" | "inferring" | "done" | "error"
+    val message: String? = null, // 状态描述或错误信息
+)
+
+@Serializable
+data class AsrModelTestResult(
+    val model: String,
+    val success: Boolean,
+    val loadTimeMs: Long? = null,       // 模型加载耗时
+    val avgInferenceMs: Long? = null,   // 平均推理耗时
+    val minInferenceMs: Long? = null,   // 最小推理耗时
+    val maxInferenceMs: Long? = null,   // 最大推理耗时
+    val vramUsageMb: Int? = null,       // 显存占用（MB）
+    val error: String? = null,          // 失败原因
+)
+```
+
+### 11.4 Python 端点
+
+#### WebSocket 路由
+
+**文件**：`desktop_assets/.../routes/asr.py` — 新增 `WS /asr/test-model-task`
+
+#### 子进程 Worker
+
+**新建**：`desktop_assets/.../subprocess/test_whisper_model_worker.py`
+
+参考 `evaluate_faster_whisper_compat_worker.py` 模式：
+
+```python
+def _test_whisper_model_worker(param: dict, send_progress, is_cancelled) -> dict:
+    """
+    遍历模型列表，每个模型：
+    1. 加载模型（记录加载耗时）
+    2. 推理 N 次（记录每次耗时）
+    3. 发送进度（每波推理后）
+    4. 检查取消信号（每个模型开始前）
+    
+    已完成模型的结果始终保留，取消只影响后续模型。
+    """
+```
+
+### 11.5 前端交互
+
+在 ASR 配置页面的模型测试区：
+
+1. **音频选择**：点击按钮 → `callBridge("select_audio_file")` → 显示选中路径
+2. **推理波数**：数字输入框，默认 10，范围 1-100
+3. **模型选择**：多选列表，从 `filterDisallowedModels()` 过滤后的模型中选择
+4. **开始测试**：按钮触发 WebSocket 连接，实时显示进度
+5. **结果表格**：模型名 | 加载耗时 | 平均推理耗时 | 最小/最大 | 显存 | 状态
+6. **取消按钮**：发送取消信号，已完成结果保留在表格中
+
+---
+
+## 十二、优先级 GPU 资源锁（Phase 11） :badge[已完成]{type="tip"}
+
+> 对应需求：将 `GpuResourceLock` 从 `Semaphore(1)` 升级为优先级+时间序锁。
+>
+> 详细优先级策略见 [task-model.md §7.3](../task-model.md#_7-3-优先级策略)。
+
+### 12.1 设计目标
+
+`GpuResourceLock` 已从 `Semaphore(1)` 升级为 `Mutex` + `PriorityQueue` 优先级锁：
+
+- **高优先级任务优先获取锁**：用户手动触发的单个转录应优先于批量任务
+- **同优先级按时间序**：先到先得，避免饥饿
+- **显式优先级**：`TaskDef.priority` 和 `withGpuLock` 的 `priority` 均无默认值，强制调用方显式指定
+
+### 12.2 优先级映射
+
+优先级范围 **0–20**，数字越大越优先。所有常量集中定义在 `TaskPriority` 对象中。
+
+| 范围   | 用途                     | 示例                                          |
+|--------|--------------------------|-----------------------------------------------|
+| 0      | 最低优先级               | `DOWNLOAD_TORCH`、测试默认值                  |
+| 1–10   | 重型 GPU 任务（ASR/转录）| `TRANSCRIBE`（Low=3, Medium=6, High=9）       |
+| 11–20  | 轻型 GPU 任务（转码等）  | `TRANSCODE_MP4`=14, `DOWNLOAD_BILIBILI_VIDEO`=14 |
+
+### 12.3 实现方案
+
+**文件**：`shared/src/commonMain/.../worker/GpuResourceLock.kt`
+
+基于 `Mutex` + `PriorityQueue<WaitEntry>` + `CancellableContinuation`：
+
+```kotlin
+object GpuResourceLock {
+    private val mutex = Mutex()                    // 保护内部状态
+    private val waitQueue = PriorityQueue<WaitEntry>(
+        compareByDescending<WaitEntry> { it.priority }.thenBy { it.seq }
+    )
+    private var occupied = false                   // 锁是否被占用
+    private var seqCounter = 0L                    // 单调递增序号
+
+    private class WaitEntry(
+        val priority: Int,
+        val seq: Long,
+        val continuation: CancellableContinuation<Unit>,
+        val taskId: String,
+    )
+
+    /**
+     * 获取 GPU 锁后执行 [block]，结束后自动释放。
+     * 高优先级任务优先获取锁；同优先级按到达时间排序。
+     *
+     * @param taskId 当前任务 ID，用于等待时更新 statusText
+     * @param priority 优先级（0-20，越大越优先）
+     * @param block 持锁期间执行的挂起函数
+     */
+    suspend fun <T> withGpuLock(
+        taskId: String,
+        priority: Int,
+        block: suspend () -> T,
+    ): T { ... }
+}
+```
+
+### 12.4 优先级传播链
+
+```
+前端 → MaterialWorkflowParam.priority: Int? = null
+  → MaterialWorkflowRouteExt.handleWhisperTranscribe()
+    → p.priority ?: TaskPriority.TRANSCRIBE_MEDIUM
+  → MaterialWorkflowServiceExt.startWhisperTranscribe2(priority: Int)
+  → CommonWorkflowService.TaskDef(priority = priority)
+  → Task.priority
+  → TranscribeExecutor: GpuResourceLock.withGpuLock(task.id, task.priority)
+```
+
+动态创建：`ASR_SPAWN_CHUNKS` → `TRANSCRIBE` 任务继承 `task.priority`。
+
+#### 修改文件清单
+
+| 文件 | 变更 |
+|------|------|
+| `GpuResourceLock.kt` | 重写为优先级锁；`priority` 无默认值 |
+| `TaskPriority.kt` | 新增：集中定义所有优先级常量 |
+| `Task.kt` | `priority` 无默认值 |
+| `CommonWorkflowService.kt` | `TaskDef` 新增 `priority: Int`（无默认值）|
+| `MaterialWorkflowRoute.kt` | `MaterialWorkflowParam` 新增 `priority: Int? = null` |
+| `MaterialWorkflowRouteExt.kt` | 传递 `p.priority ?: TaskPriority.TRANSCRIBE_MEDIUM` |
+| `MaterialWorkflowServiceExt.kt` | `startWhisperTranscribe2()` 新增 `priority: Int` 参数 |
+| `MaterialWorkflowService.kt` | `startWhisperTranscribe()` 新增 `priority: Int` 参数 |
+| `MaterialVideoTranscodeMp4Route.kt` | `priority = TaskPriority.TRANSCODE_MP4` |
+| `BilibiliVideoDownloadRoute.kt` | `priority = TaskPriority.DOWNLOAD_BILIBILI_VIDEO` |
+| `NetworkTestRoute.kt` | `priority = TaskPriority.NETWORK_TEST` |
+| `TorchService.kt` | `priority = TaskPriority.DOWNLOAD_TORCH` |
+| `AsrSpawnChunksExecutor.kt` | TRANSCRIBE 创建处 `priority = task.priority` |
+| `TranscribeExecutor.kt` | `withGpuLock(task.id, task.priority)` |
+| `TranscodeMp4Executor.kt` | `withGpuLock(task.id, task.priority)` |
+
+### 12.5 测试
+
+**文件**：`shared/src/jvmTest/kotlin/.../worker/GpuResourceLockTest.kt`
+
+| 测试 | 验证点 |
+|------|--------|
+| 互斥性 | 两个任务不会同时持锁 |
+| 等待状态文本 | 等待中的任务 statusText 显示"等待 GPU 资源…" |
+| 获取后清除状态文本 | 获取锁后 statusText 被清除 |
+| 无竞争无状态文本 | 无竞争时不写入 statusText |
+| 高优先级抢占 | 3 个任务（priority 2/10/6）等待，释放后 priority=10 先获取 |
+| 同优先级时间序 | 同 priority 的任务按 seq 顺序获取 |
+| 取消从队列移除 | 等待中的任务取消后不影响其他等待者 |
 
 ---
 

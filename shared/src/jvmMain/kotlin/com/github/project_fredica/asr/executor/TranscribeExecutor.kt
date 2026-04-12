@@ -8,6 +8,7 @@ import com.github.project_fredica.asr.model.TranscribePayload
 import com.github.project_fredica.asr.model.TranscribeSegment
 import com.github.project_fredica.asr.model.TranscribeTranscriptDoneFile
 import com.github.project_fredica.asr.model.TranscribeTranscriptMeta
+import com.github.project_fredica.asr.service.AsrConfigService
 import com.github.project_fredica.asr.service.FasterWhisperInstallService
 import com.github.project_fredica.apputil.AppProxyService
 import com.github.project_fredica.apputil.AppUtil
@@ -163,7 +164,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         val prefix = chunkPrefix(payload.chunkIndex)
         val modelSize = payload.modelSize ?: "large-v3"
 
-        GpuResourceLock.withGpuLock(task.id) {
+        GpuResourceLock.withGpuLock(task.id, task.priority) {
             val cfg = AppConfigService.repo.getConfig()
             val effectiveComputeType =
                 cfg.fasterWhisperComputeType.takeIf { it.isNotBlank() && it != "auto" } ?: "float16"
@@ -188,13 +189,16 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
             // 创建新空 .jsonl
             jsonlFile.writeText("")
 
+            // 权限覆盖：服主配置的 allowDownload 优先于 payload 参数
+            val effectiveAllowDownload = AsrConfigService.isDownloadAllowed() && payload.allowDownload
+
             val paramJson = buildJsonObject {
                 put("audio_path", payload.audioPath)
                 if (payload.language != null) put("language", payload.language)
                 put("model_name", modelSize)
                 put("device", "auto")
                 put("compute_type", effectiveComputeType)
-                put("allow_download", payload.allowDownload)
+                put("allow_download", effectiveAllowDownload)
                 put("proxy", proxyUrl)
             }.toString()
             logger.info("TranscribeExecutor: 开始转录 audio=${payload.audioPath} [taskId=${task.id}]")

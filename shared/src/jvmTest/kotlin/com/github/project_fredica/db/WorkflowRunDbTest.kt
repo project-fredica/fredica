@@ -13,6 +13,7 @@ package com.github.project_fredica.db
 // 测试环境：每个测试用例独立的 SQLite 临时文件（@BeforeTest 重新创建）。
 // =============================================================================
 
+import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
@@ -237,8 +238,8 @@ class WorkflowRunDbTest {
     @Test
     fun testRecalculate_dependencyFailed_cascadeCancelsDownstream() = runBlocking {
         workflowRunDb.create(workflowRun("wr-dep-fail"))
-        val taskA = Task(id = "dep-fail-a", type = "STEP_A", workflowRunId = "wr-dep-fail", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "dep-fail-b", type = "STEP_B", workflowRunId = "wr-dep-fail", materialId = "material-1", dependsOn = """["dep-fail-a"]""", createdAt = nowSec() + 1)
+        val taskA = Task(id = "dep-fail-a", type = "STEP_A", workflowRunId = "wr-dep-fail", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "dep-fail-b", type = "STEP_B", workflowRunId = "wr-dep-fail", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dep-fail-a"]""", createdAt = nowSec() + 1)
         taskDb.createAll(listOf(taskA, taskB))
 
         // A 失败
@@ -276,9 +277,9 @@ class WorkflowRunDbTest {
     @Test
     fun testRecalculate_threeLevel_chainPropagation() = runBlocking {
         workflowRunDb.create(workflowRun("wr-chain3"))
-        val taskA = Task(id = "c3-a", type = "STEP_A", workflowRunId = "wr-chain3", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "c3-b", type = "STEP_B", workflowRunId = "wr-chain3", materialId = "material-1", dependsOn = """["c3-a"]""", createdAt = nowSec() + 1)
-        val taskC = Task(id = "c3-c", type = "STEP_C", workflowRunId = "wr-chain3", materialId = "material-1", dependsOn = """["c3-b"]""", createdAt = nowSec() + 2)
+        val taskA = Task(id = "c3-a", type = "STEP_A", workflowRunId = "wr-chain3", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "c3-b", type = "STEP_B", workflowRunId = "wr-chain3", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["c3-a"]""", createdAt = nowSec() + 1)
+        val taskC = Task(id = "c3-c", type = "STEP_C", workflowRunId = "wr-chain3", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["c3-b"]""", createdAt = nowSec() + 2)
         taskDb.createAll(listOf(taskA, taskB, taskC))
 
         taskDb.updateStatus("c3-a", "failed", error = "模拟失败")
@@ -314,10 +315,10 @@ class WorkflowRunDbTest {
     @Test
     fun testRecalculate_diamondDependency_allCascadeCancelled() = runBlocking {
         workflowRunDb.create(workflowRun("wr-diamond"))
-        val taskA = Task(id = "dm-a", type = "STEP_A", workflowRunId = "wr-diamond", materialId = "material-1", createdAt = nowSec())
-        val taskB = Task(id = "dm-b", type = "STEP_B", workflowRunId = "wr-diamond", materialId = "material-1", dependsOn = """["dm-a"]""",        createdAt = nowSec() + 1)
-        val taskC = Task(id = "dm-c", type = "STEP_C", workflowRunId = "wr-diamond", materialId = "material-1", dependsOn = """["dm-a"]""",        createdAt = nowSec() + 2)
-        val taskD = Task(id = "dm-d", type = "STEP_D", workflowRunId = "wr-diamond", materialId = "material-1", dependsOn = """["dm-b","dm-c"]""", createdAt = nowSec() + 3)
+        val taskA = Task(id = "dm-a", type = "STEP_A", workflowRunId = "wr-diamond", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskB = Task(id = "dm-b", type = "STEP_B", workflowRunId = "wr-diamond", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dm-a"]""",        createdAt = nowSec() + 1)
+        val taskC = Task(id = "dm-c", type = "STEP_C", workflowRunId = "wr-diamond", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dm-a"]""",        createdAt = nowSec() + 2)
+        val taskD = Task(id = "dm-d", type = "STEP_D", workflowRunId = "wr-diamond", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["dm-b","dm-c"]""", createdAt = nowSec() + 3)
         taskDb.createAll(listOf(taskA, taskB, taskC, taskD))
 
         taskDb.updateStatus("dm-a", "failed", error = "根节点失败")
@@ -352,10 +353,10 @@ class WorkflowRunDbTest {
     @Test
     fun testRecalculate_mixedChains_successChainCompletesNormally() = runBlocking {
         workflowRunDb.create(workflowRun("wr-mixed"))
-        val taskF1 = Task(id = "mx-f1", type = "FAIL_A", workflowRunId = "wr-mixed", materialId = "material-1", createdAt = nowSec())
-        val taskF2 = Task(id = "mx-f2", type = "FAIL_B", workflowRunId = "wr-mixed", materialId = "material-1", dependsOn = """["mx-f1"]""", createdAt = nowSec() + 1)
-        val taskS1 = Task(id = "mx-s1", type = "OK_A",   workflowRunId = "wr-mixed", materialId = "material-1", createdAt = nowSec() + 2)
-        val taskS2 = Task(id = "mx-s2", type = "OK_B",   workflowRunId = "wr-mixed", materialId = "material-1", dependsOn = """["mx-s1"]""", createdAt = nowSec() + 3)
+        val taskF1 = Task(id = "mx-f1", type = "FAIL_A", workflowRunId = "wr-mixed", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskF2 = Task(id = "mx-f2", type = "FAIL_B", workflowRunId = "wr-mixed", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["mx-f1"]""", createdAt = nowSec() + 1)
+        val taskS1 = Task(id = "mx-s1", type = "OK_A",   workflowRunId = "wr-mixed", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 2)
+        val taskS2 = Task(id = "mx-s2", type = "OK_B",   workflowRunId = "wr-mixed", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["mx-s1"]""", createdAt = nowSec() + 3)
         taskDb.createAll(listOf(taskF1, taskF2, taskS1, taskS2))
 
         taskDb.updateStatus("mx-f1", "failed")
@@ -385,9 +386,9 @@ class WorkflowRunDbTest {
     @Test
     fun testRecalculate_partialDependencyFailed() = runBlocking {
         workflowRunDb.create(workflowRun("wr-partial-dep"))
-        val taskA = Task(id = "pd-a", type = "STEP_A", workflowRunId = "wr-partial-dep", materialId = "material-1", createdAt = nowSec())
-        val taskX = Task(id = "pd-x", type = "STEP_X", workflowRunId = "wr-partial-dep", materialId = "material-1", createdAt = nowSec() + 1)
-        val taskB = Task(id = "pd-b", type = "STEP_B", workflowRunId = "wr-partial-dep", materialId = "material-1", dependsOn = """["pd-a","pd-x"]""", createdAt = nowSec() + 2)
+        val taskA = Task(id = "pd-a", type = "STEP_A", workflowRunId = "wr-partial-dep", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec())
+        val taskX = Task(id = "pd-x", type = "STEP_X", workflowRunId = "wr-partial-dep", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, createdAt = nowSec() + 1)
+        val taskB = Task(id = "pd-b", type = "STEP_B", workflowRunId = "wr-partial-dep", materialId = "material-1", priority = TaskPriority.DEV_TEST_DEFAULT, dependsOn = """["pd-a","pd-x"]""", createdAt = nowSec() + 2)
         taskDb.createAll(listOf(taskA, taskX, taskB))
 
         taskDb.updateStatus("pd-a", "failed")
@@ -452,6 +453,7 @@ class WorkflowRunDbTest {
             Task(
                 id = "$workflowRunId-t$i", type = "DOWNLOAD_VIDEO",
                 workflowRunId = workflowRunId, materialId = "material-1",
+                priority = TaskPriority.DEV_TEST_DEFAULT,
                 createdAt = nowSec() + i,
             )
         }

@@ -5,6 +5,8 @@ import com.github.project_fredica.api.FredicaApi
 
 // AI建议：按字母序排序
 fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
+    AsrConfigGetRoute,
+    AsrConfigSaveRoute,
     BilibiliFavoriteGetPageRoute,
     BilibiliFavoriteGetVideoListRoute,
     BilibiliVideoAiConclusionRoute,

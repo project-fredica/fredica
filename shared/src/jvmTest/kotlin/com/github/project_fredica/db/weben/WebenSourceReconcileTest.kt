@@ -58,6 +58,7 @@ package com.github.project_fredica.db.weben
 import com.github.project_fredica.api.routes.WebenSourceListRoute
 import com.github.project_fredica.db.Task
 import com.github.project_fredica.db.TaskDb
+import com.github.project_fredica.db.TaskPriority
 import com.github.project_fredica.db.TaskService
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunDb
@@ -171,6 +172,7 @@ class WebenSourceReconcileTest {
             workflowRunId = workflowRunId,
             materialId    = "",
             status        = status,
+            priority      = TaskPriority.DEV_TEST_DEFAULT,
             payload       = "{}",
             createdAt     = nowSec(),
             claimedAt     = claimedAt,

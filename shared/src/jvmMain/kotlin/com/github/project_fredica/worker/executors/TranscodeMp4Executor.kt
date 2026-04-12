@@ -216,7 +216,7 @@ object TranscodeMp4Executor : WebSocketTaskExecutor() {
         }
 
         return@withContext if (resolvedAccel != "cpu") {
-            GpuResourceLock.withGpuLock(task.id) { runTask() }
+            GpuResourceLock.withGpuLock(task.id, task.priority) { runTask() }
         } else {
             runTask()
         }
