@@ -52,7 +52,7 @@ class PromptRuntimeContextProvider {
         for (variableResolver in variableResolvers) {
             val res = variableResolver.resolve(key)
             if (res.isNotBlank()) {
-                logger.debug("[PromptRuntimeContextProvider] getVar resolved key=$key resolver=$variableResolver result=$res")
+                logger.debug("[PromptRuntimeContextProvider] getVar resolved key=$key resolver=$variableResolver result=${res.take(200)}")
                 result = res
                 break
             }

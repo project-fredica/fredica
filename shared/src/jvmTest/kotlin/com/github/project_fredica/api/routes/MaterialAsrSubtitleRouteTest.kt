@@ -74,7 +74,7 @@ class MaterialAsrSubtitleRouteTest {
 
 """.trimIndent()
 
-        val segments = MaterialSubtitleService.parseSrt(srt)
+        val segments = MaterialSubtitleService.Util.parseSrt(srt)
         assertEquals(2, segments.size)
 
         assertEquals(1.0, segments[0].from)
@@ -90,8 +90,8 @@ class MaterialAsrSubtitleRouteTest {
 
     @Test
     fun `A2 - parseSrt returns empty list for empty text`() {
-        assertEquals(0, MaterialSubtitleService.parseSrt("").size)
-        assertEquals(0, MaterialSubtitleService.parseSrt("   \n  ").size)
+        assertEquals(0, MaterialSubtitleService.Util.parseSrt("").size)
+        assertEquals(0, MaterialSubtitleService.Util.parseSrt("   \n  ").size)
     }
 
     // ── A3 ───────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ Hello
 
 """.trimIndent()
 
-        val segments = MaterialSubtitleService.parseSrt(srt)
+        val segments = MaterialSubtitleService.Util.parseSrt(srt)
         assertEquals(1, segments.size)
         assertEquals(1.5, segments[0].from)
         assertEquals(3.2, segments[0].to)

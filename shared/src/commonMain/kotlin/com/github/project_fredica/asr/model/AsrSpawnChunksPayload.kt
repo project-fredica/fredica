@@ -7,8 +7,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AsrSpawnChunksPayload(
     @SerialName("extract_audio_task_id") val extractAudioTaskId: String,
-    val language: String = "zh",
-    @SerialName("model_size") val modelSize: String = "large-v3",
+    val language: String,
+    @SerialName("model_size") val modelSize: String,
     @SerialName("output_dir") val outputDir: String,
     @SerialName("chunk_duration_sec") val chunkDurationSec: Int = 300,
     @SerialName("overlap_sec") val overlapSec: Int = 60,

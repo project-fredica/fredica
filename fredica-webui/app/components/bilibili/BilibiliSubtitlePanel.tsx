@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Loader, Captions, RefreshCw, ChevronDown, ChevronUp, AlertCircle, Download } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
 import { CommonSubtitlePanel, type CommonSubtitleItem } from "~/components/subtitle/CommonSubtitlePanel";
-import { usePlaybackTime } from "~/hooks/usePlaybackTime";
 import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,12 +39,11 @@ interface SubtitleBodyResult {
 
 // ─── SubtitleBodyPanel ────────────────────────────────────────────────────────
 
-function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, currentTime, onSeek }: {
+function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, onSeek }: {
     materialId?: string;
     selectedLan?: string | null;
     metaItem: SubtitleMetaItem;
     isUpdate: boolean;
-    currentTime: number;
     onSeek?: (seconds: number) => void;
 }) {
     const { apiFetch } = useAppFetch();
@@ -90,7 +88,8 @@ function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, curren
     );
 
     const items: CommonSubtitleItem[] = result.body;
-    const downloadFilename = `${materialId ?? "subtitle"}_${selectedLan ?? metaItem.lan}.srt`;
+    const subtitleId = `bili.${selectedLan ?? metaItem.lan}`;
+    const downloadFilename = `subtitle___${materialId ?? "unknown"}___${subtitleId}.srt`;
 
     return (
         <div className="flex flex-col min-h-0 flex-1 gap-3">
@@ -104,7 +103,7 @@ function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, curren
                     导出 SRT
                 </button>
             </div>
-            <CommonSubtitlePanel items={items} currentTime={currentTime} onSeek={onSeek} />
+            <CommonSubtitlePanel items={items} materialId={materialId} onSeek={onSeek} />
         </div>
     );
 }
@@ -118,12 +117,15 @@ export function BilibiliSubtitlePanel({
     materialId,
     bvid,
     pageIndex = 0,
+    initialLan,
     onSeek,
 }: {
-    /** 素材 ID，用于订阅播放进度 BroadcastChannel（自动跟随字幕） */
+    /** 素材 ID，传给 CommonSubtitlePanel 订阅播放进度 BroadcastChannel */
     materialId?: string;
     bvid: string;
     pageIndex?: number;
+    /** 加载完成后自动选中的语言代码（如 "ai-zh"），未匹配时回退到第一条 */
+    initialLan?: string;
     /** 点击字幕行时触发，参数为该行的起始时间（秒） */
     onSeek?: (seconds: number) => void;
 }) {
@@ -133,8 +135,6 @@ export function BilibiliSubtitlePanel({
     const [selectedLan, setSelectedLan] = useState<string | null>(null);
     const [refreshCount, setRefreshCount] = useState(0);
     const [showMeta, setShowMeta] = useState(false);
-
-    const currentTime = usePlaybackTime(materialId);
 
     useEffect(() => {
         let cancelled = false;
@@ -148,7 +148,10 @@ export function BilibiliSubtitlePanel({
             .then(({ data }) => {
                 if (!cancelled) {
                     setMetaResult(data);
-                    if (data && data.subtitles && data.subtitles.length > 0) setSelectedLan(data.subtitles[0].lan);
+                    if (data && data.subtitles && data.subtitles.length > 0) {
+                        const match = initialLan && data.subtitles.find(s => s.lan === initialLan);
+                        setSelectedLan(match ? match.lan : data.subtitles[0].lan);
+                    }
                 }
             })
             .catch(() => {
@@ -236,7 +239,6 @@ export function BilibiliSubtitlePanel({
                     selectedLan={selectedLan}
                     metaItem={currentTrack}
                     isUpdate={isUpdate}
-                    currentTime={currentTime}
                     onSeek={onSeek}
                 />
             )}

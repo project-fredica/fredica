@@ -220,7 +220,7 @@ export async function previewPromptScript(params: {
         appAuthToken?: string | null;
     };
     onLog?: (log: PromptSandboxLog) => void;
-}): Promise<{ promptText: string | null; error: string | null; errorType: string | null; logs: PromptSandboxLog[] }> {
+}): Promise<{ promptText: string | null; promptTexts: string[] | null; error: string | null; errorType: string | null; logs: PromptSandboxLog[] }> {
     const { connection } = params;
     const schema = connection.schema ?? "http";
     const domain = connection.domain ?? "localhost";
@@ -245,6 +245,7 @@ export async function previewPromptScript(params: {
     const decoder = new TextDecoder();
     let buffer = "";
     let promptText: string | null = null;
+    let promptTexts: string[] | null = null;
     let error: string | null = null;
     let errorType: string | null = null;
     const logs: PromptSandboxLog[] = [];
@@ -268,6 +269,9 @@ export async function previewPromptScript(params: {
                         params.onLog?.(log);
                     } else if (event.type === "result") {
                         promptText = String(event.prompt_text ?? "");
+                        if (Array.isArray(event.prompt_texts)) {
+                            promptTexts = (event.prompt_texts as unknown[]).map(String);
+                        }
                     } else if (event.type === "error") {
                         error = String(event.error ?? "");
                         errorType = String(event.error_type ?? "unknown");
@@ -282,7 +286,115 @@ export async function previewPromptScript(params: {
         reader.releaseLock();
     }
 
-    return { promptText, error, errorType, logs };
+    return { promptText, promptTexts, error, errorType, logs };
+}
+
+/**
+ * 调用后端 PromptScriptGenerateRoute（SSE），执行脚本 → 逐段调用 LLM → 流式返回。
+ * 脚本返回 string 时为单段模式；返回 string[] 时为分段 MapReduce 模式。
+ */
+export async function streamPromptScriptGenerate(params: {
+    scriptCode: string;
+    appModelId: string;
+    connection: {
+        domain?: string | null;
+        port?: string | null;
+        schema?: string | null;
+        appAuthToken?: string | null;
+    };
+    onScriptLog?: (log: PromptSandboxLog) => void;
+    onSegmentStart?: (index: number, total: number) => void;
+    onChunk: (chunk: string) => void;
+    signal?: AbortSignal;
+    disableCache?: boolean;
+}): Promise<{ fullText: string; error: string | null }> {
+    const { connection } = params;
+    const schema = connection.schema ?? "http";
+    const domain = connection.domain ?? "localhost";
+    const port = connection.port ?? DEFAULT_SERVER_PORT;
+    const url = `${schema}://${domain}:${port}/api/v1/PromptScriptGenerateRoute`;
+    console.debug("[streamPromptScriptGenerate] fetch url=", url);
+
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+            ...buildAuthHeaders(connection.appAuthToken),
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            script_code: params.scriptCode,
+            app_model_id: params.appModelId,
+            disable_cache: params.disableCache ?? false,
+        }),
+        signal: params.signal,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("无法读取响应流");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    let error: string | null = null;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (value) buffer += decoder.decode(value, { stream: !done });
+            const lines = buffer.split("\n");
+            buffer = done ? "" : (lines.pop() ?? "");
+            for (const line of lines) {
+                const trimmed = line.replace(/\r$/, "").trim();
+                // 跳过 event: 行（如 llm_source）
+                if (trimmed.startsWith("event:")) continue;
+                if (!trimmed.startsWith("data:")) continue;
+                const dataStr = trimmed.slice(5).trim();
+                if (dataStr === "[DONE]") continue;
+                try {
+                    const event = json_parse<Record<string, unknown>>(dataStr);
+                    if (!event) continue;
+                    // 脚本日志
+                    if (event.type === "script_log") {
+                        const log: PromptSandboxLog = {
+                            level: String(event.level ?? "log"),
+                            args: String(event.args ?? ""),
+                            ts: Number(event.ts ?? 0),
+                        };
+                        params.onScriptLog?.(log);
+                    }
+                    // 脚本错误
+                    else if (event.type === "script_error") {
+                        error = String(event.error ?? "脚本执行失败");
+                    }
+                    // 分段开始
+                    else if (event.type === "segment_start") {
+                        params.onSegmentStart?.(Number(event.index ?? 0), Number(event.total ?? 1));
+                    }
+                    // LLM chunk（标准 choices[0].delta.content 格式）
+                    else if (Array.isArray(event.choices)) {
+                        const delta = (event.choices as Array<{ delta?: { content?: string } }>)[0]?.delta;
+                        const content = delta?.content ?? "";
+                        if (content) {
+                            fullText += content;
+                            params.onChunk(content);
+                        }
+                    }
+                    // LLM 错误（event: llm_error 的 data 行）
+                    else if (event.error_type) {
+                        error = String(event.message ?? event.error_type);
+                    }
+                } catch (parseErr) {
+                    console.debug("[streamPromptScriptGenerate] ignore malformed SSE event", parseErr, { dataStr });
+                }
+            }
+            if (done) break;
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return { fullText, error };
 }
 
 // ── 概念提取运行 ──────────────────────────────────────────────────────────────

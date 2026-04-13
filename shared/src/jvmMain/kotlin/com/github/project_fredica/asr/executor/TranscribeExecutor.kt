@@ -8,6 +8,7 @@ import com.github.project_fredica.asr.model.TranscribePayload
 import com.github.project_fredica.asr.model.TranscribeSegment
 import com.github.project_fredica.asr.model.TranscribeTranscriptDoneFile
 import com.github.project_fredica.asr.model.TranscribeTranscriptMeta
+import com.github.project_fredica.asr.model.TranscriptBestLanguage
 import com.github.project_fredica.asr.service.AsrConfigService
 import com.github.project_fredica.asr.service.FasterWhisperInstallService
 import com.github.project_fredica.apputil.AppProxyService
@@ -45,8 +46,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  * ```json
  * {
  *   "audio_path":        "/path/to/chunk_0000.m4a",
- *   "language":          "zh",           // 可选，null 为自动检测
- *   "model_size":        "large-v3",     // 可选
+ *   "language":          "zh",           // 必填，"auto" 表示自动检测
+ *   "model_size":        "large-v3",     // 必填
  *   "output_dir":        "/path/to/asr_result/",  // 输出目录
  *   "chunk_index":       0,              // chunk 序号
  *   "total_chunks":      1,              // chunk 总数
@@ -131,11 +132,13 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         }
         val currentHash = withContext(Dispatchers.IO) { sha256(audioFile) }
         val hashMatch = done.inputHash == currentHash
-        val modelMatch = done.modelSize == (payload.modelSize ?: "large-v3")
-        val langMatch = done.language == payload.language
+        val modelMatch = done.modelSize == payload.modelSize
+        // "auto" 表示自动检测，不严格匹配语言（因为每次检测结果可能不同）
+        val langMatch = payload.language == "auto" || done.language == payload.language
         logger.debug(
             "TranscribeExecutor.canSkip: hashMatch=$hashMatch modelMatch=$modelMatch langMatch=$langMatch" +
-                    " storedHash=${done.inputHash.take(12)}… currentHash=${currentHash.take(12)}…"
+                    " storedHash=${done.inputHash.take(12)}… currentHash=${currentHash.take(12)}…" +
+                    " payload.language=${payload.language} done.language=${done.language}"
         )
         return hashMatch && modelMatch && langMatch
     }
@@ -162,7 +165,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         outDir.mkdirs()
 
         val prefix = chunkPrefix(payload.chunkIndex)
-        val modelSize = payload.modelSize ?: "large-v3"
+        val modelSize = payload.modelSize
 
         GpuResourceLock.withGpuLock(task.id, task.priority) {
             val cfg = AppConfigService.repo.getConfig()
@@ -194,7 +197,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
 
             val paramJson = buildJsonObject {
                 put("audio_path", payload.audioPath)
-                if (payload.language != null) put("language", payload.language)
+                put("language", payload.language)
                 put("model_name", modelSize)
                 put("device", "auto")
                 put("compute_type", effectiveComputeType)
@@ -202,7 +205,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                 put("proxy", proxyUrl)
             }.toString()
             logger.info("TranscribeExecutor: 开始转录 audio=${payload.audioPath} [taskId=${task.id}]")
-            logger.debug("TranscribeExecutor: params [taskId=${task.id}]: model=$modelSize, language=${payload.language ?: "(auto)"}, computeType=$effectiveComputeType, proxy=${proxyUrl.ifBlank { "(none)" }}, chunkIndex=${payload.chunkIndex}, offsetSec=${payload.chunkOffsetSec}")
+            logger.debug("TranscribeExecutor: params [taskId=${task.id}]: model=$modelSize, language=${payload.language}, computeType=$effectiveComputeType, proxy=${proxyUrl.ifBlank { "(none)" }}, chunkIndex=${payload.chunkIndex}, offsetSec=${payload.chunkOffsetSec}")
 
             // 确保 faster-whisper 已安装
             TaskService.repo.updateStatusText(task.id, "正在检查 faster-whisper 依赖…")
@@ -266,7 +269,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                     writeChunkMeta(
                         outDir,
                         prefix,
-                        payload.language ?: "und",
+                        payload.language,
                         modelSize,
                         segments.size,
                         partial = true,
@@ -282,7 +285,8 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                     val language = runCatching {
                         result.loadJson().getOrThrow().let { it as? JsonObject }
                             ?.get("language")?.jsonPrimitive?.content
-                    }.getOrNull() ?: payload.language ?: "und"
+                    }.getOrNull() ?: payload.language
+                    logger.info("TranscribeExecutor: chunk ${payload.chunkIndex} 转录完成，检测语言=$language，请求语言=${payload.language} [taskId=${task.id}]")
 
                     writeChunkMeta(
                         outDir,
@@ -295,7 +299,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                         coreEndSec = payload.coreEndSec
                     )
                     writeChunkSrt(outDir, prefix, segments)
-                    writeChunkDone(outDir, prefix, File(payload.audioPath), segments, modelSize, payload.language)
+                    writeChunkDone(outDir, prefix, File(payload.audioPath), segments, modelSize, language)
 
                     logger.info("TranscribeExecutor: 写入 ${segments.size} 段 → $prefix.srt + $prefix.done [taskId=${task.id}]")
                     logger.debug("TranscribeExecutor: 结果详情 [taskId=${task.id}]: segmentCount=${segments.size}, language=$language, outputDir=${outDir.absolutePath}")
@@ -309,7 +313,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                 // CancellationException 必须重新抛出，不能吞掉
                 TaskService.repo.updateStatusText(task.id, null)
                 writeChunkMeta(
-                    outDir, prefix, payload.language ?: "und", modelSize, segments.size,
+                    outDir, prefix, payload.language, modelSize, segments.size,
                     partial = true, coreStartSec = payload.coreStartSec, coreEndSec = payload.coreEndSec,
                 )
                 writeChunkSrt(outDir, prefix, segments)
@@ -320,7 +324,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
                     writeChunkMeta(
                         outDir,
                         prefix,
-                        payload.language ?: "und",
+                        payload.language,
                         modelSize,
                         segments.size,
                         partial = true,
@@ -365,7 +369,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         audioFile: File,
         segments: List<TranscribeSegment>,
         modelSize: String,
-        language: String?
+        language: String
     ) {
         val inputHash = if (audioFile.exists()) sha256(audioFile) else ""
         val srtContent = TranscribeSegment.buildSrt(segments)
@@ -377,6 +381,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
             language = language,
         )
         outDir.resolve("$prefix.done").writeText(AppUtil.dumpJsonStr(done).getOrThrow().str)
+        logger.debug("TranscribeExecutor: writeChunkDone $prefix language=$language modelSize=$modelSize inputHash=${inputHash.take(12)}…")
     }
 
     /**
@@ -402,8 +407,10 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
 
     /**
      * 检查所有 chunk 是否完成，若是则合并为 transcript.srt + transcript.meta.json + transcript.done。
+     *
+     * @param lastChunkLanguage 当前最后完成 chunk 的检测语言，作为聚合失败时的兜底。
      */
-    private fun tryMergeChunks(outDir: File, totalChunks: Int, modelSize: String, language: String) {
+    private fun tryMergeChunks(outDir: File, totalChunks: Int, modelSize: String, lastChunkLanguage: String) {
         val doneCount = (0 until totalChunks).count { i ->
             outDir.resolve("${chunkPrefix(i)}.done").exists()
         }
@@ -413,6 +420,22 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         }
 
         logger.info("TranscribeExecutor: 全部 $totalChunks chunks 完成，开始合并")
+
+        // 跨 chunk 语言聚合：读取各 chunk.done 的 language 字段，多数投票
+        val chunkDetectedLanguages = (0 until totalChunks).mapNotNull { i ->
+            val doneFile = outDir.resolve("${chunkPrefix(i)}.done")
+            doneFile.takeIf { it.exists() }?.readText()
+                ?.loadJsonModel<TranscribeChunkDoneFile>()?.getOrNull()?.language
+        }
+        val aggregatedLanguage = if (chunkDetectedLanguages.isEmpty()) {
+            lastChunkLanguage
+        } else {
+            chunkDetectedLanguages.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+                ?: lastChunkLanguage
+        }
+        logger.info(
+            "TranscribeExecutor: 跨 chunk 语言聚合: [${chunkDetectedLanguages.joinToString(", ")}] → $aggregatedLanguage"
+        )
 
         // 按 chunk index 顺序读取所有 SRT，按 core region 过滤后拼接
         val allSegments = mutableListOf<TranscribeSegment>()
@@ -458,7 +481,7 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         // 写入 transcript.meta.json
         val meta = TranscribeTranscriptMeta(
             modelSize = modelSize,
-            language = language,
+            language = aggregatedLanguage,
             totalSegments = allSegments.size,
             totalChunks = totalChunks,
             completedAt = nowIso(),
@@ -469,6 +492,26 @@ object TranscribeExecutor : WebSocketTaskExecutor() {
         val srtHash = sha256String(mergedSrt)
         val done = TranscribeTranscriptDoneFile(outputHash = srtHash, chunkCount = totalChunks)
         outDir.resolve("transcript.done").writeText(AppUtil.dumpJsonStr(done).getOrThrow().str)
+
+        // 写入 transcript_best_language.json（语言聚合结果）
+        if (chunkDetectedLanguages.isNotEmpty()) {
+            val countsByLang = chunkDetectedLanguages.groupingBy { it }.eachCount()
+            val total = chunkDetectedLanguages.size
+            val confidence = (countsByLang[aggregatedLanguage] ?: 0).toDouble() / total
+            val chunkLangMap = (0 until totalChunks).mapNotNull { i ->
+                val lang = outDir.resolve("${chunkPrefix(i)}.done").takeIf { it.exists() }
+                    ?.readText()?.loadJsonModel<TranscribeChunkDoneFile>()?.getOrNull()?.language
+                if (lang != null) i.toString() to lang else null
+            }.toMap()
+            val bestLanguage = TranscriptBestLanguage(
+                language = aggregatedLanguage,
+                confidence = confidence,
+                chunkLanguages = chunkLangMap,
+                determinedAt = nowIso(),
+            )
+            outDir.resolve("transcript_best_language.json")
+                .writeText(AppUtil.dumpJsonStr(bestLanguage).getOrThrow().str)
+        }
 
         logger.info("TranscribeExecutor: 合并完成 → transcript.srt (${allSegments.size} segments, raw $totalSegmentCount)")
     }

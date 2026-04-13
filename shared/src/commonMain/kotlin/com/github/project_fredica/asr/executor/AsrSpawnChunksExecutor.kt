@@ -83,7 +83,7 @@ object AsrSpawnChunksExecutor : TaskExecutor {
         }
 
         val totalChunks = chunks.size
-        logger.info("AsrSpawnChunksExecutor: 发现 $totalChunks 个 chunk，开始创建 TRANSCRIBE 任务 [taskId=${task.id}]")
+        logger.info("AsrSpawnChunksExecutor: 发现 $totalChunks 个 chunk，开始创建 TRANSCRIBE 任务 [taskId=${task.id}] language=${payload.language} model=${payload.modelSize}")
 
         // 3. 为每个 chunk 创建 TRANSCRIBE 任务
         val transcribeTasks = chunks.map { chunkElem ->
@@ -117,6 +117,12 @@ object AsrSpawnChunksExecutor : TaskExecutor {
             ).getOrThrow().str
 
             val taskId = TaskId.random().value
+            logger.debug(
+                "AsrSpawnChunksExecutor: 创建 TRANSCRIBE 任务 chunkIndex=$chunkIndex/${totalChunks - 1}" +
+                        " language=${payload.language} model=${payload.modelSize}" +
+                        " offsetSec=$chunkOffsetSec coreRegion=[${coreStartSec}s,${coreEndSec}s)" +
+                        " audioPath=$chunkPath"
+            )
             Task(
                 id = taskId,
                 type = "TRANSCRIBE",

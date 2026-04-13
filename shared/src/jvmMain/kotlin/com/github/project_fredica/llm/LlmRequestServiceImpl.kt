@@ -81,7 +81,13 @@ class LlmRequestServiceImpl : LlmRequestService {
                 throw e
             } catch (e: LlmProviderException) {
                 // LLM 提供商错误：记录 warn 日志后重新抛出（调用方会处理）
-                logger.warn("[LlmRequestService] LLM provider error: type=${e.type} status=${e.httpStatus} keyHash=${keyHash.take(8)}...", isHappensFrequently = false, err = e)
+                logger.warn(
+                    "[LlmRequestService] LLM provider error: type=${e.type} status=${e.httpStatus} keyHash=${
+                        keyHash.take(
+                            8
+                        )
+                    }...", isHappensFrequently = false, err = e
+                )
                 throw e
             }
 
@@ -103,7 +109,13 @@ class LlmRequestServiceImpl : LlmRequestService {
                         lastHitAt = now,
                     )
                 )
-                logger.debug("[LlmRequestService] cache written: keyHash=${keyHash.take(8)}...")
+                logger.debug(
+                    "[LlmRequestService] cache written: keyHash=${keyHash.take(8)}... result text : ${
+                        result.take(
+                            100
+                        )
+                    }..."
+                )
             }
 
             LlmResponse(result, LlmResponseSource.LLM_FRESH, keyHash, cacheKey)

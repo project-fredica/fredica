@@ -61,7 +61,6 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
     TRANSCODE_MP4:           '转码 MP4',
     EXTRACT_AUDIO:           '提取音频',
     TRANSCRIBE:              '语音识别',
-    DOWNLOAD_WHISPER_MODEL:  '下载 ASR 模型',
     DOWNLOAD_TORCH:          '下载 PyTorch',
     SUBTITLE_EXPORT_ASR:     '生成 ASR 字幕',
 };

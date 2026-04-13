@@ -494,9 +494,13 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
         后台协程：持续从 status_queue 读取子进程消息并调用 _on_subprocess_message()。
         子进程退出且队列排空后自动结束。
 
-        异常退出兜底：若子进程以非零 exitcode 退出（崩溃），主动向 WebSocket 发送
-        {"type": "error"} 消息，打断 start_and_wait 主循环中阻塞在 _read_command()
-        的等待，避免任务状态永久卡住。
+        异常退出兜底：若子进程以非零 exitcode 异常崩溃（且主循环尚未进入关闭阶段），
+        主动向 WebSocket 发送 {"type": "error"} 消息，打断 start_and_wait 主循环中
+        阻塞在 _read_command() 的等待，避免任务状态永久卡住。
+
+        正常取消不发 error：exitcode == -15（SIGTERM）且 _cancel_flag 已置位时，
+        属于正常 terminate()，不发送 error 消息；主循环已在 _is_stopping 阶段时
+        也跳过发送（WebSocket 可能已关闭）。
         """
         loop = asyncio.get_running_loop()
         while True:
@@ -512,14 +516,22 @@ class TaskEndpointInSubProcess(TaskEndpoint, metaclass=abc.ABCMeta):
                 if process_dead:
                     exitcode = self._process.exitcode if self._process is not None else None
                     if exitcode is not None and exitcode != 0:
-                        # 子进程异常崩溃：主动推送 error 消息，让 Kotlin 侧关闭 WebSocket，
-                        # 从而打断主循环中 _read_command() 的阻塞等待。
-                        error_msg = f"subprocess exited with code {exitcode}"
-                        logger.error("[{}] {}", self.tag, error_msg)
-                        try:
-                            await self.send_json({"type": "error", "error": error_msg})
-                        except Exception as send_err:
-                            logger.debug("[{}] failed to send subprocess error: {}", self.tag, send_err)
+                        # SIGTERM (-15) + cancel_flag = 正常取消，不视为崩溃
+                        if exitcode == -15 and self._cancel_flag:
+                            logger.debug("[{}] subprocess terminated by cancel (SIGTERM), pid={}",
+                                         self.tag, self._process.pid if self._process else "?")
+                        elif not self._is_stopping:
+                            # 子进程异常崩溃且主循环尚未退出：推送 error 消息，
+                            # 让 Kotlin 侧关闭 WebSocket，打断 _read_command() 阻塞。
+                            error_msg = f"subprocess exited with code {exitcode}"
+                            logger.warning("[{}] {}", self.tag, error_msg)
+                            try:
+                                await self.send_json({"type": "error", "error": error_msg})
+                            except Exception as send_err:
+                                logger.debug("[{}] failed to send subprocess error (ws may be closed): {}", self.tag, send_err)
+                        else:
+                            logger.debug("[{}] subprocess exited with code {} during shutdown, skipping ws send",
+                                         self.tag, exitcode)
                     break
         logger.debug("[{}] queue reader stopped", self.tag)
 

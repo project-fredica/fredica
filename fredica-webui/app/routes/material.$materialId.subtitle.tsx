@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
     Subtitles, Mic, ScanText, FileVideo2,
     CheckCircle, ChevronRight, ChevronDown, Clock,
-    ExternalLink, Loader, RefreshCw, AlertCircle, X,
+    ExternalLink, Loader, RefreshCw, AlertCircle, X, Play,
 } from "lucide-react";
 import { Link } from "react-router";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
@@ -16,6 +16,7 @@ import {
 } from "~/util/asrConfig";
 import { callBridgeOrNull } from "~/util/bridge";
 import { json_parse } from "~/util/json";
+import { useFloatingPlayerCtx } from "~/context/floatingPlayer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,13 +33,26 @@ interface SubtitleApiItem {
 }
 
 const SOURCE_LABEL: Record<string, { text: string; cls: string }> = {
-    bilibili_platform: { text: '平台字幕', cls: 'bg-blue-50 text-blue-600' },
-    asr:               { text: 'Whisper ASR', cls: 'bg-violet-50 text-violet-600' },
-    ocr:               { text: 'OCR 识别', cls: 'bg-amber-50 text-amber-600' },
-    embedded:          { text: '内嵌字幕轨', cls: 'bg-green-50 text-green-700' },
+    bilibili_platform:  { text: '平台字幕', cls: 'bg-blue-50 text-blue-600' },
+    asr:                { text: 'Whisper ASR', cls: 'bg-violet-50 text-violet-600' },
+    asr_postprocess:    { text: 'LLM 后处理', cls: 'bg-emerald-50 text-emerald-600' },
+    ocr:                { text: 'OCR 识别', cls: 'bg-amber-50 text-amber-600' },
+    embedded:           { text: '内嵌字幕轨', cls: 'bg-green-50 text-green-700' },
 };
 
 // ─── SubtitleChip ─────────────────────────────────────────────────────────────
+
+function makeSubtitleId(sub: SubtitleApiItem): string {
+    switch (sub.source) {
+        case "bilibili_platform": return `bili.${sub.lan}`;
+        case "asr": return `asr.${sub.model_size || "large-v3"}`;
+        case "asr_postprocess": {
+            const stem = sub.subtitle_url.split(/[/\\]/).pop()?.replace(/\.srt$/, "") || "unknown";
+            return `pp.${stem}`;
+        }
+        default: return `other.${sub.lan}`;
+    }
+}
 
 function SubtitleChip({ sub }: { sub: SubtitleApiItem }) {
     const badge = SOURCE_LABEL[sub.source] ?? { text: sub.source, cls: 'bg-gray-100 text-gray-500' };
@@ -47,9 +61,13 @@ function SubtitleChip({ sub }: { sub: SubtitleApiItem }) {
         ? (sub.model_size ? `AI(${sub.model_size})` : 'AI')
         : null;
 
+    const isClickable = !sub.partial;
+
     const inner = (
-        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs ${
-            sub.source === "asr" ? "hover:border-violet-300 cursor-pointer" : ""
+        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border rounded-lg text-xs ${
+            isClickable
+                ? "border-gray-200 hover:border-violet-300 cursor-pointer"
+                : "border-gray-200"
         }`}>
             {sub.partial
                 ? <Loader className="w-3 h-3 text-amber-500 animate-spin flex-shrink-0" />
@@ -59,14 +77,13 @@ function SubtitleChip({ sub }: { sub: SubtitleApiItem }) {
             {aiLabel && <span className="text-gray-400">{aiLabel}</span>}
             <span className={`px-1 py-0.5 rounded font-medium ${badge.cls}`}>{badge.text}</span>
             <span className="text-gray-400">{dateStr}</span>
-            {sub.source === "asr" && <ChevronRight className="w-3 h-3 text-gray-400" />}
+            {isClickable && <ChevronRight className="w-3 h-3 text-gray-400" />}
         </div>
     );
 
-    if (sub.source === "asr") {
-        return <Link to={`../subtitle-asr?model_size=${encodeURIComponent(sub.model_size || 'large-v3')}`} relative="path">{inner}</Link>;
-    }
-    return inner;
+    if (sub.partial) return inner;
+    const sid = makeSubtitleId(sub);
+    return <Link to={`../subtitle-preview/${sid}`} relative="path">{inner}</Link>;
 }
 
 // ─── Scheme panel ─────────────────────────────────────────────────────────────
@@ -136,6 +153,7 @@ const PRIORITY_OPTIONS = [
 ] as const;
 
 function AsrModelPickerModal({
+    materialId,
     selectedModel,
     selectedLanguage,
     selectedAllowDownload,
@@ -146,6 +164,7 @@ function AsrModelPickerModal({
     onSelect,
     onClose,
 }: {
+    materialId: string;
     selectedModel: string;
     selectedLanguage: string;
     selectedAllowDownload: boolean;
@@ -156,6 +175,7 @@ function AsrModelPickerModal({
     onSelect: (model: string, language: string, allowDownload: boolean, priority: string) => void;
     onClose: () => void;
 }) {
+    const { openFloatingPlayer } = useFloatingPlayerCtx();
     const [model, setModel] = useState(selectedModel);
     const [language, setLanguage] = useState(selectedLanguage);
     const [allowDownload, setAllowDownload] = useState(selectedAllowDownload);
@@ -180,14 +200,13 @@ function AsrModelPickerModal({
         return () => clearTimeout(t);
     }, [language]);
 
-    // LLM 猜测完成后自动设置语言，并联动更新模型
+    // 用户手动切换语言时，联动推荐模型
+    const prevLangRef = useRef(language);
     useEffect(() => {
-        if (typeof langGuessState !== "object") return;
-        const detectedLang = langGuessState.lang;
-        setLanguage(detectedLang);
-        setModel(pickDefaultModel(detectedLang));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [langGuessState]);
+        if (prevLangRef.current === language) return;
+        prevLangRef.current = language;
+        setModel(pickDefaultModel(language));
+    }, [language]);
 
     return (
         <div
@@ -267,9 +286,31 @@ function AsrModelPickerModal({
                             ))}
                         </select>
                         {typeof langGuessState === "object" && (
-                            <p className="text-[11px] text-gray-400 mt-1">
-                                LLM 猜测语言为「{langGuessState.label}」，如与实际不符可在此修改。
-                            </p>
+                            <div className={`mt-1 flex items-start gap-1.5 rounded-md px-2 py-1.5 ${
+                                langGuessState.lang === "auto"
+                                    ? "bg-amber-50 border border-amber-200"
+                                    : "bg-violet-50 border border-violet-200"
+                            }`}>
+                                <p className={`text-[11px] flex-1 leading-relaxed ${
+                                    langGuessState.lang === "auto" ? "text-amber-700" : "text-violet-700"
+                                }`}>
+                                    {langGuessState.lang === "auto"
+                                        ? "语言不确定，建议试听后手动选择。"
+                                        : <>LLM 猜测语言为<span className="font-semibold">「{langGuessState.label}」</span>，如与实际不符可在此修改。</>}
+                                </p>
+                                <button
+                                    onClick={() => openFloatingPlayer(materialId)}
+                                    className={`flex-shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] border rounded-md transition-colors ${
+                                        langGuessState.lang === "auto"
+                                            ? "text-amber-600 hover:text-amber-700 border-amber-300 hover:border-amber-400"
+                                            : "text-violet-600 hover:text-violet-700 border-violet-300 hover:border-violet-400"
+                                    }`}
+                                    title="试听视频以确认语言"
+                                >
+                                    <Play className="w-2.5 h-2.5" />
+                                    试听
+                                </button>
+                            </div>
                         )}
                     </div>
 
@@ -518,6 +559,7 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
             <p className="text-xs text-gray-400">识别完成后可在「已有字幕」中查看结果</p>
             {showModal && (
                 <AsrModelPickerModal
+                    materialId={materialId}
                     selectedModel={modalInitialModel}
                     selectedLanguage={language}
                     selectedAllowDownload={allowDownload}
@@ -545,7 +587,7 @@ function PlatformSchemeDetail({ isBilibili }: { isBilibili: boolean }) {
                     </p>
                 </div>
                 <Link
-                    to="../subtitle-bilibili"
+                    to="../subtitle-preview/bili.list"
                     relative="path"
                     className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
@@ -619,7 +661,10 @@ export default function SubtitlePage() {
                 ) : (
                     <div className="flex flex-wrap gap-2">
                         {subtitles.map((s, i) => (
-                            <SubtitleChip key={`${s.lan}-${s.source}-${s.model_size ?? ''}-${i}`} sub={s} />
+                            <SubtitleChip
+                                key={`${s.lan}-${s.source}-${s.model_size ?? ''}-${i}`}
+                                sub={s}
+                            />
                         ))}
                     </div>
                 )}

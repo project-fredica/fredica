@@ -29,6 +29,8 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.routing.RoutingContext
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -80,7 +82,14 @@ object PromptTemplatePreviewRoute {
                 } else {
                     val event = buildJsonObject {
                         put("type", "result")
-                        put("prompt_text", result.promptText ?: "")
+                        if (result.promptTexts != null) {
+                            put("prompt_text", "")
+                            put("prompt_texts", buildJsonArray {
+                                result.promptTexts.forEach { add(JsonPrimitive(it)) }
+                            })
+                        } else {
+                            put("prompt_text", result.promptText ?: "")
+                        }
                     }
                     writeStringUtf8("data: ${event}\n\n")
                 }

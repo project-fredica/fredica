@@ -3,13 +3,18 @@
  *
  * 通用字幕列表组件，支持：
  * - 虚拟滚动（固定行高 52px）
- * - 根据 currentTime 高亮当前激活字幕行
+ * - 根据播放进度高亮当前激活字幕行（通过 materialId 订阅 BroadcastChannel，或外部传入 currentTime）
  * - 自动跟随开关（默认开启），激活行变更时自动滚动居中
  * - maxHeight prop：限制列表最大高度（不传则 flex-1 撑满父容器）
+ *
+ * 高度约定：
+ *   组件根元素为 `flex flex-col min-h-0 flex-1`，需要父容器是 flex 列方向且有确定高度。
+ *   直接放入 `flex flex-col min-h-0` 容器即可，无需额外包装层。
  */
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronsDown } from "lucide-react";
+import { usePlaybackTime } from "~/hooks/usePlaybackTime";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,6 +26,9 @@ export interface CommonSubtitleItem {
 
 export interface CommonSubtitlePanelProps {
     items: CommonSubtitleItem[];
+    /** 素材 ID，用于订阅 BroadcastChannel 播放进度（推荐方式） */
+    materialId?: string;
+    /** 外部直接传入播放时间（秒），会覆盖 materialId 订阅的值 */
     currentTime?: number;
     onSeek?: (seconds: number) => void;
     /** 限制列表区域最大高度，传入时不再依赖 flex 父容器高度 */
@@ -44,7 +52,8 @@ const OVERSCAN = 5;
 
 export function CommonSubtitlePanel({
     items,
-    currentTime = 0,
+    materialId,
+    currentTime: currentTimeOverride,
     onSeek,
     maxHeight,
     autoScrollDefault = true,
@@ -53,6 +62,10 @@ export function CommonSubtitlePanel({
     const [scrollTop, setScrollTop] = useState(0);
     const [containerHeight, setContainerHeight] = useState(400);
     const [autoScroll, setAutoScroll] = useState(autoScrollDefault);
+
+    const playbackTime = usePlaybackTime(materialId);
+    // 外部 currentTime 覆盖内部订阅值；两者都没有时默认 0
+    const currentTime = currentTimeOverride ?? playbackTime;
 
     // suppressUntilRef：记录"用户主动滚动"后的抑制截止时间戳（Date.now() + 5000ms）。
     // 使用 ref 而非 state，避免每次更新都触发重渲染。

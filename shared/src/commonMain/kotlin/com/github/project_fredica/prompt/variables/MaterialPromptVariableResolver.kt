@@ -16,7 +16,11 @@ class MaterialPromptVariableResolver : PromptVariableResolver {
     /**
      * 解析 `material/{id}/{subPath}` 形式的 prompt 变量。
      *
-     * 支持的 `subPath`：`title`、`description`、`subtitles/{language}`。
+     * 支持的 `subPath`：
+     *   - `title`
+     *   - `description`
+     *   - `subtitles/{subtitleId}` — 统一字幕 ID（如 `asr.large-v3`、`bili.ai-zh`、`pp.stem`、`first`）
+     *
      * 未知路径或格式错误统一返回空串；预期失败打 warn，内部异常打 error。
      */
     override suspend fun resolve(key: String): String {
@@ -41,14 +45,19 @@ class MaterialPromptVariableResolver : PromptVariableResolver {
                 }
 
                 subPath.startsWith("subtitles/") -> {
-                    val lan = subPath.removePrefix("subtitles/").takeIf { it.isNotBlank() }.let {
-                        if (it == "first") null else it
+                    val subtitleId = subPath.removePrefix("subtitles/").trim()
+                    if (subtitleId.isBlank()) {
+                        logger.warn(
+                            "[MaterialPromptVariableResolver] subtitles/ 路径缺少 subtitleId key=$key",
+                            isHappensFrequently = false, err = null,
+                        )
+                        return ""
                     }
                     try {
-                        MaterialSubtitleService.fetchSubtitleText(materialId, lan) ?: ""
+                        MaterialSubtitleService.getSubtitleText(materialId, subtitleId) ?: ""
                     } catch (e: Throwable) {
                         logger.error(
-                            "[MaterialPromptVariableResolver] subtitle 读取失败 materialId=$materialId lan=$lan",
+                            "[MaterialPromptVariableResolver] subtitle 读取失败 materialId=$materialId subtitleId=$subtitleId",
                             e,
                         )
                         ""

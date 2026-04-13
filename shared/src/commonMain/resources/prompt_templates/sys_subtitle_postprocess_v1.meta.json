@@ -1,0 +1,6 @@
+{
+  "id": "sys_subtitle_postprocess_v1",
+  "name": "ASR 字幕后处理（默认）",
+  "description": "对 ASR 识别字幕进行翻译、纠错或精简等后处理，输出标准 SRT 格式。",
+  "category": "subtitle_postprocess"
+}

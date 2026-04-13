@@ -24,6 +24,7 @@ export interface BuildPromptWarning {
 
 export interface BuildPromptResult {
     text: string;
+    texts?: string[];
     charCount: number;
     blocked: boolean;
     warnings: BuildPromptWarning[];

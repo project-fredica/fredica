@@ -7,8 +7,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class TranscribePayload(
     @SerialName("audio_path") val audioPath: String,
-    val language: String? = null,
-    @SerialName("model_size") val modelSize: String? = null,
+    val language: String,
+    @SerialName("model_size") val modelSize: String,
     @SerialName("output_dir") val outputDir: String = "",
     @SerialName("chunk_index") val chunkIndex: Int = 0,
     @SerialName("total_chunks") val totalChunks: Int = 1,

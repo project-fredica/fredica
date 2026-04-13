@@ -1,5 +1,5 @@
 import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Eye, Play, Settings2, Sparkles, Cloud, CloudOff } from "lucide-react";
+import { AlertTriangle, Eye, Play, RefreshCw, Settings2, Sparkles, Cloud, CloudOff } from "lucide-react";
 import { print_error } from "~/util/error_handler";
 import {
     fetchLlmModelAvailability,
@@ -249,7 +249,8 @@ export function PromptBuilder(props: PromptBuilderProps) {
         { id: "render", label: "组件渲染", disabled: renderDisabled },
     ] as const;
 
-    function renderActions(includeEditorExtra: boolean) {
+    function renderActions(includeEditorExtra: boolean, forPreviewTab = false) {
+        const isPreviewRefresh = forPreviewTab && previewResult !== null;
         return (
             <>
                 {includeEditorExtra ? editorHeaderExtra : null}
@@ -261,9 +262,19 @@ export function PromptBuilder(props: PromptBuilderProps) {
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 >
-                    <Eye className="w-4 h-4" />
-                    预览
+                    {isPreviewRefresh ? <RefreshCw className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {isPreviewRefresh ? "刷新" : "预览"}
                 </button>
+                {forPreviewTab && generating ? (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("stream")}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors"
+                    >
+                        <Sparkles className="w-4 h-4 animate-spin" />
+                        回到 LLM 输出
+                    </button>
+                ) : null}
                 {onGenerate ? (
                     <div className="inline-flex rounded-lg overflow-hidden border border-gray-200">
                         <button
@@ -380,7 +391,7 @@ export function PromptBuilder(props: PromptBuilderProps) {
                     </PaneVisibility>
 
                     <PaneVisibility active={activeTab} tab="preview">
-                        <PromptPreviewPane result={previewResult} loading={previewLoading} actions={renderActions(false)} />
+                        <PromptPreviewPane result={previewResult} loading={previewLoading} actions={renderActions(false, true)} />
                     </PaneVisibility>
 
                     <PaneVisibility active={activeTab} tab="stream">

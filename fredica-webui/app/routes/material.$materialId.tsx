@@ -31,7 +31,7 @@ const TABS: readonly {
     end: boolean; also: string[];
 }[] = [
     { id: 'overview',  label: '概览',   to: '.',         icon: LayoutDashboard, end: true,  also: [] },
-    { id: 'subtitle',  label: '字幕提取', to: 'subtitle',  icon: Subtitles,       end: false, also: ['subtitle-bilibili'] },
+    { id: 'subtitle',  label: '字幕提取', to: 'subtitle',  icon: Subtitles,       end: false, also: ['subtitle-preview', 'subtitle-asr-postprocess'] },
     { id: 'summary',   label: '内容总结', to: 'summary',   icon: BrainCircuit,    end: false, also: [] },
     { id: 'diarize',   label: '声纹分类', to: 'diarize',   icon: Users,           end: false, also: [] },
     { id: 'frames',    label: '帧分析',  to: 'frames',    icon: Film,            end: false, also: [] },

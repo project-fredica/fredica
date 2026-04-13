@@ -25,8 +25,8 @@ private val logger = createLogger { "MaterialWorkflowServiceExt" }
  * 动态创建 N 个 TRANSCRIBE 任务（每个 chunk 一个），各自携带正确的
  * chunk_index / total_chunks / chunk_offset_sec。
  *
- * @param model    模型名称，为空时使用 "large-v3"
- * @param language 语言代码，为空时使用 "zh"
+ * @param model    模型名称，不能为空
+ * @param language 语言代码，为空时使用 "auto"（自动检测）
  */
 @Suppress("UnusedReceiverParameter")
 suspend fun MaterialWorkflowService.startWhisperTranscribe2(
@@ -43,8 +43,9 @@ suspend fun MaterialWorkflowService.startWhisperTranscribe2(
         }
     if (hasActive) return MaterialWorkflowService.StartResult.AlreadyActive
 
-    val modelName = model?.takeIf { it.isNotBlank() } ?: "large-v3"
-    val langCode = language?.takeIf { it.isNotBlank() } ?: "zh"
+    val modelName = model?.takeIf { it.isNotBlank() }
+        ?: error("model 不能为空，调用方必须显式指定模型名称")
+    val langCode = language?.takeIf { it.isNotBlank() } ?: "auto"
     logger.debug("startWhisperTranscribe2 materialId=${material.id} model=$modelName lang=$langCode allowDownload=$allowDownload")
     val mediaDir = AppUtil.Paths.materialMediaDir(material.id)
     val inputVideoPath = material.localVideoPath.ifBlank { mediaDir.resolve("video.mp4").absolutePath }

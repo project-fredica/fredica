@@ -20,6 +20,11 @@ package com.github.project_fredica.prompt
 //   S13 main() 返回 null → promptText = ""（包装层 null 转空串）
 //   S14 main() 返回数字 → promptText = String(number)
 //   S15 异步 main() 内部 rejection → error 非空，errorType = "script_error"
+//   A1  同步 main() 返回 string[] → promptTexts 正确，promptText = null
+//   A2  异步 main() 返回 string[] → promptTexts 正确
+//   A3  main() 返回空数组 → promptTexts = []
+//   A4  main() 返回单元素数组 → promptTexts.size = 1
+//   A5  main() 返回混合类型数组 → 所有元素转为 string
 //
 // 注意：
 //   - 所有脚本均不调用依赖 DB 的 getVar("material.title")，因此不需要初始化任何数据库服务。
@@ -223,5 +228,85 @@ class PromptScriptRuntimeTest {
         assertTrue(result.error.contains("async boom"), "error 应含异常消息，实际: ${result.error}")
         assertEquals("script_error", result.errorType)
         assertNull(result.promptText)
+    }
+
+    // ── 数组返回（分段 MapReduce）────────────────────────────────────────────────
+
+    @Test
+    fun `A1 sync main returning string array populates promptTexts`() {
+        val result = run("""
+            function main() {
+                return ['segment one', 'segment two', 'segment three'];
+            }
+        """.trimIndent())
+
+        assertNull(result.error, "预期无错误，但得到: ${result.error}")
+        assertNull(result.promptText, "数组模式下 promptText 应为 null")
+        assertNotNull(result.promptTexts, "promptTexts 应非空")
+        assertEquals(3, result.promptTexts!!.size)
+        assertEquals("segment one", result.promptTexts!![0])
+        assertEquals("segment two", result.promptTexts!![1])
+        assertEquals("segment three", result.promptTexts!![2])
+    }
+
+    @Test
+    fun `A2 async main returning string array populates promptTexts`() {
+        val result = run("""
+            async function main() {
+                return ['async seg 1', 'async seg 2'];
+            }
+        """.trimIndent())
+
+        assertNull(result.error, "预期无错误，但得到: ${result.error}")
+        assertNull(result.promptText, "数组模式下 promptText 应为 null")
+        assertNotNull(result.promptTexts)
+        assertEquals(2, result.promptTexts!!.size)
+        assertEquals("async seg 1", result.promptTexts!![0])
+        assertEquals("async seg 2", result.promptTexts!![1])
+    }
+
+    @Test
+    fun `A3 main returning empty array yields empty promptTexts`() {
+        val result = run("""
+            function main() {
+                return [];
+            }
+        """.trimIndent())
+
+        assertNull(result.error, "预期无错误，但得到: ${result.error}")
+        assertNull(result.promptText, "数组模式下 promptText 应为 null")
+        assertNotNull(result.promptTexts)
+        assertEquals(0, result.promptTexts!!.size)
+    }
+
+    @Test
+    fun `A4 main returning single element array yields promptTexts size 1`() {
+        val result = run("""
+            function main() {
+                return ['only one'];
+            }
+        """.trimIndent())
+
+        assertNull(result.error, "预期无错误，但得到: ${result.error}")
+        assertNull(result.promptText)
+        assertNotNull(result.promptTexts)
+        assertEquals(1, result.promptTexts!!.size)
+        assertEquals("only one", result.promptTexts!![0])
+    }
+
+    @Test
+    fun `A5 main returning mixed type array falls back to single promptText`() {
+        // JSON.stringify(['text', 42, true]) → '["text",42,true]'
+        // loadJsonModel<List<String>> 无法解析非字符串元素，回退为单段 promptText
+        val result = run("""
+            function main() {
+                return ['text', 42, true];
+            }
+        """.trimIndent())
+
+        assertNull(result.error, "预期无错误，但得到: ${result.error}")
+        assertNull(result.promptTexts, "混合类型数组无法解析为 List<String>，应回退")
+        assertNotNull(result.promptText, "应回退为 promptText")
+        assertTrue(result.promptText!!.startsWith("["), "promptText 应为原始 JSON 字符串")
     }
 }

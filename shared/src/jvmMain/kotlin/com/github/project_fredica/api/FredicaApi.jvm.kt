@@ -405,6 +405,11 @@ object FredicaApiJvmService {
                 if (!checkAuth()) return@post
                 PromptTemplatePreviewRoute.handle(this)
             }
+            // Prompt 脚本执行 + LLM 分段生成（SSE 流式，支持 string[] 分段 MapReduce）
+            post("/api/v1/PromptScriptGenerateRoute") {
+                if (!checkAuth()) return@post
+                PromptScriptGenerateRoute.handle(this)
+            }
 
             for (route in allRoutes) {
                 when (route.mode) {

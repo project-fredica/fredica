@@ -15,13 +15,14 @@ package com.github.project_fredica.prompt
 //
 // 脚本约定：
 //   - 必须定义 `async function main()` 或 `function main()`。
-//   - main() 返回字符串（Prompt 文本）。
+//   - main() 返回字符串（单段 Prompt）或字符串数组（分段 Prompt，引擎逐段请求 LLM）。
 //   - 可调用注入函数：getVar(key)、getSchemaHint(key)。
 //   - 可使用 console.log/warn/error 写入日志。
 // =============================================================================
 
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
+import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -209,6 +210,12 @@ object PromptScriptRuntime {
         var __error  = undefined;
         var __done   = false;
 
+        function __resolveValue(v) {
+            if (v == null) return '';
+            if (Array.isArray(v)) return JSON.stringify(v);
+            return String(v);
+        }
+
         $scriptCode
 
         if (typeof main !== 'function') {
@@ -219,11 +226,11 @@ object PromptScriptRuntime {
                 var __ret = main();
                 if (__ret !== null && __ret !== undefined && typeof __ret.then === 'function') {
                     __ret.then(
-                        function(v) { __result = (v == null ? '' : String(v)); __done = true; },
-                        function(e) { __error  = String(e);                    __done = true; }
+                        function(v) { __result = __resolveValue(v); __done = true; },
+                        function(e) { __error  = String(e);         __done = true; }
                     );
                 } else {
-                    __result = (__ret == null ? '' : String(__ret));
+                    __result = __resolveValue(__ret);
                     __done   = true;
                 }
             } catch(e) {
@@ -246,10 +253,25 @@ object PromptScriptRuntime {
                 promptText = null, error = error.asString(), errorType = "script_error", logs = logs,
             )
 
-            else -> PromptSandboxResult(
-                promptText = result?.takeIf { !it.isNull }?.asString(),
-                error = null, errorType = null, logs = logs,
-            )
+            else -> {
+                val raw = result?.takeIf { !it.isNull }?.asString()
+                // 检测数组返回：JSON.stringify(array) 产生 "[...]" 字符串
+                val promptTexts: List<String>? = raw?.takeIf { it.startsWith("[") }?.let {
+                    runCatching { it.loadJsonModel<List<String>>().getOrNull() }.getOrNull()
+                }
+                if (promptTexts != null) {
+                    logger.info("[PromptScriptRuntime] 脚本返回数组，共 ${promptTexts.size} 段")
+                    PromptSandboxResult(
+                        promptText = null, promptTexts = promptTexts,
+                        error = null, errorType = null, logs = logs,
+                    )
+                } else {
+                    PromptSandboxResult(
+                        promptText = raw,
+                        error = null, errorType = null, logs = logs,
+                    )
+                }
+            }
         }
     }
 }

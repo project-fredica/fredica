@@ -79,7 +79,11 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
     # ── 读取参数（在任何第三方 import 之前）─────────────────────────────────────
     audio_path: str = param["audio_path"]
     model_name: str = param.get("model_name", "large-v3")
-    language = param.get("language", None)
+    language_param = param.get("language", None)
+    if language_param == "auto":
+        language = None  # faster-whisper 期望 None 表示自动检测
+    else:
+        language = language_param
     device: str = param.get("device", "auto")
     compute_type: str = param.get("compute_type", "float16")
     allow_download: bool = bool(param.get("allow_download", False))
@@ -94,6 +98,7 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
     def _status(text: str):
         status_queue.put({"type": "status_text", "text": text})
 
+    _log("info", f"[whisper] 收到参数 language={language_param!r} effective={language!r} model={model_name} device={device} compute_type={compute_type}")
     _log("info", f"[whisper] 加载模型 model={model_name} device={device} compute_type={compute_type} allow_download={allow_download} proxy={proxy!r}")
 
     # ── 关键：monkey-patch 必须在 `from faster_whisper import ...` 之前执行 ────
@@ -328,7 +333,7 @@ def _faster_whisper_worker(param: dict, status_queue, cancel_event, resume_event
         t_trans = time.monotonic()
         segments_iter, info = model.transcribe(audio_path, language=language)
         duration = getattr(info, "duration", 0) or 0
-        _log("info", f"[whisper] 检测语言={info.language} 音频时长={duration:.1f}s")
+        _log("info", f"[whisper] 检测语言={info.language} 置信度={getattr(info, 'language_probability', 0):.2f} 音频时长={duration:.1f}s")
         _status(f"正在转录（语言：{info.language}，时长：{duration:.0f}s）…")
 
         collected_texts = []

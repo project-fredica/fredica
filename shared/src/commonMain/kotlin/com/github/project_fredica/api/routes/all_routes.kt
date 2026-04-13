@@ -40,6 +40,7 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     MaterialWorkflowStatusRoute,
     NetworkTestConfigRoute,
     NetworkTestRoute,
+    PostprocessSubtitleSaveRoute,
     PromptTemplateDeleteRoute,
     PromptTemplateGetRoute,
     PromptTemplateListRoute,

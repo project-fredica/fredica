@@ -1,5 +1,5 @@
 async function main() {
-  // subtitles/{lan}：指定语言代码（如 ai-zh、zh），first 表示取首条
+  // subtitles/first：取第一条可用字幕；如有 __subtitleId 可替换为 subtitles/__subtitleId
   const subtitle = await getVar("material/" + __materialId + "/subtitles/first")
   const schemaHint = await getSchemaHint("weben/summary")
   const title = await getVar("material/" + __materialId + "/title")

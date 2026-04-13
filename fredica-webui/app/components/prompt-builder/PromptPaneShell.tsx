@@ -15,7 +15,7 @@ export function PromptPaneShell({
                 <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
                 {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
             </div>
-            <div className="flex-1 min-h-0">{children}</div>
+            <div className="flex-1 min-h-0 flex flex-col">{children}</div>
         </div>
     );
 }

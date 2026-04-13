@@ -74,8 +74,8 @@ class MaterialWorkflowServiceAsrPayloadTest {
         updatedAt = 0L,
     )
 
-    private suspend fun startAndGetTasks(matId: String): Pair<Task, Task> {
-        val result = MaterialWorkflowService.startWhisperTranscribe(makeMaterial(matId), priority = TaskPriority.DEV_TEST_DEFAULT)
+    private suspend fun startAndGetTasks(matId: String, model: String = "large-v3"): Pair<Task, Task> {
+        val result = MaterialWorkflowService.startWhisperTranscribe(makeMaterial(matId), model = model, priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(result is MaterialWorkflowService.StartResult.Started, "应成功创建工作流")
         val tasks = TaskStatusService.listAll(materialId = matId, pageSize = 20).items
         val extract = tasks.first { it.type == "EXTRACT_AUDIO" }
@@ -132,8 +132,8 @@ class MaterialWorkflowServiceAsrPayloadTest {
 
         val payload = Json.parseToJsonElement(spawnTask.payload).jsonObject
 
-        assertEquals("zh", payload["language"]!!.jsonPrimitive.content, "默认语言应为 zh")
-        assertEquals("large-v3", payload["model_size"]!!.jsonPrimitive.content, "默认模型应为 large-v3")
+        assertEquals("auto", payload["language"]!!.jsonPrimitive.content, "未指定语言时应默认为 auto（自动检测）")
+        assertEquals("large-v3", payload["model_size"]!!.jsonPrimitive.content, "显式传入 large-v3 时 model_size 应为 large-v3")
         assertEquals(300, payload["chunk_duration_sec"]!!.jsonPrimitive.int, "chunk_duration_sec 应为 300")
         assertEquals(60, payload["overlap_sec"]!!.jsonPrimitive.int, "overlap_sec 应为 60")
         assertEquals(false, payload["allow_download"]!!.jsonPrimitive.boolean, "默认 allow_download 应为 false")
@@ -146,10 +146,10 @@ class MaterialWorkflowServiceAsrPayloadTest {
         val matId = "asr-p4-${System.nanoTime()}"
         val material = makeMaterial(matId)
 
-        val first = MaterialWorkflowService.startWhisperTranscribe(material, priority = TaskPriority.DEV_TEST_DEFAULT)
+        val first = MaterialWorkflowService.startWhisperTranscribe(material, model = "large-v3", priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(first is MaterialWorkflowService.StartResult.Started, "第一次应成功创建")
 
-        val second = MaterialWorkflowService.startWhisperTranscribe(material, priority = TaskPriority.DEV_TEST_DEFAULT)
+        val second = MaterialWorkflowService.startWhisperTranscribe(material, model = "large-v3", priority = TaskPriority.DEV_TEST_DEFAULT)
         assertTrue(second is MaterialWorkflowService.StartResult.AlreadyActive, "第二次应返回 AlreadyActive")
     }
 
