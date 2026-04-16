@@ -29,6 +29,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.util.UUID
+import com.github.project_fredica.auth.AuthRole
 
 /** 默认测试目标，NetworkTestRoute 和 NetworkTestConfigRoute 共用同一份。 */
 val NETWORK_TEST_DEFAULT_URLS = listOf(
@@ -42,6 +43,7 @@ val NETWORK_TEST_DEFAULT_URLS = listOf(
 object NetworkTestRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "触发网速和延迟测试（创建 NETWORK_TEST 流水线）"
+    override val minRole = AuthRole.TENANT
 
     /** 与 NetworkTestExecutor.Payload 结构相同，用于从请求体反序列化参数。 */
     @Serializable
@@ -50,7 +52,7 @@ object NetworkTestRoute : FredicaApi.Route {
         @SerialName("timeout_ms") val timeoutMs: Int = 5_000,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         // 解析请求体，失败时使用默认参数（允许 POST 空 body "{}"）
         val p = param.loadJsonModel<Param>().getOrElse { Param() }
         val nowSec       = System.currentTimeMillis() / 1000L

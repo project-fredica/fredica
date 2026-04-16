@@ -5,6 +5,7 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.weben.WebenConceptService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -24,9 +25,10 @@ object WebenConceptUpdateRoute : FredicaApi.Route {
     private val logger = createLogger { "WebenConceptUpdateRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "更新概念的定义/元数据（用户手动修正，PATCH 语义）"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<WebenConceptUpdateParam>().getOrThrow()
 
         logger.debug(

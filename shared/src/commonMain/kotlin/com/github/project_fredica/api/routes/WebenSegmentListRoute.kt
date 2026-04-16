@@ -7,6 +7,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenSegmentService
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.encodeToString
 
 /**
@@ -24,8 +25,9 @@ object WebenSegmentListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询视频来源的全部时间段（播放器时间轴数据，按 seq 升序）"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query    = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val sourceId = query["source_id"]?.firstOrNull()
 

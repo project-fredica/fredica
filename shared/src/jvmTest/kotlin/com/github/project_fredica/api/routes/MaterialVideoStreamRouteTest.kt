@@ -16,6 +16,7 @@ package com.github.project_fredica.api.routes
 // =============================================================================
 
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.auth.WebserverAuthTokenCache
 import com.github.project_fredica.db.MaterialCategoryDb
 import com.github.project_fredica.db.MaterialDb
 import com.github.project_fredica.db.MaterialService
@@ -62,6 +63,7 @@ class MaterialVideoStreamRouteTest {
         MaterialCategoryDb(db).initialize()
         MaterialService.initialize(materialDb)
         MaterialVideoService.initialize(materialVideoDb)
+        WebserverAuthTokenCache.init("test-token")
 
         MaterialVideoService.repo.upsertAll(
             listOf(
@@ -90,6 +92,7 @@ class MaterialVideoStreamRouteTest {
 
     @AfterTest
     fun tearDown() {
+        WebserverAuthTokenCache.invalidate()
         testMediaDir.deleteRecursively()
     }
 

@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.AppConfigService
@@ -21,10 +22,11 @@ import kotlinx.serialization.json.put
 object BilibiliCredentialCheckRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "已废弃：请使用 kmpJsBridge check_bilibili_credential"
+    override val minRole = AuthRole.GUEST
 
     private val logger = createLogger { "BilibiliCredentialCheckRoute" }
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         logger.warn("BilibiliCredentialCheckRoute 已废弃，请使用 kmpJsBridge check_bilibili_credential")
         return buildJsonObject {
             put("configured", false)

@@ -7,6 +7,7 @@ import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.encodeToString
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/WorkerTaskListRoute[?id=...&workflow_run_id=...&status=...&material_id=...&category_id=...&page=1&page_size=20&sort=desc]
@@ -26,8 +27,9 @@ import kotlinx.serialization.encodeToString
 object WorkerTaskListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "列出 Worker 任务（可按 id/workflow_run_id/status/material_id/category_id 过滤，支持分页和排序，含首次启动对账）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query         = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val taskId        = query["id"]?.firstOrNull()
         val workflowRunId = query["workflow_run_id"]?.firstOrNull()

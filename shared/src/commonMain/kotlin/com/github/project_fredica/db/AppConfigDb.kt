@@ -2,6 +2,7 @@ package com.github.project_fredica.db
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.github.project_fredica.auth.WebserverAuthTokenCache
 import org.ktorm.database.Database
 import org.ktorm.dsl.*
 import org.ktorm.schema.BaseTable
@@ -52,6 +53,24 @@ private val defaultKv: Map<String, String> = mapOf(
     "bilibili_ac_time_value" to "",
     "bilibili_buvid4" to "",
     "bilibili_proxy" to "",
+    // torch 检测结果
+    "torch_recommended_variant" to "",
+    "torch_recommendation_json" to "",
+    // torch 用户选择
+    "torch_variant" to "",
+    // torch 下载代理
+    "torch_download_use_proxy" to "false",
+    "torch_download_proxy_url" to "",
+    "torch_download_index_url" to "",
+    // torch 自定义版本
+    "torch_custom_packages" to "",
+    "torch_custom_index_url" to "",
+    "torch_custom_variant_id" to "",
+    // 认证相关
+    "webserver_auth_token" to "",
+    "instance_initialized" to "false",
+    "salt_imk_b64" to "",
+    "salt_auth_b64" to "",
 )
 
 private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
@@ -88,6 +107,19 @@ private fun AppConfig.toKvMap(): Map<String, String> = mapOf(
     "bilibili_ac_time_value" to bilibiliAcTimeValue,
     "bilibili_buvid4" to bilibiliBuvid4,
     "bilibili_proxy" to bilibiliProxy,
+    "torch_recommended_variant" to torchRecommendedVariant,
+    "torch_recommendation_json" to torchRecommendationJson,
+    "torch_variant" to torchVariant,
+    "torch_download_use_proxy" to torchDownloadUseProxy.toString(),
+    "torch_download_proxy_url" to torchDownloadProxyUrl,
+    "torch_download_index_url" to torchDownloadIndexUrl,
+    "torch_custom_packages" to torchCustomPackages,
+    "torch_custom_index_url" to torchCustomIndexUrl,
+    "torch_custom_variant_id" to torchCustomVariantId,
+    "webserver_auth_token" to webserverAuthToken,
+    "instance_initialized" to instanceInitialized,
+    "salt_imk_b64" to saltImkB64,
+    "salt_auth_b64" to saltAuthB64,
 )
 
 private fun Map<String, String>.toAppConfig() = AppConfig(
@@ -124,6 +156,19 @@ private fun Map<String, String>.toAppConfig() = AppConfig(
     bilibiliAcTimeValue = get("bilibili_ac_time_value") ?: "",
     bilibiliBuvid4 = get("bilibili_buvid4") ?: "",
     bilibiliProxy = get("bilibili_proxy") ?: "",
+    torchRecommendedVariant = get("torch_recommended_variant") ?: "",
+    torchRecommendationJson = get("torch_recommendation_json") ?: "",
+    torchVariant = get("torch_variant") ?: "",
+    torchDownloadUseProxy = get("torch_download_use_proxy")?.toBooleanStrictOrNull() ?: false,
+    torchDownloadProxyUrl = get("torch_download_proxy_url") ?: "",
+    torchDownloadIndexUrl = get("torch_download_index_url") ?: "",
+    torchCustomPackages = get("torch_custom_packages") ?: "",
+    torchCustomIndexUrl = get("torch_custom_index_url") ?: "",
+    torchCustomVariantId = get("torch_custom_variant_id") ?: "",
+    webserverAuthToken = get("webserver_auth_token") ?: "",
+    instanceInitialized = get("instance_initialized") ?: "false",
+    saltImkB64 = get("salt_imk_b64") ?: "",
+    saltAuthB64 = get("salt_auth_b64") ?: "",
 )
 
 class AppConfigDb(private val db: Database) : AppConfigRepo {
@@ -174,6 +219,7 @@ class AppConfigDb(private val db: Database) : AppConfigRepo {
                 }
             }
         }
+        WebserverAuthTokenCache.invalidate()
     }
 
     override suspend fun updateConfigPartial(kvPatch: Map<String, String>): Unit = withContext(Dispatchers.IO) {
@@ -186,6 +232,9 @@ class AppConfigDb(private val db: Database) : AppConfigRepo {
                     ps.executeUpdate()
                 }
             }
+        }
+        if ("webserver_auth_token" in kvPatch) {
+            WebserverAuthTokenCache.invalidate()
         }
     }
 }

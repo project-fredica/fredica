@@ -5,6 +5,7 @@ import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
@@ -14,8 +15,9 @@ object BilibiliVideoGetPagesRoute : FredicaApi.Route {
         get() = FredicaApi.Route.Mode.Post
     override val desc: String
         get() = "获取bilibili视频的全部分P列表"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoGetPagesParam>().getOrThrow()
         val body = buildJsonObject { put("bvid", p.bvid) }.toValidJson()
         val res = FredicaApi.PyUtil.post("/bilibili/video/get-pages/${p.bvid}", body.str)

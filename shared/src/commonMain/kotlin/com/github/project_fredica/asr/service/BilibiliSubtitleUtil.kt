@@ -1,6 +1,8 @@
 package com.github.project_fredica.asr.service
 
+import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.asr.model.BilibiliMaterialExtra
 import com.github.project_fredica.asr.model.BilibiliSubtitleBodyPayload
 import com.github.project_fredica.asr.model.BilibiliSubtitleMeta
@@ -13,7 +15,7 @@ import com.github.project_fredica.db.MaterialVideoService
  * 以及从本地缓存快速获取字幕文本等静态方法。
  */
 object BilibiliSubtitleUtil {
-
+    private val logger = createLogger()
     fun parseMateRaw(metaRaw: String): Result<BilibiliSubtitleMeta> =
         metaRaw.loadJsonModel<BilibiliSubtitleMeta>()
 
@@ -33,7 +35,8 @@ object BilibiliSubtitleUtil {
                 }
                 .joinToString("&")
             "${uri.host}${uri.rawPath ?: ""}${if (stableParams.isNotEmpty()) "?$stableParams" else ""}"
-        } catch (_: Exception) {
+        } catch (err: Exception) {
+            logger.warn("error on extract subtitle url key", isHappensFrequently = false, err)
             normalized
         }
     }

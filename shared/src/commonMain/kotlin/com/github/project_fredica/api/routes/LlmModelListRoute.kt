@@ -10,6 +10,7 @@ import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/LlmModelListRoute
@@ -20,6 +21,7 @@ import kotlinx.serialization.Serializable
 object LlmModelListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取可用 LLM 模型元数据列表"
+    override val minRole = AuthRole.GUEST
 
     private val logger = createLogger { "LlmModelListRoute" }
 
@@ -30,7 +32,7 @@ object LlmModelListRoute : FredicaApi.Route {
         val notes: String = "",
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val config = AppConfigService.repo.getConfig()
         val models = config.llmModelsJson.loadJsonModel<List<LlmModelConfig>>().getOrElse { emptyList() }
         val items = models

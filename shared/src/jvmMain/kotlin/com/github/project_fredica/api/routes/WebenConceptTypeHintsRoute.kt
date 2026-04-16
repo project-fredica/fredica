@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.prompt.schema_hints.WebenTypeHintResourceLoader
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -21,6 +22,7 @@ object WebenConceptTypeHintsRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取 Weben concept type hints（默认资源 + 现有值）"
+    override val minRole = AuthRole.GUEST
 
     @Serializable
     data class TypeHintItem(
@@ -30,7 +32,7 @@ object WebenConceptTypeHintsRoute : FredicaApi.Route {
         @SerialName("source_type") val sourceType: String,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val defaults = WebenTypeHintResourceLoader.loadDefaultConceptTypes()
         val defaultSet = defaults.toSet()
         val items = WebenTypeHintResourceLoader.loadMergedConceptTypes().map { type ->

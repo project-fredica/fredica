@@ -11,9 +11,12 @@ import {
   Wrench,
   BrainCircuit,
   AlertCircle,
+  Users,
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 import { useAppFetch } from '~/util/app_fetch';
+import { useAppConfig } from '~/context/appConfig';
+import { isSessionUser } from '~/util/auth';
 
 interface SidebarItemProps {
   uid: string;
@@ -32,7 +35,9 @@ const SideBarItem: React.FC<SidebarItemProps> = ({ uid, title, Icon, routeTo }) 
   const location = useLocation()
 
   let isActive = false
-  if (routeTo && location.pathname == routeTo) {
+  if (routeTo && location.pathname === routeTo) {
+    isActive = true
+  } else if (routeTo && location.pathname.startsWith(routeTo + '/')) {
     isActive = true
   }
   const parentClassName = `flex flex-row items-center text-sm px-4 py-2 font-medium rounded-lg ${isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`
@@ -54,10 +59,56 @@ const SideBarItem: React.FC<SidebarItemProps> = ({ uid, title, Icon, routeTo }) 
   )
 }
 
+const ROLE_LABEL: Record<string, string> = { guest: "游客", tenant: "用户", root: "管理员" };
+
+function UserFooter({ appConfig, setAppConfig, apiFetch }: {
+  appConfig: ReturnType<typeof useAppConfig>["appConfig"];
+  setAppConfig: ReturnType<typeof useAppConfig>["setAppConfig"];
+  apiFetch: ReturnType<typeof useAppFetch>["apiFetch"];
+}) {
+  const sessionUser = isSessionUser(appConfig);
+  const guestUser = !sessionUser && !!appConfig.webserver_auth_token;
+
+  if (!sessionUser && !guestUser) return null;
+
+  const handleLogout = async () => {
+    if (sessionUser) {
+      try {
+        await apiFetch("/api/v1/AuthLogoutRoute", { method: "POST" }, { silent: true });
+      } catch { /* ignore */ }
+      setAppConfig({ session_token: null, user_role: null, user_display_name: null, user_permissions: null });
+    } else {
+      setAppConfig({ webserver_auth_token: null, user_role: null });
+    }
+    window.location.href = "/login";
+  };
+
+  return (
+    <div className="p-3 border-t border-gray-100 flex items-center gap-2">
+      <div className="flex-1 overflow-hidden">
+        <div className="text-sm font-medium text-gray-800 truncate">
+          {sessionUser ? (appConfig.user_display_name ?? "用户") : "游客"}
+        </div>
+        {appConfig.user_role && (
+          <div className="text-xs text-gray-400">{ROLE_LABEL[appConfig.user_role] ?? appConfig.user_role}</div>
+        )}
+      </div>
+      <button
+        onClick={handleLogout}
+        title="退出登录"
+        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer"
+      >
+        <LogOut className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const location = useLocation();
   const [pendingRestartCount, setPendingRestartCount] = useState(0);
   const { apiFetch } = useAppFetch();
+  const { appConfig, setAppConfig } = useAppConfig();
 
   // Poll restart log pending_review_count
   useEffect(() => {
@@ -124,6 +175,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             </div>
             <SideBarItem uid='weben' Icon={BrainCircuit} title='知识网络' routeTo='/weben' />
             <SideBarItem uid='tools' Icon={Wrench} title='小工具' routeTo='/tools' />
+            {appConfig.user_role === 'root' && (
+              <SideBarItem uid='admin' Icon={Users} title='管理后台' routeTo='/admin/users' />
+            )}
+            <SideBarItem uid='home' Icon={Home} title='主页' routeTo='/' />
             {/* <SideBarItem uid='add-project' Icon={Plus} title='新建项目' routeTo='/create-project' /> */}
             {/* <SideBarItem uid='product-dashboard' Icon={Plus} title='管理产品' routeTo='/product-dashboard' /> */}
             {/* <SideBarItem uid='source-search' Icon={Search} title='搜索' />
@@ -199,20 +254,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Footer/User */}
-        {/* <div className="p-4 border-t border-gray-50 space-y-4">
-          <div className="bg-emerald-50 rounded-lg p-1">
-            <div className="text-[10px] text-emerald-600 font-bold text-center py-0.5 uppercase tracking-tighter">Free 计划</div>
-          </div>
-          <button className="w-full flex items-center justify-between p-2 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
-            <div className="flex items-center gap-3 overflow-hidden">
-              <img src="https://picsum.photos/seed/user/40/40" className="w-8 h-8 rounded-full border border-gray-200" alt="Avatar" />
-              <div className="text-left overflow-hidden">
-                <div className="text-sm font-semibold text-gray-900 truncate">TcSnZh _</div>
-              </div>
-            </div>
-            <ChevronDown className="w-4 h-4 text-gray-400" />
-          </button>
-        </div> */}
+        <UserFooter appConfig={appConfig} setAppConfig={setAppConfig} apiFetch={apiFetch} />
       </aside>
     </>
   );

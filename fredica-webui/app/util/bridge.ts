@@ -10,6 +10,11 @@
  * 调用方无需自行添加 try-catch 或重试逻辑。
  */
 
+/** 同步检测当前是否处于桌面端 WebView 环境（kmpJsBridge 已注入）。 */
+export function isBridgeAvailable(): boolean {
+    return typeof window !== "undefined" && !!window.kmpJsBridge;
+}
+
 /** bridge 对象不存在（非 WebView 环境，如普通浏览器）时抛出此错误。 */
 export class BridgeUnavailableError extends Error {
     constructor() {

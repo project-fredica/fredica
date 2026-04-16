@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.warn
@@ -34,9 +35,10 @@ object WebenExtractionRunSaveRoute : FredicaApi.Route {
     private val logger = createLogger { "WebenExtractionRunSaveRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "保存概念提取运行（含提取上下文 + 概念批量写入）"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<WebenExtractionRunSaveParam>().getOrThrow()
             logger.debug(

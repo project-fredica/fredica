@@ -175,7 +175,8 @@ function buildInitialValues(): Record<string, string | number | boolean> {
     }
     // B站账号字段（不在 settingSections 中，单独初始化）
     for (const key of ["bilibili_sessdata", "bilibili_bili_jct", "bilibili_buvid3", "bilibili_buvid4",
-                        "bilibili_dedeuserid", "bilibili_ac_time_value", "bilibili_proxy"]) {
+                        "bilibili_dedeuserid", "bilibili_ac_time_value", "bilibili_proxy",
+                        "webserver_auth_token"]) {
         values[key] = "";
     }
     return values;
@@ -1060,6 +1061,55 @@ export default function Component({ }: Route.ComponentProps) {
                     >
                         进入配置 →
                     </button>
+                </div>
+
+                {/* 游客访问令牌 */}
+                <div style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    overflow: "hidden",
+                }}>
+                    <div style={{
+                        padding: "14px 20px",
+                        borderBottom: "1px solid #f3f4f6",
+                        backgroundColor: "#f9fafb",
+                    }}>
+                        <h2 style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            游客访问令牌
+                        </h2>
+                        <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#9ca3af" }}>
+                            设置后，游客可使用此令牌以只读身份访问。留空则禁用游客访问。
+                        </p>
+                    </div>
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "16px",
+                        padding: "16px 20px",
+                    }}>
+                        <p style={{ margin: 0, fontSize: "14px", fontWeight: 500, color: "#374151", minWidth: "140px" }}>
+                            令牌
+                        </p>
+                        <input
+                            type="text"
+                            value={(values["webserver_auth_token"] as string) ?? ""}
+                            placeholder="留空则禁用游客访问"
+                            onChange={(e) => handleChange("webserver_auth_token", e.target.value)}
+                            style={{
+                                flex: 1,
+                                padding: "6px 10px",
+                                fontSize: "13px",
+                                color: "#374151",
+                                border: "1px solid #d1d5db",
+                                borderRadius: "8px",
+                                fontFamily: "monospace",
+                                boxSizing: "border-box",
+                            }}
+                        />
+                    </div>
                 </div>
 
                 <p style={{ textAlign: "center", fontSize: "12px", color: "#9ca3af", marginTop: "8px" }}>

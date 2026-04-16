@@ -9,6 +9,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.llm.LlmCapability
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -26,6 +27,7 @@ import kotlinx.serialization.json.put
 
 object LlmModelProbeRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "探测 LLM 模型功能参数"
 
     private val logger = createLogger { "LlmModelProbeRoute" }
@@ -51,7 +53,7 @@ object LlmModelProbeRoute : FredicaApi.Route {
         val error: String? = null,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<ProbeParam>().getOrThrow()
             val warnings = mutableListOf<String>()

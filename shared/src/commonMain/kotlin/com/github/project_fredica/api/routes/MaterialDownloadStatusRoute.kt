@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * POST /api/v1/MaterialDownloadStatusRoute
@@ -26,8 +27,9 @@ import kotlinx.serialization.Serializable
 object MaterialDownloadStatusRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "批量检查素材本地下载状态"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<MaterialDownloadStatusParam>().getOrThrow()
 
         val result = withContext(Dispatchers.IO) {

@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialCategoryService
@@ -29,9 +30,10 @@ fun bilibiliVideoId(bvid: String, page: Int = 1): String =
 
 object MaterialImportRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "将浏览到的视频元数据导入素材库"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = lenientJson.decodeFromString<MaterialImportParam>(param)
         require(p.categoryIds.isNotEmpty()) { "至少需要指定一个分类" }
 

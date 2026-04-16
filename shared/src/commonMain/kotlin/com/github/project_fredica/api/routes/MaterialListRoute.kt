@@ -6,12 +6,14 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.db.MaterialVideo
 import com.github.project_fredica.db.MaterialVideoService
+import com.github.project_fredica.auth.AuthRole
 
 object MaterialListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "列出素材库中的所有视频"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val videos: List<MaterialVideo> = MaterialVideoService.repo.listAll()
         return AppUtil.dumpJsonStr(videos).getOrThrow()
     }

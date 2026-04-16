@@ -15,6 +15,7 @@ package com.github.project_fredica.api.routes
 // =============================================================================
 
 import com.github.project_fredica.apputil.AppUtil
+import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.db.MaterialCategoryDb
 import com.github.project_fredica.db.MaterialDb
 import com.github.project_fredica.db.MaterialService
@@ -88,6 +89,8 @@ class MaterialVideoCheckRouteTest {
         testMediaDir.deleteRecursively()
     }
 
+    private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
+
     private fun queryJson(materialId: String?): String {
         if (materialId == null) return "{}"
         return """{"material_id":["$materialId"]}"""
@@ -98,7 +101,7 @@ class MaterialVideoCheckRouteTest {
         testMediaDir.resolve("video.mp4").writeBytes(ByteArray(2048))
         testMediaDir.resolve("transcode.done").createNewFile()
 
-        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId))
+        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId), noContext)
         val json = Json.parseToJsonElement(result.str).jsonObject
 
         assertEquals(true, json["ready"]?.jsonPrimitive?.boolean)
@@ -113,7 +116,7 @@ class MaterialVideoCheckRouteTest {
         testMediaDir.resolve("video.mp4").writeBytes(ByteArray(512))
         // transcode.done 不创建
 
-        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId))
+        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId), noContext)
         val json = Json.parseToJsonElement(result.str).jsonObject
 
         assertEquals(false, json["ready"]?.jsonPrimitive?.boolean)
@@ -124,7 +127,7 @@ class MaterialVideoCheckRouteTest {
 
     @Test
     fun `not ready - neither file exists`() = runBlocking {
-        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId))
+        val result = MaterialVideoCheckRoute.handler(queryJson(testMaterialId), noContext)
         val json = Json.parseToJsonElement(result.str).jsonObject
 
         assertEquals(false, json["ready"]?.jsonPrimitive?.boolean)
@@ -132,7 +135,7 @@ class MaterialVideoCheckRouteTest {
 
     @Test
     fun `error - missing material_id`() = runBlocking {
-        val result = MaterialVideoCheckRoute.handler(queryJson(null))
+        val result = MaterialVideoCheckRoute.handler(queryJson(null), noContext)
         val json = Json.parseToJsonElement(result.str).jsonObject
 
         assertEquals("MISSING_MATERIAL_ID", json["error"]?.jsonPrimitive?.content)
@@ -140,7 +143,7 @@ class MaterialVideoCheckRouteTest {
 
     @Test
     fun `error - material not found`() = runBlocking {
-        val result = MaterialVideoCheckRoute.handler(queryJson("no-such-id"))
+        val result = MaterialVideoCheckRoute.handler(queryJson("no-such-id"), noContext)
         val json = Json.parseToJsonElement(result.str).jsonObject
 
         assertEquals("MATERIAL_NOT_FOUND", json["error"]?.jsonPrimitive?.content)

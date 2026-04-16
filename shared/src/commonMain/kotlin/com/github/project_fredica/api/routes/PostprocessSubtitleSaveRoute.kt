@@ -23,6 +23,7 @@ import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.asr.srt.ParseSrtBlocksResult
 import com.github.project_fredica.asr.srt.SrtUtil
 import kotlinx.serialization.SerialName
@@ -34,6 +35,7 @@ object PostprocessSubtitleSaveRoute : FredicaApi.Route {
     private val logger = createLogger { "PostprocessSubtitleSaveRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "保存 LLM 后处理字幕到素材目录"
 
     @Serializable
@@ -43,7 +45,7 @@ object PostprocessSubtitleSaveRoute : FredicaApi.Route {
         @SerialName("srt_content") val srtContent: String,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<SaveParam>().getOrThrow()
             logger.debug("PostprocessSubtitleSaveRoute: materialId=${p.materialId} modelId=${p.modelId}")

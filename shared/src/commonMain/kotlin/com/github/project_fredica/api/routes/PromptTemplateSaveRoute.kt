@@ -29,6 +29,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.PromptTemplate
 import com.github.project_fredica.db.PromptTemplateService
 import kotlinx.serialization.SerialName
@@ -40,6 +41,7 @@ object PromptTemplateSaveRoute : FredicaApi.Route {
     private val logger = createLogger { "PromptTemplateSaveRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "新建或更新用户 Prompt 脚本模板"
 
     @Serializable
@@ -53,7 +55,7 @@ object PromptTemplateSaveRoute : FredicaApi.Route {
         @SerialName("based_on_template_id") val basedOnTemplateId: String? = null,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<SaveParam>().getOrThrow()
             logger.debug("PromptTemplateSaveRoute: id=${p.id} name=${p.name}")

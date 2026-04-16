@@ -36,6 +36,8 @@ class WebenConceptBatchImportRouteTest {
     private lateinit var conceptDb: WebenConceptDb
     private lateinit var sourceDb: WebenSourceDb
 
+    private fun ctx() = RouteContext(identity = null, clientIp = null, userAgent = null)
+
     @BeforeTest
     fun setup() = runBlocking {
         val tmpFile = File.createTempFile("weben_batch_import_", ".db").also { it.deleteOnExit() }
@@ -90,7 +92,8 @@ class WebenConceptBatchImportRouteTest {
                     {"name": "开漏输出", "types": ["术语"], "description": "一种输出模式", "aliases": []}
                   ]
                 }
-            """.trimIndent()
+            """.trimIndent(),
+            ctx()
         )
 
         val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
@@ -128,7 +131,8 @@ class WebenConceptBatchImportRouteTest {
                     {"name": "GPIO", "types": ["术语"], "description": "旧描述", "aliases": ["GPIO口"]}
                   ]
                 }
-            """.trimIndent()
+            """.trimIndent(),
+            ctx()
         )
 
         val result = WebenConceptBatchImportRoute.handler(
@@ -139,7 +143,8 @@ class WebenConceptBatchImportRouteTest {
                     {"name": "GPIO", "types": ["术语"], "description": "新描述", "aliases": ["General Purpose IO"]}
                   ]
                 }
-            """.trimIndent()
+            """.trimIndent(),
+            ctx()
         )
 
         val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
@@ -167,7 +172,8 @@ class WebenConceptBatchImportRouteTest {
                     {"name": "链表", "types": ["数据结构"], "description": "一种线性数据结构"}
                   ]
                 }
-            """.trimIndent()
+            """.trimIndent(),
+            ctx()
         )
 
         val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
@@ -188,7 +194,8 @@ class WebenConceptBatchImportRouteTest {
                     {"name": "GPIO", "types": ["   "], "description": "通用输入输出接口"}
                   ]
                 }
-            """.trimIndent()
+            """.trimIndent(),
+            ctx()
         )
         val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
         val error = payload.error
@@ -198,7 +205,7 @@ class WebenConceptBatchImportRouteTest {
 
     @Test
     fun `invalid json returns error field`() = runBlocking {
-        val result = WebenConceptBatchImportRoute.handler("not-json")
+        val result = WebenConceptBatchImportRoute.handler("not-json", ctx())
         val payload = result.str.loadJsonModel<BatchImportResponse>().getOrThrow()
         val error = payload.error
         assertNotNull(error)

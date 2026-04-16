@@ -11,6 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskService
 import kotlinx.serialization.encodeToString
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/WorkerTaskWfIdListRoute?task_type=DOWNLOAD_TORCH[&page=1&page_size=20]
@@ -25,8 +26,9 @@ object WorkerTaskWfIdListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "按任务类型查询去重 workflow_run_id 列表（分页，按最新任务时间降序）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val query    = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
             val taskType = query["task_type"]?.firstOrNull() ?: ""

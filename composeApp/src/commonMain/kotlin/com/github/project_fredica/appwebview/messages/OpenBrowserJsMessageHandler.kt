@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.IntentUtil
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.openBrowser
+import com.github.project_fredica.db.AppConfigService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 import io.ktor.http.URLBuilder
@@ -29,10 +30,11 @@ class OpenBrowserJsMessageHandler : MyJsMessageHandler() {
         if (model.addServerInfoParam) {
             val domainAndPort = FredicaApi.getNativeWebServerLocalDomainAndPort()
             if (domainAndPort !== null) {
+                val token = AppConfigService.repo.getConfig().webserverAuthToken
                 b.parameters["webserver_schema"] = "http"
                 b.parameters["webserver_domain"] = domainAndPort.first
                 b.parameters["webserver_port"] = domainAndPort.second.toString()
-                b.parameters["webserver_auth_token"] = "114514"
+                b.parameters["webserver_auth_token"] = token
             }
         }
         val u = b.build()

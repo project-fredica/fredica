@@ -13,6 +13,7 @@ import com.github.project_fredica.db.weben.WebenConceptService
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -145,6 +146,7 @@ object WebenSourceListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "来源库列表（可按 material_id 过滤，分页，含双层状态对账 + 首次启动保护）"
+    override val minRole = AuthRole.GUEST
 
     @Serializable
     data class WebenSourceListItem(
@@ -160,7 +162,7 @@ object WebenSourceListRoute : FredicaApi.Route {
         val limit: Int,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query      = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
         val limit      = query["limit"]?.firstOrNull()?.toIntOrNull()?.coerceIn(1, 200) ?: 20

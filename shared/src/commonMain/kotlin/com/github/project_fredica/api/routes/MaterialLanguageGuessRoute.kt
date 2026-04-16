@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.asr.route_ext.handler2
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * 根据素材标题和简介，用 LLM 猜测视频的主要语言。
@@ -19,6 +20,7 @@ import com.github.project_fredica.asr.route_ext.handler2
 object MaterialLanguageGuessRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "用 LLM 猜测素材视频的主要语言（ISO 639-1 代码或 auto），结果文件缓存到素材目录"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString = handler2(param)
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString = handler2(param)
 }

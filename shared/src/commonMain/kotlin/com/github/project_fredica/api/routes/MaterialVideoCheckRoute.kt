@@ -8,6 +8,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/MaterialVideoCheckRoute
@@ -27,8 +28,9 @@ import com.github.project_fredica.db.MaterialVideoService
 object MaterialVideoCheckRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "检查素材 video.mp4 是否就绪"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val materialId = p["material_id"]?.firstOrNull()
             ?: return buildJsonObject { put("error", "MISSING_MATERIAL_ID") }.toValidJson()

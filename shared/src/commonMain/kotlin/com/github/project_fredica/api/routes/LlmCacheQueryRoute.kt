@@ -6,14 +6,16 @@ import com.github.project_fredica.db.LlmResponseCacheService
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonNull
+import com.github.project_fredica.auth.AuthRole
 
 object LlmCacheQueryRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询 LLM 响应缓存"
+    override val minRole = AuthRole.TENANT
 
     private val logger = createLogger()
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse {
             return buildJsonObject { put("error", "invalid query params") }.toValidJson()
         }

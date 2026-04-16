@@ -1,6 +1,8 @@
 package com.github.project_fredica.api
 
+import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.api.routes.getCommonRoutes
+import com.github.project_fredica.auth.AuthRole
 
 interface FredicaApi {
     companion object {
@@ -27,7 +29,13 @@ interface FredicaApi {
         val desc: String
         val requiresAuth: Boolean get() = true
 
-        suspend fun handler(param: String): Any
+        /** 允许访问此路由的最低角色。每个路由必须显式声明。 */
+        val minRole: AuthRole
+
+        /** 需要的额外权限标签（仅对 TENANT/ROOT 生效）。 */
+        val requiredPermissions: Set<String> get() = emptySet()
+
+        suspend fun handler(param: String, context: RouteContext): Any
 
         companion object
     }

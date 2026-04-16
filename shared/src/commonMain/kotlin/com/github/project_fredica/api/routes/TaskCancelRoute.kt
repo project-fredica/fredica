@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
@@ -26,11 +27,12 @@ import kotlinx.serialization.Serializable
  */
 object TaskCancelRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "取消任务并级联取消同一 WorkflowRun 内所有活跃任务"
 
     private val activeStatuses = setOf("pending", "claimed", "running")
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<TaskCancelParam>().getOrThrow()
 
         // 查找目标任务，获取 workflowRunId 以便级联取消；首次访问时对父 WorkflowRun 进行对账

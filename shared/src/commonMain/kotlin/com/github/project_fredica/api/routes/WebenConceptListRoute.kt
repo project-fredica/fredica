@@ -8,6 +8,7 @@ import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenConcept
 import com.github.project_fredica.db.weben.WebenConceptService
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
@@ -33,6 +34,7 @@ object WebenConceptListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "概念分页查询（可按 source_id/material_id/concept_type 过滤，按 canonical_name 升序）"
+    override val minRole = AuthRole.GUEST
 
     @Serializable
     private data class PageResult(
@@ -42,7 +44,7 @@ object WebenConceptListRoute : FredicaApi.Route {
         val limit: Int,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query       = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val sourceId    = query["source_id"]?.firstOrNull()
         val materialId  = query["material_id"]?.firstOrNull()

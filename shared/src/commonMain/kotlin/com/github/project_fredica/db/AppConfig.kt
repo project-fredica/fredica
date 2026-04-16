@@ -55,6 +55,12 @@ data class AppConfig(
     @SerialName("torch_custom_packages") val torchCustomPackages: String = "",
     @SerialName("torch_custom_index_url") val torchCustomIndexUrl: String = "",
     @SerialName("torch_custom_variant_id") val torchCustomVariantId: String = "",
+    // 认证相关
+    // ⚠️ webserverAuthToken 由 AppConfigDb.updateConfig/updateConfigPartial 自动触发 WebserverAuthTokenCache.invalidate()
+    @SerialName("webserver_auth_token") val webserverAuthToken: String = "",
+    @SerialName("instance_initialized") val instanceInitialized: String = "false",
+    @SerialName("salt_imk_b64") val saltImkB64: String = "",
+    @SerialName("salt_auth_b64") val saltAuthB64: String = "",
     // Bilibili 登录态（留空则匿名请求；仅当出现"账号未登录"类错误时才需要配置）
     @SerialName("bilibili_sessdata") override val bilibiliSessdata: String = "",
     @SerialName("bilibili_bili_jct") override val bilibiliBiliJct: String = "",

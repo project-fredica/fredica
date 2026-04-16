@@ -1,5 +1,6 @@
 package com.github.project_fredica.api.routes
 
+import com.github.project_fredica.api.routes.RouteContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -15,12 +16,15 @@ class LlmModelProbeRouteTest {
     @Serializable
     private data class ProbeError(val error: String? = null)
 
+    private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
+
     @Test
     fun `probe returns error when base url is invalid`() = runBlocking {
         val result = LlmModelProbeRoute.handler(
             """
             {"provider_type":"OPENAI_COMPATIBLE","base_url":"","api_key":"x","model":"gpt-4o-mini"}
-            """.trimIndent()
+            """.trimIndent(),
+            noContext,
         )
         val error = Json.decodeFromString<ProbeError>(result.str)
         assertNotNull(error.error)
@@ -32,7 +36,8 @@ class LlmModelProbeRouteTest {
         val result = LlmModelProbeRoute.handler(
             """
             {"provider_type":"OPENAI_COMPATIBLE","base_url":"http://127.0.0.1:1/v1","api_key":"x","model":"qwen-128k"}
-            """.trimIndent()
+            """.trimIndent(),
+            noContext,
         )
         val root = Json.parseToJsonElement(result.str).jsonObject
         assertTrue(root.containsKey("error"))

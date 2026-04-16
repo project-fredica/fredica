@@ -2,6 +2,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.*
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.LlmResponseCacheService
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
@@ -21,11 +22,12 @@ data class LlmCacheInvalidateRequest(
 
 object LlmCacheInvalidateRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "废除 LLM 响应缓存"
 
     private val logger = createLogger()
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val req = param.loadJsonModel<LlmCacheInvalidateRequest>().getOrElse { e ->
             logger.error("请求体解析失败", e)
             return buildJsonObject { put("error", "invalid request body") }.toValidJson()

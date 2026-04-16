@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
@@ -20,9 +21,10 @@ import kotlinx.serialization.Serializable
  */
 object TaskPauseRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "暂停正在执行的下载任务"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<TaskPauseParam>().getOrThrow()
         val signalled = TaskPauseResumeService.pause(p.taskId)
         if (signalled) {

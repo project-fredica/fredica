@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.*
 import com.github.project_fredica.apputil.internalReadNetworkProxy
 import com.github.project_fredica.asr.service.BilibiliSubtitleBodyCacheService
 import com.github.project_fredica.asr.service.BilibiliSubtitleMetaCacheService
+import com.github.project_fredica.auth.*
 import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.llm.LlmRequestServiceHolder
@@ -127,6 +128,17 @@ object FredicaApiJvmService {
             // AppConfig（最先，其他服务可能依赖配置）
             AppConfigDb(database).also { it.initialize(); AppConfigService.initialize(it) }
                 .let { logger.debug("AppConfigService initialized, db path: $dbPath") }
+            // 预热 webserver_auth_token 缓存（避免 resolveIdentity 首次读 SQLite）
+            WebserverAuthTokenCache.init(AppConfigService.repo.getConfig().webserverAuthToken)
+            // Auth（user 表先于 auth_session，因外键引用）
+            UserDb(database).also        { it.initialize(); UserService.initialize(it) }
+            AuthSessionDb(database).also { it.initialize(); AuthSessionService.initialize(it) }
+            AuditLogDb(database).also    { it.initialize(); AuditLogService.initialize(it) }
+            // 邀请链接
+            GuestInviteLinkDb(database).also  { it.initialize(); GuestInviteLinkService.initialize(it) }
+            GuestInviteVisitDb(database).also { it.initialize(); GuestInviteVisitService.initialize(it) }
+            TenantInviteLinkDb(database).also { it.initialize(); TenantInviteLinkService.initialize(it) }
+            TenantInviteRegistrationDb(database).also { it.initialize(); TenantInviteRegistrationService.initialize(it) }
             // Material（顺序有依赖：base → video → category → task）
             MaterialDb(database).also          { it.initialize(); MaterialService.initialize(it) }
             MaterialVideoDb(database).also     { it.initialize(); MaterialVideoService.initialize(it) }
@@ -162,6 +174,10 @@ object FredicaApiJvmService {
 
         // LlmRequestService（依赖 LlmResponseCacheService，必须在 DB 初始化后）
         LlmRequestServiceHolder.instance = LlmRequestServiceImpl()
+
+        // AuthService / LoginRateLimiter（commonMain 路由通过 Holder 访问）
+        AuthServiceHolder.initialize(AuthService)
+        LoginRateLimiterHolder.initialize(LoginRateLimiter)
 
         CurrentInstanceHandler.server = embeddedServer(
             Netty, port = option.ktorServerPort.toInt(), host = option.ktorServerHost, module = {
@@ -370,7 +386,40 @@ object FredicaApiJvmService {
 
         suspend fun RoutingContext.handleRoute(route: FredicaApi.Route, getBody: suspend RoutingContext.() -> String) {
             if (route.requiresAuth && !checkAuth()) return
-            handleRouteResult(route) { route.handler(getBody()) }
+            val identity = call.attributes.getOrNull(AuthIdentityKey)
+            // 角色检查
+            if (route.minRole != AuthRole.GUEST) {
+                val roleLevel = when (identity) {
+                    is AuthIdentity.Authenticated -> identity.role.ordinal
+                    else -> AuthRole.GUEST.ordinal
+                }
+                if (roleLevel < route.minRole.ordinal) {
+                    call.respond(HttpStatusCode.Forbidden, mapOf("error" to "权限不足"))
+                    return
+                }
+            }
+            // 权限标签检查
+            if (route.requiredPermissions.isNotEmpty()) {
+                val userPerms = if (identity is AuthIdentity.Authenticated && identity.permissions.isNotBlank())
+                    identity.permissions.split(",").map { it.trim() }.toSet()
+                else emptySet()
+                val missing = route.requiredPermissions - userPerms
+                if (missing.isNotEmpty()) {
+                    call.respond(HttpStatusCode.Forbidden, mapOf("error" to "缺少权限: ${missing.joinToString()}"))
+                    return
+                }
+            }
+            val clientIp = call.request.header("X-Forwarded-For")?.split(",")?.firstOrNull()?.trim()
+                ?: call.request.header("X-Real-IP")?.trim()
+                ?: call.request.local.remoteAddress
+            val routeContext = RouteContext(
+                identity = identity,
+                clientIp = clientIp,
+                userAgent = call.request.userAgent(),
+            )
+            handleRouteResult(route) {
+                route.handler(getBody(), routeContext)
+            }
         }
 
         routing {
@@ -405,7 +454,7 @@ object FredicaApiJvmService {
                 if (!checkAuth()) return@post
                 PromptTemplatePreviewRoute.handle(this)
             }
-            // Prompt 脚本执行 + LLM 分段生成（SSE 流式，支持 string[] 分段 MapReduce）
+            // Prompt 脚本执行 + LLM 分段生成（SSE 流式，支持 string[] 分段）
             post("/api/v1/PromptScriptGenerateRoute") {
                 if (!checkAuth()) return@post
                 PromptScriptGenerateRoute.handle(this)
@@ -427,11 +476,15 @@ object FredicaApiJvmService {
 }
 
 
+val AuthIdentityKey = AttributeKey<AuthIdentity>("AuthIdentity")
+
 private suspend fun RoutingContext.checkAuth(): Boolean {
     val authHead = call.request.headers["Authorization"]
-    if (authHead.isNullOrBlank() || !authHead.startsWith("Bearer ")) {
+    val identity = AuthService.resolveIdentity(authHead)
+    if (identity == null) {
         call.respond(HttpStatusCode.Unauthorized)
         return false
     }
+    call.attributes.put(AuthIdentityKey, identity)
     return true
 }

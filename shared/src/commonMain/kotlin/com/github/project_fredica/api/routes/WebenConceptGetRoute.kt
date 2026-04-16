@@ -11,6 +11,7 @@ import com.github.project_fredica.db.weben.WebenConceptService
 import com.github.project_fredica.db.weben.WebenNoteService
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.put
 
 /**
@@ -27,8 +28,9 @@ object WebenConceptGetRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取概念详情（含来源关联、笔记）"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val id    = query["id"]?.firstOrNull()
 

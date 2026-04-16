@@ -5,6 +5,7 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
@@ -25,9 +26,10 @@ import java.util.UUID
  */
 object MaterialVideoTranscodeMp4Route : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "为指定素材启动 MP4 转码任务"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<MaterialVideoTranscodeMp4Param>().getOrThrow()
         val materialId = p.materialId
         val taskType = "TRANSCODE_MP4"

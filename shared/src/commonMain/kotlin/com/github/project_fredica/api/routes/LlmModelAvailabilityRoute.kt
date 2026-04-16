@@ -10,6 +10,7 @@ import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/LlmModelAvailabilityRoute
@@ -19,6 +20,7 @@ import kotlinx.serialization.Serializable
 object LlmModelAvailabilityRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取 LLM 模型可用性摘要"
+    override val minRole = AuthRole.GUEST
 
     private val logger = createLogger { "LlmModelAvailabilityRoute" }
 
@@ -30,7 +32,7 @@ object LlmModelAvailabilityRoute : FredicaApi.Route {
         @SerialName("selected_model_available") val selectedModelAvailable: Boolean,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val selectedModelId = query["selected_model_id"]?.firstOrNull()?.takeIf { it.isNotBlank() }
 

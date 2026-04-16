@@ -18,6 +18,7 @@ import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.PromptTemplateService
@@ -27,12 +28,13 @@ object PromptTemplateDeleteRoute : FredicaApi.Route {
     private val logger = createLogger { "PromptTemplateDeleteRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "删除用户 Prompt 脚本模板（系统模板不可删除）"
 
     @Serializable
     private data class DeleteParam(val id: String)
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<DeleteParam>().getOrThrow()
             logger.debug("PromptTemplateDeleteRoute: id=${p.id}")

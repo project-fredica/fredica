@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.asr.route_ext.handler2
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/MaterialSubtitleListRoute?material_id=xxx
@@ -15,6 +16,7 @@ import com.github.project_fredica.asr.route_ext.handler2
 object MaterialSubtitleListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询素材已缓存的字幕列表"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString = handler2(param)
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString = handler2(param)
 }

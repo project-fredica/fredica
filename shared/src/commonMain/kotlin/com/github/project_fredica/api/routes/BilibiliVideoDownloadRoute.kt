@@ -16,6 +16,7 @@ import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * 为指定 Bilibili 素材启动视频下载任务。
@@ -26,8 +27,9 @@ import java.util.UUID
 object BilibiliVideoDownloadRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "为指定 Bilibili 素材启动视频下载任务"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoDownloadParam>().getOrThrow()
         val materialId = p.materialId
         val taskType = "DOWNLOAD_BILIBILI_VIDEO"

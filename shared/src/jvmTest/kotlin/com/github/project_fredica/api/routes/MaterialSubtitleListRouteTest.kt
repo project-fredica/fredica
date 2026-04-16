@@ -21,6 +21,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.db.MaterialCategoryDb
+import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.db.MaterialDb
 import com.github.project_fredica.db.MaterialService
 import com.github.project_fredica.db.MaterialVideo
@@ -71,6 +72,8 @@ class MaterialSubtitleListRouteTest {
         mediaDir.deleteRecursively()
     }
 
+    private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
+
     private fun queryParam(id: String) = """{"material_id":["$id"]}"""
 
     private suspend fun insertMaterial(id: String = matId, sourceType: String = "local") {
@@ -97,7 +100,7 @@ class MaterialSubtitleListRouteTest {
 
     @Test
     fun `L1 - material not found returns empty list`() = runBlocking {
-        val result = MaterialSubtitleListRoute.handler(queryParam("no-such-id"))
+        val result = MaterialSubtitleListRoute.handler(queryParam("no-such-id"), noContext)
         assertEquals(0, parseArray(result).size)
     }
 
@@ -106,7 +109,7 @@ class MaterialSubtitleListRouteTest {
     @Test
     fun `L2 - non-bilibili material with no ASR result returns empty list`() = runBlocking {
         insertMaterial(sourceType = "local")
-        val result = MaterialSubtitleListRoute.handler(queryParam(matId))
+        val result = MaterialSubtitleListRoute.handler(queryParam(matId), noContext)
         assertEquals(0, parseArray(result).size)
     }
 
@@ -117,7 +120,7 @@ class MaterialSubtitleListRouteTest {
         insertMaterial(sourceType = "local")
         writeSrt()
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         assertEquals(1, arr.size, "应有 1 条 ASR 字幕")
         assertEquals("asr", arr[0].jsonObject["source"]?.jsonPrimitive?.content)
     }
@@ -128,7 +131,7 @@ class MaterialSubtitleListRouteTest {
     fun `L4 - bilibili material with no cache and no ASR returns empty list`() = runBlocking {
         insertMaterial(sourceType = "bilibili")
         // 不写 transcript.srt，不插入 bilibili 缓存
-        val result = MaterialSubtitleListRoute.handler(queryParam(matId))
+        val result = MaterialSubtitleListRoute.handler(queryParam(matId), noContext)
         assertEquals(0, parseArray(result).size)
     }
 
@@ -139,7 +142,7 @@ class MaterialSubtitleListRouteTest {
         insertMaterial(sourceType = "bilibili")
         writeSrt()
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         assertTrue(arr.any { it.jsonObject["source"]?.jsonPrimitive?.content == "asr" },
             "应包含 source=asr 条目")
     }
@@ -151,7 +154,7 @@ class MaterialSubtitleListRouteTest {
         insertMaterial(sourceType = "local")
         writeSrt()
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         assertEquals(1, arr.size)
         val item = arr[0].jsonObject
 
@@ -174,7 +177,7 @@ class MaterialSubtitleListRouteTest {
         val asrDir = mediaDir.resolve("asr_results").resolve("large-v3").also { it.mkdirs() }
         asrDir.resolve("transcript.srt").writeText("")
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         assertEquals(0, arr.size, "空 SRT 文件不应出现在列表中")
     }
 
@@ -186,7 +189,7 @@ class MaterialSubtitleListRouteTest {
         writeSrt(modelName = "large-v3")
         writeSrt(modelName = "medium")
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         val asrItems = arr.filter { it.jsonObject["source"]?.jsonPrimitive?.content == "asr" }
         assertEquals(2, asrItems.size, "应有 2 条 ASR 条目（large-v3 + medium）")
 
@@ -204,7 +207,7 @@ class MaterialSubtitleListRouteTest {
         modelDir.resolve("chunk_0000.srt").writeText("1\n00:00:00,000 --> 00:00:01,000\n测试\n\n")
         // 无 transcript.done
 
-        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId)))
+        val arr = parseArray(MaterialSubtitleListRoute.handler(queryParam(matId), noContext))
         assertEquals(1, arr.size, "应有 1 条 partial ASR 条目")
         val item = arr[0].jsonObject
         assertEquals("asr", item["source"]?.jsonPrimitive?.content)

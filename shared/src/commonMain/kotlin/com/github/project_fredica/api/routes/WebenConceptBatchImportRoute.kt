@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.loadJsonModel
@@ -30,9 +31,10 @@ object WebenConceptBatchImportRoute : FredicaApi.Route {
     private val logger = createLogger { "WebenConceptBatchImportRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "批量导入 Weben concepts"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             val p = param.loadJsonModel<WebenConceptBatchImportParam>().getOrThrow()
             logger.debug(

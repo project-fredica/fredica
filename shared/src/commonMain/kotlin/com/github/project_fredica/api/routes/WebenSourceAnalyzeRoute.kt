@@ -47,7 +47,7 @@ package com.github.project_fredica.api.routes
 //    override val mode = FredicaApi.Route.Mode.Post
 //    override val desc = "提交来源进行 AI 分析（FETCH_SUBTITLE → WEBEN_CONCEPT_EXTRACT）"
 //
-//    override suspend fun handler(param: String): ValidJsonString {
+//    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
 //        val p = param.loadJsonModel<WebenSourceAnalyzeParam>().getOrThrow()
 //        val cfg = AppConfigService.repo.getConfig()
 //        val nowSec = System.currentTimeMillis() / 1000L

@@ -26,6 +26,10 @@ function checkFixBugAdvice(data: unknown) {
     ).catch(() => {});
 }
 
+// ─── 401 重定向去重 ──────────────────────────────────────────────────────────
+// 多个并发请求同时收到 401 时，只执行一次跳转到 /login
+let _redirectingToLogin = false;
+
 // ─── 内部工具函数 ──────────────────────────────────────────────────────────────
 
 function getAppHost(
@@ -40,8 +44,12 @@ function getAppHost(
 }
 
 export function buildAuthHeaders(
-    token?: string | null,
+    tokenOrConfig?: string | null | { session_token: string | null; webserver_auth_token: string | null },
 ): Record<string, string> {
+    if (!tokenOrConfig) return {};
+    if (typeof tokenOrConfig === "string") return { Authorization: `Bearer ${tokenOrConfig}` };
+    // AppConfig 对象：session_token 优先，fallback webserver_auth_token
+    const token = tokenOrConfig.session_token ?? tokenOrConfig.webserver_auth_token;
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
 }
@@ -223,11 +231,13 @@ export function useAppFetch<J = JsonValue>(param?: {
 }) {
     const { allowNot2XX = false } = param ?? {};
 
-    const { appConfig, isStorageLoaded } = useAppConfig();
+    const { appConfig, isStorageLoaded, setAppConfig } = useAppConfig();
     const isStorageLoadedRef = useRef(isStorageLoaded);
     isStorageLoadedRef.current = isStorageLoaded;
-    const authTokenRef = useRef(appConfig.webserver_auth_token);
-    authTokenRef.current = appConfig.webserver_auth_token;
+    // session_token 优先，fallback webserver_auth_token
+    const effectiveToken = appConfig.session_token ?? appConfig.webserver_auth_token;
+    const authTokenRef = useRef(effectiveToken);
+    authTokenRef.current = effectiveToken;
     const [data, setData] = useState<J | null>(null);
     const [loading, setLoading] = useState<boolean>(() =>
         param?.appPath != null
@@ -235,7 +245,7 @@ export function useAppFetch<J = JsonValue>(param?: {
     const [error, setError] = useState<Error | null>(null);
     const [response, setResponse] = useState<Response | null>(null);
 
-    const authToken = appConfig.webserver_auth_token;
+    const authToken = effectiveToken;
     const host = getAppHost(
         appConfig.webserver_domain,
         appConfig.webserver_port,
@@ -284,6 +294,21 @@ export function useAppFetch<J = JsonValue>(param?: {
                 if (cancelled) return;
 
                 setResponse(resp);
+                // 401 全局处理
+                if (resp.status === 401 && !_redirectingToLogin) {
+                    if (appConfig.session_token) {
+                        // Session 用户：清除 + 跳转
+                        _redirectingToLogin = true;
+                        setAppConfig({ session_token: null, user_role: null, user_display_name: null, user_permissions: null });
+                        import("react-toastify").then(m => m.toast.warn("登录已过期，请重新登录")).catch(() => {});
+                        window.location.href = "/login";
+                        return;
+                    }
+                    if (appConfig.webserver_auth_token) {
+                        // 游客：交互式 toast，不跳转不清除
+                        import("~/util/guest_401_toast").then(m => m.showGuest401Toast()).catch(() => {});
+                    }
+                }
                 if (!resp.ok && !allowNot2XX) {
                     reportHttpError(`HTTP 请求失败 : ${appPath}`, resp);
                     try { checkFixBugAdvice(json_parse(await resp.text())); } catch {}
@@ -368,6 +393,21 @@ export function useAppFetch<J = JsonValue>(param?: {
                     signal,
                 );
                 clearTimer();
+                // 401 全局处理
+                if (resp.status === 401 && !_redirectingToLogin) {
+                    if (authTokenRef.current === appConfig.session_token && appConfig.session_token) {
+                        // Session 用户：清除 + 跳转
+                        _redirectingToLogin = true;
+                        setAppConfig({ session_token: null, user_role: null, user_display_name: null, user_permissions: null });
+                        import("react-toastify").then(m => m.toast.warn("登录已过期，请重新登录")).catch(() => {});
+                        window.location.href = "/login";
+                        throw new Error("HTTP 401");
+                    }
+                    if (appConfig.webserver_auth_token && !appConfig.session_token) {
+                        // 游客：交互式 toast，不跳转不清除
+                        import("~/util/guest_401_toast").then(m => m.showGuest401Toast()).catch(() => {});
+                    }
+                }
                 if (!resp.ok && !allowNot2XX) {
                     if (!silent) {
                         reportHttpError(`HTTP 请求失败 : ${path}`, resp);
@@ -398,7 +438,7 @@ export function useAppFetch<J = JsonValue>(param?: {
                 throw err;
             }
         },
-        [host, authToken],
+        [host, authToken, appConfig.session_token],
     );
 
     return { data, loading, error, response, apiFetch };

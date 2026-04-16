@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.python.TorchService
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/TorchInstallCheckRoute
@@ -23,8 +24,9 @@ import com.github.project_fredica.python.TorchService
 object TorchInstallCheckRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "检查 torch 安装状态"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val expectedVersion = p["expected_version"]?.firstOrNull() ?: ""
         return ValidJsonString(TorchService.check(expectedVersion))

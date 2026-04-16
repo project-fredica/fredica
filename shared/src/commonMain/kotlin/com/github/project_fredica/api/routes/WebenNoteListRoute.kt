@@ -7,6 +7,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenNoteService
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.encodeToString
 
 /**
@@ -19,8 +20,9 @@ object WebenNoteListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询某概念的笔记列表（按 updated_at 降序）"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query     = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val conceptId = query["concept_id"]?.firstOrNull()
 

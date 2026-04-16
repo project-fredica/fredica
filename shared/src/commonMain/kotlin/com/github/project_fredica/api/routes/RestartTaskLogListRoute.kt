@@ -7,6 +7,7 @@ import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.RestartTaskLogListResult
 import com.github.project_fredica.db.RestartTaskLogService
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/RestartTaskLogListRoute[?disposition=...&material_id=...]
@@ -22,8 +23,9 @@ import com.github.project_fredica.db.RestartTaskLogService
 object RestartTaskLogListRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询重启中断任务日志，含 pending_review 数量角标"
+    override val minRole = AuthRole.ROOT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query      = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val disposition = query["disposition"]?.firstOrNull()
         val materialId  = query["material_id"]?.firstOrNull()

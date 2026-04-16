@@ -12,8 +12,16 @@ interface AppConfig {
     webserver_port: string | null;
     /** 协议，null 时默认使用 "http"。 */
     webserver_schema: WebserverSchema | null;
-    /** Bearer Token 鉴权令牌，持久化到 localStorage。 */
+    /** Bearer Token 鉴权令牌（游客 token），持久化到 localStorage。 */
     webserver_auth_token: string | null;
+    /** 用户登录后的 session token（fredica_session:xxx 格式）。 */
+    session_token: string | null;
+    /** 当前用户角色。 */
+    user_role: "guest" | "tenant" | "root" | null;
+    /** 当前用户显示名。 */
+    user_display_name: string | null;
+    /** 当前用户权限标签列表。 */
+    user_permissions: string[] | null;
 }
 
 /** React Context 暴露的类型，通过 `useAppConfig()` 获取。 */
@@ -33,7 +41,7 @@ interface AppConfigContextType {
 /** localStorage 中存储配置的键名。 */
 const STORAGE_KEY = "fredica_app_config";
 
-const defaultConfig: AppConfig = { webserver_domain: null, webserver_port: null, webserver_schema: null, webserver_auth_token: null };
+const defaultConfig: AppConfig = { webserver_domain: null, webserver_port: null, webserver_schema: null, webserver_auth_token: null, session_token: null, user_role: null, user_display_name: null, user_permissions: null };
 
 const AppConfigContext = createContext<AppConfigContextType>({
     appConfig: defaultConfig,
@@ -66,9 +74,10 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
             if (stored) {
                 const parsed = json_parse<AppConfig>(stored);
                 setAppConfigState(parsed);
-                // 从 localStorage 恢复时也写入 Cookie，供 <video src> 使用
-                if (parsed.webserver_auth_token) {
-                    document.cookie = `fredica_token=${parsed.webserver_auth_token}; path=/; SameSite=Strict`;
+                // 从 localStorage 恢复时也写入 Cookie，供 <video src> 使用（session_token 优先）
+                const effectiveToken = parsed.session_token ?? parsed.webserver_auth_token;
+                if (effectiveToken) {
+                    document.cookie = `fredica_token=${effectiveToken}; path=/; SameSite=Strict`;
                 }
             }
         } catch {
@@ -96,6 +105,13 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
                 console.debug('[appConfig] saved to localStorage:', next);
             } catch { }
+            // 写入 fredica_token Cookie，供 <video src> 使用（session_token 优先）
+            const effectiveToken = next.session_token ?? next.webserver_auth_token;
+            if (effectiveToken) {
+                document.cookie = `fredica_token=${effectiveToken}; path=/; SameSite=Strict`;
+            } else {
+                document.cookie = `fredica_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+            }
             return next;
         });
     };

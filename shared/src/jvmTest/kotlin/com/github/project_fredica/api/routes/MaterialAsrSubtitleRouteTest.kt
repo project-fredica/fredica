@@ -22,6 +22,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.asr.model.AsrSubtitleResponse
 import com.github.project_fredica.asr.service.MaterialSubtitleService
 import java.io.File
@@ -51,10 +52,12 @@ class MaterialAsrSubtitleRouteTest {
         Unit
     }
 
+    private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
+
     private fun queryParam(id: String = matId) = """{"material_id":["$id"]}"""
 
     private suspend fun callHandler(id: String = matId): AsrSubtitleResponse {
-        val result = MaterialAsrSubtitleRoute.handler(queryParam(id))
+        val result = MaterialAsrSubtitleRoute.handler(queryParam(id), noContext)
         return result.str.loadJsonModel<AsrSubtitleResponse>().getOrThrow()
     }
 
@@ -229,7 +232,7 @@ test
 
     @Test
     fun `A9 - handler returns empty response when material_id is missing`() = runBlocking {
-        val result = MaterialAsrSubtitleRoute.handler("""{}""")
+        val result = MaterialAsrSubtitleRoute.handler("""{}""", noContext)
         val resp = result.str.loadJsonModel<AsrSubtitleResponse>().getOrThrow()
         assertEquals(0, resp.segments.size)
         assertFalse(resp.partial)
@@ -242,7 +245,7 @@ test
         """{"material_id":["$id"],"model_size":["$modelSize"]}"""
 
     private suspend fun callHandlerWithModel(id: String = matId, modelSize: String): AsrSubtitleResponse {
-        val result = MaterialAsrSubtitleRoute.handler(queryParamWithModel(id, modelSize))
+        val result = MaterialAsrSubtitleRoute.handler(queryParamWithModel(id, modelSize), noContext)
         return result.str.loadJsonModel<AsrSubtitleResponse>().getOrThrow()
     }
 

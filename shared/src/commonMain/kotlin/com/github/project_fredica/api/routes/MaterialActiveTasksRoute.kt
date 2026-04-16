@@ -11,6 +11,7 @@ import kotlinx.serialization.json.put
 import com.github.project_fredica.db.TaskStatusService
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/MaterialActiveTasksRoute?material_id=<id>
@@ -25,8 +26,9 @@ import kotlinx.serialization.json.jsonObject
 object MaterialActiveTasksRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询素材的任务状态（每种 type 取最新一条，含首次启动对账）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
             ?: return buildJsonObject { put("error", "material_id required") }.toValidJson()

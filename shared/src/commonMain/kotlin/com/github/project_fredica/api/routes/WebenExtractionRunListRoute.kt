@@ -8,6 +8,7 @@ import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenExtractionRunService
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
@@ -24,6 +25,7 @@ object WebenExtractionRunListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "列出某来源的概念提取历史（摘要）"
+    override val minRole = AuthRole.GUEST
 
     @Serializable
     private data class RunSummary(
@@ -43,7 +45,7 @@ object WebenExtractionRunListRoute : FredicaApi.Route {
         val limit: Int,
     )
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val sourceId = query["source_id"]?.firstOrNull()?.takeIf { it.isNotBlank() }
             ?: return buildJsonObject { put("error", "source_id 不能为空") }.toValidJson()

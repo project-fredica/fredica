@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toValidJson
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.asr.material_workflow_ext.handleWhisperTranscribe
 import com.github.project_fredica.db.MaterialVideoService
 import com.github.project_fredica.db.MaterialWorkflowService
@@ -23,9 +24,10 @@ import kotlinx.serialization.json.put
  */
 object MaterialWorkflowRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "素材工作流：按模板启动 WorkflowRun（支持 DAG 依赖）"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<MaterialWorkflowParam>().getOrThrow()
         val material = MaterialVideoService.repo.findById(p.materialId)
             ?: return buildJsonObject { put("error", "MATERIAL_NOT_FOUND") }.toValidJson()

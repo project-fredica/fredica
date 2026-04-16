@@ -3,6 +3,7 @@ package com.github.project_fredica.appwebview.messages
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
+import com.github.project_fredica.db.AppConfigService
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.multiplatform.webview.jsbridge.JsMessage
@@ -29,11 +30,12 @@ class GetServerInfoJsMessageHandler : MyJsMessageHandler() {
         callback: (String) -> Unit,
     ) {
         val domainAndPort = FredicaApi.getNativeWebServerLocalDomainAndPort()
+        val token = AppConfigService.repo.getConfig().webserverAuthToken
         callback(buildJsonObject {
             put("webserver_schema", "http")
             put("webserver_domain", domainAndPort?.first ?: "localhost")
             put("webserver_port", domainAndPort?.second?.toString() ?: "7631")
-            put("webserver_auth_token", "114514")
+            put("webserver_auth_token", token)
         }.toString())
     }
 }

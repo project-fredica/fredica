@@ -22,14 +22,16 @@ import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.db.PromptTemplateService
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.github.project_fredica.auth.AuthRole
 
 object PromptTemplateGetRoute : FredicaApi.Route {
     private val logger = createLogger { "PromptTemplateGetRoute" }
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "按 id 返回 Prompt 脚本模板完整内容（含 script_code）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             // GET 路由参数格式为 Map<String, List<String>>，取首元素
             val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }

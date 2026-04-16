@@ -26,6 +26,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.github.project_fredica.auth.AuthRole
 
 // 内置模板列表：由 BuiltInTemplateLoader 从 commonMain/resources/prompt_templates/ 加载。
 // 使用 lazy 确保首次访问时才触发 IO，避免静态初始化顺序问题。
@@ -36,8 +37,9 @@ object PromptTemplateListRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "返回系统内置 + 用户 Prompt 脚本模板列表（不含 script_code）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return try {
             // GET 路由参数格式为 Map<String, List<String>>，取 category 首元素
             val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }

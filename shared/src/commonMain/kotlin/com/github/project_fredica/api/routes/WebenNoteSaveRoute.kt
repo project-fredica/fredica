@@ -5,6 +5,7 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.weben.WebenNote
 import com.github.project_fredica.db.weben.WebenNoteService
 import kotlinx.serialization.SerialName
@@ -27,9 +28,10 @@ object WebenNoteSaveRoute : FredicaApi.Route {
     private val logger = createLogger { "WebenNoteSaveRoute" }
 
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "创建或更新概念笔记（按 id 幂等）"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<WebenNoteSaveParam>().getOrThrow()
         val nowSec = System.currentTimeMillis() / 1000L
 

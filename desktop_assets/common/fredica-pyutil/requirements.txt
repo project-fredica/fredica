@@ -12,3 +12,5 @@ psutil
 pynvml
 huggingface_hub
 pytest
+argon2-cffi
+cryptography

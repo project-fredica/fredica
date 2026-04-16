@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialWorkflowService
 import kotlinx.serialization.encodeToString
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/MaterialWorkflowStatusRoute?material_id=<id>[&mode=history&page=1&page_size=10]
@@ -31,8 +32,9 @@ import kotlinx.serialization.encodeToString
 object MaterialWorkflowStatusRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "查询素材的活跃/历史工作流（含任务列表）"
+    override val minRole = AuthRole.TENANT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query      = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val materialId = query["material_id"]?.firstOrNull()
             ?: return buildJsonObject { put("error", "MISSING_MATERIAL_ID") }.toValidJson()

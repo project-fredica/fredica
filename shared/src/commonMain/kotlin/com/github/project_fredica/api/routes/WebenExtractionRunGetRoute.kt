@@ -8,6 +8,7 @@ import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.db.weben.WebenExtractionRunService
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -22,8 +23,9 @@ object WebenExtractionRunGetRoute : FredicaApi.Route {
 
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取单次概念提取运行详情（含 prompt/output）"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrElse { emptyMap() }
         val id = query["id"]?.firstOrNull()?.takeIf { it.isNotBlank() }
             ?: return buildJsonObject { put("error", "id 不能为空") }.toValidJson()

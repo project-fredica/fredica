@@ -16,14 +16,16 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import com.github.project_fredica.auth.AuthRole
 
 object BilibiliVideoAiConclusionRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "获取 B 站视频 AI 总结"
+    override val minRole = AuthRole.TENANT
 
     private val logger = createLogger { "BilibiliVideoAiConclusionRoute" }
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoAiConclusionParam>().getOrThrow()
         logger.debug("请求 bvid=${p.bvid} page=${p.pageIndex} is_update=${p.isUpdate}")
 

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.put
 import com.github.project_fredica.db.RestartTaskLogService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * POST /api/v1/RestartTaskLogUpdateDispositionRoute
@@ -30,8 +31,9 @@ import kotlinx.serialization.Serializable
 object RestartTaskLogUpdateDispositionRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "更新重启中断任务日志的处置方式（dismissed / recreated）"
+    override val minRole = AuthRole.ROOT
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<RestartTaskLogUpdateDispositionParam>().getOrThrow()
 
         val disposition = if (p.newWorkflowRunId != null) "recreated" else "dismissed"

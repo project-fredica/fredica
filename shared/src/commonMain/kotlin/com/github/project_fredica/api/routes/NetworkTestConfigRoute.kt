@@ -7,6 +7,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
+import com.github.project_fredica.auth.AuthRole
 
 /**
  * GET /api/v1/NetworkTestConfigRoute
@@ -21,8 +22,9 @@ import kotlinx.serialization.json.put
 object NetworkTestConfigRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "获取网速测试默认配置（测试目标列表）"
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         return buildJsonObject {
             put("urls", buildJsonArray { NETWORK_TEST_DEFAULT_URLS.forEach { add(it) } })
         }.toValidJson()

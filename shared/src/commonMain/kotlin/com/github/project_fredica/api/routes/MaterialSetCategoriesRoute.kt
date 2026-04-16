@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialCategoryService
@@ -12,9 +13,10 @@ import kotlinx.serialization.Serializable
 
 object MaterialSetCategoriesRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
+    override val minRole = AuthRole.TENANT
     override val desc = "替换素材的分类关联（删除旧的、写入新的）"
 
-    override suspend fun handler(param: String): ValidJsonString {
+    override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<MaterialSetCategoriesParam>().getOrThrow()
         MaterialCategoryService.repo.setMaterialCategories(p.materialId, p.categoryIds)
         return buildJsonObject { put("updated", true) }.toValidJson()

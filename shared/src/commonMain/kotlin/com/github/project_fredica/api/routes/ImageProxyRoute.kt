@@ -4,6 +4,7 @@ import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJsonModel
+import com.github.project_fredica.auth.AuthRole
 import io.ktor.client.call.body
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
@@ -17,8 +18,9 @@ object ImageProxyRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Get
     override val desc = "图片跨站代理，缓存到本地后返回"
     override val requiresAuth = false
+    override val minRole = AuthRole.GUEST
 
-    override suspend fun handler(param: String): Any {
+    override suspend fun handler(param: String, context: RouteContext): Any {
         val query = param.loadJsonModel<Map<String, List<String>>>().getOrThrow()
         val url = query["url"]?.firstOrNull()
             ?: throw IllegalArgumentException("缺少 url 参数")
