@@ -6342,20 +6342,54 @@ FredicaApi.Route.Mode.Get -> {
 
 **选择 `fredica_media_token`**：最准确地描述用途——这是一个用于媒体资源访问的 Cookie 形式 token。
 
+#### 工作流程
+
+```mermaid
+sequenceDiagram
+    participant KT as Kotlin (composeApp)
+    participant WV as WebView (JS)
+    participant BR as Browser
+    participant KR as Ktor (MaterialVideoStreamRoute)
+
+    Note over WV: 启动时从 localStorage 恢复配置
+    WV->>WV: document.cookie = "fredica_media_token=<token>; path=/; SameSite=Strict"
+
+    WV->>KT: callBridge("get_server_info")
+    KT-->>WV: { webserver_auth_token: "<token>", ... }
+    WV->>WV: document.cookie = "fredica_media_token=<webserver_auth_token>; ..."
+
+    Note over WV: 用户登录后 setAppConfig({ session_token })
+    WV->>WV: document.cookie = "fredica_media_token=<session_token>; ..."
+    Note over WV: session_token 优先于 webserver_auth_token
+
+    Note over BR: 渲染 <video src="http://localhost:7631/api/v1/MaterialVideoStreamRoute?material_id=xxx" crossOrigin="use-credentials">
+    BR->>KR: GET /api/v1/MaterialVideoStreamRoute?material_id=xxx\nCookie: fredica_media_token=<token>
+    Note over BR: 浏览器自动携带同域 Cookie，无需手动设置 header
+
+    KR->>KR: token = cookies["fredica_media_token"]
+    KR->>KR: AuthService.resolveIdentity("Bearer <token>")
+    KR-->>BR: 206 Partial Content (video/mp4, Range 支持)
+```
+
+**关键点：**
+- Cookie 由前端 JS `document.cookie` 写入，**不经过 Set-Cookie 响应头**
+- `crossOrigin="use-credentials"` 确保跨域 `<video>` 请求也携带 Cookie
+- `session_token`（登录后）优先于 `webserver_auth_token`（guest 模式）
+- Range 请求（seek）由 Ktor PartialContent 插件自动处理，Cookie 随每次分片请求自动携带
+
 #### 涉及变更
 
 **后端**（1 处读取）：
-- `MaterialVideoStreamRoute.kt`：`call.request.cookies["fredica_token"]` → `call.request.cookies["fredica_media_token"]`
-- 归一化后此处由 `checkAuth()` 的 Cookie 回退逻辑处理，路由本身不再读 Cookie
+- `MaterialVideoStreamRoute.kt`：`call.request.cookies["fredica_media_token"]`
+- `checkAuth()` 不添加 Cookie fallback——`fredica_media_token` 仅供媒体路由使用
 
-**前端**（3 处写入）：
-- `fredica-webui/app/context/appConfig.tsx`：3 处 `fredica_token` → `fredica_media_token`
-  - localStorage 恢复时写入
-  - bridge 获取 server info 后写入
-  - `setAppConfig` 更新时写入
+**前端**（3 处写入，`appConfig.tsx`）：
+- localStorage 恢复时写入
+- bridge 获取 server info 后写入（`webserver_auth_token`）
+- `setAppConfig` 更新时写入（`session_token` 优先）
 
 **测试**（1 处）：
-- `MaterialVideoStreamRouteTest.kt`：`cookie("fredica_token", ...)` → `cookie("fredica_media_token", ...)`
+- `MaterialVideoStreamRouteTest.kt`：`cookie("fredica_media_token", ...)`
 
 #### 兼容性
 
