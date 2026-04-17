@@ -14,10 +14,13 @@ order: 140
 ```
 <type>(<scope>): <subject>
 
+<intro>
+
 <body>
 ```
 
 - **首行**：`type(scope): subject`，不超过 80 字符
+- **intro**：大型提交必须有 2-5 行的背景说明段落，解释"为什么做这件事"、"之前的状态"、"这次改变了什么"
 - **正文**：按模块分组，每条变更一行，以 `- ` 开头。请勿遗漏任何重大修改（尤其是工具模块的修改），你可以分很多很多模块。
 
 ---
@@ -72,6 +75,7 @@ docs(claude): ...
 - 用中文，简洁描述"做了什么"
 - 多个并列变更用 `+` 或 `·` 连接，不超过 80 字符
 - 不加句号
+- 大型提交可在括号内标注 Phase 编号，方便追溯
 
 ```
 # ✅ 好的例子
@@ -79,6 +83,7 @@ feat(worker): DAG 依赖失败级联取消 + MaterialGetRoute
 fix(python/bilibili): 修复凭据校验逻辑（check_valid 取反）
 refactor(webui): 抽取 WorkflowInfoPanel 组件，重构任务状态展示
 feat(asr+webui): 集成 faster-whisper ASR 支持，重构素材库组件
+feat(auth+routes): 完整认证系统（Phase 15）+ RouteContext 迁移（Phase 16.1）
 
 # ❌ 避免
 feat: update code
@@ -87,7 +92,38 @@ feat(worker): 修改了一些东西
 
 ---
 
-## 6. 正文格式
+## 6. Intro 段落（大型提交必须）
+
+大型提交（跨 3 个以上模块，或引入重要架构决策）在正文模块列表之前，先写 **2-5 行背景说明**，回答三个问题：
+
+1. **之前的状态**：改动前系统是什么样的？存在什么问题或缺失？
+2. **这次做了什么**：核心变更是什么，一句话概括？
+3. **为什么这样设计**：关键架构决策的理由（可用编号列表展开）
+
+如果变更量大，可在 intro 后附一行 `N files changed, M insertions(+)` 作为规模提示。
+
+```
+本次提交是 Fredica 项目认证体系从零到完整的里程碑。在此之前，所有 API
+路由均无鉴权，任何人都可以访问任意接口。本次提交引入了完整的多角色认证
+系统（GUEST / TENANT / ROOT），并同步完成了路由框架的 handler 签名统一
+（Phase 16.1），为后续路由归一化（Phase 16.2）打下基础。
+
+设计核心思路：
+  1. AuthIdentity sealed interface 作为"身份令牌"在整个请求生命周期流转，
+     dispatcher 层统一做 minRole 检查，路由 handler 无需重复鉴权。
+  2. AuthServiceApi 定义在 commonMain，实现在 jvmMain，原因是 Argon2 依赖
+     Python CryptoService，commonMain 无法直接调用 JVM 专属库。
+  3. Token 双模式：session token 对应登录用户，webserver_auth_token 对应游客，
+     resolveIdentity() 统一解析，上层路由无需感知区别。
+
+174 files changed, 19468 insertions(+), 162 deletions(-)
+```
+
+小型提交（1-2 个模块，改动直观）可省略 intro，直接写正文。
+
+---
+
+## 7. 正文格式
 
 正文按**模块**分组，每组一个二级标题（`type(scope):`），组内每条变更一行：
 
@@ -107,36 +143,69 @@ fix(bridge):
 
 变更描述格式：`- <类名/文件名>: <做了什么>`，说明具体改动而非泛泛描述。
 
----
-
-## 7. 大型提交示例
-
-跨多个模块的大型提交，首行用 `·` 列出主要模块，正文按模块展开：
-
-```
-feat: 启动恢复系统 + WebenSource 分析流水线 Phase C + Executor 链 + B站凭据 + 知识网络前端
-
-fix(bridge):
-- MyJsMessageHandler: 修复 kmpJsBridge 回调中单引号导致 JS 语法错误
-
-feat(worker):
-- Task: 新增 resetStaleTasks()、failOrphanedTasks()、snapshotNonTerminalTasks()
-- WorkerEngine: start() 改为 suspend，新增 runStartupRecovery() 五步恢复序列
-- RestartTaskLog: 新增数据模型 + DB 实现，记录每次启动恢复日志（可审计）
-- 新增测试：RestartTaskLogDbTest、TaskReconcileTest、WorkflowRunReconcileTest
-
-feat(executor/kotlin):
-- FetchSubtitleExecutor: Bilibili 字幕轨优先，SHA-256 缓存，Whisper ASR 兜底
-- WebenConceptExtractExecutor: 切块 → PromptGraph → 写 WebenConcept/Relation/Flashcard
-
-refactor(startup):
-- main.kt: 修正 runBlocking(Dispatchers.IO) 误用
-- FredicaApi.jvm.kt: 新增 engineScope 持久化；新增 onAppReady() 启动后台对账
-```
+**描述粒度要求：**
+- 说明**关键参数、常量、策略**（如"双重过期策略：expires_at 绝对 7 天 + last_accessed_at 活跃 24 小时"）
+- 说明**设计原因**（如"IP 上限更高因 NAT 环境多用户共享 IP"）
+- 说明**边界条件**（如"有注册记录的链接禁止删除，保护审计追踪"）
+- 不要只写"新增 XXX"，要写"新增 XXX，做了什么，为什么"
 
 ---
 
-## 8. 提交流程
+## 8. 大型提交示例
+
+参考提交 `68cc91e`（`feat(auth+routes): 完整认证系统（Phase 15）+ RouteContext 迁移（Phase 16.1）`）：
+
+```
+feat(auth+routes): 完整认证系统（Phase 15）+ RouteContext 迁移（Phase 16.1）
+
+本次提交是 Fredica 项目认证体系从零到完整的里程碑。在此之前，所有 API
+路由均无鉴权，任何人都可以访问任意接口。本次提交引入了完整的多角色认证
+系统（GUEST / TENANT / ROOT），并同步完成了路由框架的 handler 签名统一
+（Phase 16.1），为后续路由归一化（Phase 16.2）打下基础。
+
+设计核心思路：
+  1. AuthIdentity sealed interface 作为"身份令牌"在整个请求生命周期流转，
+     dispatcher 层（FredicaApi.jvm.kt）统一做 minRole 检查，路由 handler
+     无需重复鉴权，职责边界清晰。
+  2. AuthServiceApi 定义在 commonMain，实现在 jvmMain，原因是 Argon2 密码
+     哈希和 ECDSA 密钥对生成均依赖 Python CryptoService，commonMain 无法
+     直接调用 JVM 专属库。
+  3. Token 双模式：session token（fredica_session:<base64>）对应登录用户，
+     webserver_auth_token（UUID）对应游客，resolveIdentity() 统一解析两种
+     格式，上层路由无需感知区别。
+  4. RouteContext 替代原来的协程上下文注入（RouteAuthContext + RouteRequestContext），
+     改为显式 data class 参数传递，测试时直接构造，无需 withContext 包裹。
+
+174 files changed, 19468 insertions(+), 162 deletions(-)
+
+feat(auth/models):
+- AuthModels.kt: AuthRole 枚举（GUEST=0 < TENANT=1 < ROOT=2，ordinal 直接用于 minRole 比较）
+- AuthModels.kt: AuthIdentity sealed interface（RootUser / TenantUser / Guest），每次请求由 resolveIdentity() 解析
+- AuthSessionDb.kt: 双重过期策略（expires_at 绝对 7 天 + last_accessed_at 活跃 24 小时）；并发 session 上限 5，FIFO 淘汰最旧
+- LoginRateLimiter.kt: 内存滑动窗口，IP 维度（上限 10）× 用户名维度（上限 5）；IP 上限更高因 NAT 环境多用户共享 IP
+
+refactor(routes/context):
+- RouteContext.kt: 合并 RouteAuthContext + RouteRequestContext 为单一 data class；提供 authenticatedUser / userId 便捷属性
+- FredicaApi.jvm.kt: minRole 在 dispatcher 层统一强制，路由 handler 无需重复检查
+- 78 个路由 handler 签名统一为 handler(param, context: RouteContext)
+
+test(auth):
+- InviteIntegrationTest: 端到端邀请流程（创建链接 → 访问 → 注册 → 验证 max_uses 限制）
+- 合计约 690 个测试
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+**此提交的优点总结（写提交信息时参考）：**
+- intro 段落交代了"之前无鉴权"的背景，让读者立刻理解变更的重要性
+- "设计核心思路"编号列表解释了关键架构决策的原因，而不只是罗列做了什么
+- 正文每条描述都包含关键参数和设计理由（如"IP 上限更高因 NAT 环境"）
+- 模块分组细化到子层（`auth/models`、`auth/service`、`auth/db`），而非笼统的 `auth`
+- 测试条目说明了测试覆盖的场景，而不只是文件名
+
+---
+
+## 9. 提交流程
 
 ### 提交前：git diff 确认变更
 
@@ -173,7 +242,7 @@ git add -A && git commit -m "wip: ..."
 
 ---
 
-## 9. Co-Author 行
+## 10. Co-Author 行
 
 AI 辅助开发的提交在正文末尾加 Co-Author 行：
 
