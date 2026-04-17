@@ -6536,31 +6536,72 @@ WHERE m.id IN (SELECT material_id FROM material_user WHERE user_id = ?)
 
 #### 不在 17.x 范围内
 
-- `material_category` 用户化 → 18.x
-- `prompt_template` 用户化 → 20.x
-- LLM 调用计费 → 19.x
+- `material_category` 用户化 → 18.A
+- `prompt_template` 用户化 → 18.C
+- LLM 调用计费 → 18.B
 - 素材"公开/私有"标记 → `material_user` 的 `role` 字段已预留扩展
 
-### 18.x 分类用户化重构
+---
+
+## 十八、旧接口重构
+
+> 以下章节仅记录规划方向，本次不实施。依赖 16.x 路由框架重构完成后再开始。
+
+### 18.A 分类用户化重构
 
 分类与用户关联，支持公开分类，高级分类（平台数据同步如 Bilibili 收藏夹）。
 
 涉及路由：`MaterialCategory*Route`
 
-### 19.x LLM 调用收税体系
+### 18.B LLM 调用收税体系
 
 烧 token 的操作需租户上下文，为后期计费做准备。
 
 涉及路由：`MaterialLanguageGuessRoute`、`BilibiliVideoAiConclusionRoute` 等
 
-### 20.x 模板用户化重构
+### 18.C 模板用户化重构
 
 模板与用户关联，支持公开模板。
 
 涉及路由：`PromptTemplate*Route`
 
-### 21.x Weben 模块废弃
+### 18.D Weben 模块废弃
 
 整体移除或替换 Weben 模块。
 
 涉及路由：`Weben*Route`
+
+### 18.E MaterialWorkflowRoute 业务逻辑解耦
+
+#### 现状分析
+
+`MaterialWorkflowRoute`（`minRole = AuthRole.TENANT`）目前承担了两类完全不同的业务：
+
+1. **`bilibili_download_transcode`**：触发 Bilibili 视频下载 + 转码双任务流水线，属于"素材采集"语义
+2. **`whisper_transcribe`**：触发 Whisper ASR 转录任务，属于"字幕生成"语义
+
+两者共用同一个路由入口，仅靠 `template` 字段区分，导致：
+- 路由职责不清晰，难以独立演进（如 ASR 路由未来需要不同的参数校验、权限策略）
+- 前端调用方（`useVideoPlayerState.ts`、ASR 相关页面）需要了解 `template` 字段的枚举值，耦合度高
+- 测试时必须同时覆盖两条业务路径，测试用例难以聚焦
+
+#### 重构方向
+
+将 `MaterialWorkflowRoute` 拆分为两个独立路由：
+
+| 新路由 | 替代 template | 职责 |
+|--------|--------------|------|
+| `MaterialBilibiliDownloadTranscodeRoute` | `bilibili_download_transcode` | Bilibili 视频下载 + 转码流水线 |
+| `MaterialAsrTranscribeRoute` | `whisper_transcribe` | ASR 转录任务启动 |
+
+`MaterialWorkflowRoute` 本身可保留作为通用工作流触发入口（仅限内部/高级用途），或在迁移完成后废弃。
+
+#### 前端影响
+
+- `useVideoPlayerState.ts`：`startEncode()` 中 bilibili 分支改用 `MaterialBilibiliDownloadTranscodeRoute`
+- ASR 相关页面：改用 `MaterialAsrTranscribeRoute`
+- `materialWorkflowApi.ts`：`MATERIAL_WORKFLOW_API_PATH` 常量可拆分或废弃
+
+#### 实施前提
+
+依赖 16.x 路由框架重构完成（`RouteContext` 显式参数传递已落地）。

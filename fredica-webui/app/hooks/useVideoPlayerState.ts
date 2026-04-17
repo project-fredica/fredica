@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppConfig } from "~/context/appConfig";
 import { buildAuthHeaders } from "~/util/app_fetch";
+import { print_error, reportHttpError } from "~/util/error_handler";
 import { json_parse } from "~/util/json";
 import { MATERIAL_WORKFLOW_API_PATH, fetchActiveWorkflows, findActiveEncodeWorkflowRunId } from "~/util/materialWorkflowApi";
 
@@ -116,7 +117,7 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
         const port = appConfig.webserver_port ?? "7631";
         return `${schema}://${domain}:${port}`;
     })();
-    const authHeaders = buildAuthHeaders(appConfig.webserver_auth_token);
+    const authHeaders = buildAuthHeaders(appConfig);
 
     // ── 查询 MP4 就绪状态 ────────────────────────────────────────────────────
 
@@ -248,6 +249,12 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
                 headers: { ...authHeaders, "Content-Type": "application/json" },
                 body,
             });
+
+            if (!resp.ok) {
+                reportHttpError("启动转码失败", resp);
+                return;
+            }
+
             const json = await resp.json() as { workflow_run_id?: string; error?: string };
 
             if (json.error === "TASK_ALREADY_ACTIVE") {
@@ -263,11 +270,16 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
                         ["pending", "claimed", "running"].includes(t.status));
                     if (active) setWorkflowRunId(active.workflow_run_id);
                 }
+            } else if (json.error) {
+                print_error({ reason: `启动转码失败: ${json.error}` });
+                return;
             } else if (json.workflow_run_id) {
                 setWorkflowRunId(json.workflow_run_id);
             }
             setState("encoding");
-        } catch { /* ignore */ }
+        } catch (e) {
+            print_error({ reason: "启动转码请求异常", err: e });
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [materialId, serverBase, sourceType]);
 
