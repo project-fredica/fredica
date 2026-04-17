@@ -41,9 +41,12 @@ material_category_rel (M:N 关联)
 
 | 路由 | 方法 | minRole | 说明 |
 |------|------|---------|------|
-| `MaterialCategoryListRoute` | POST | GUEST | 列出所有分类 |
-| `MaterialCategoryCreateRoute` | POST | TENANT | 创建分类（name 去重） |
-| `MaterialCategoryDeleteRoute` | POST | TENANT | 删除分类及关联 |
+| `MaterialCategoryListRoute` | POST | GUEST | 分页+条件查询分类 |
+| `MaterialCategorySimpleCreateRoute` | POST | TENANT | 创建简易分类（name 去重） |
+| `MaterialCategorySimpleDeleteRoute` | POST | TENANT | 删除简易分类及关联 |
+| `MaterialCategorySimpleUpdateRoute` | POST | TENANT | 更新简易分类 |
+| `MaterialCategorySyncUpdateRoute` | POST | TENANT | 更新同步分类（仅 name/description） |
+| `MaterialCategorySyncDeleteRoute` | POST | TENANT | 删除同步分类（级联清理同步元数据） |
 | `MaterialSetCategoriesRoute` | POST | TENANT | 替换素材的分类关联 |
 
 ### 1.4 现有前端组件
@@ -509,101 +512,363 @@ Guest 用户（未登录/访客 token）：
 ```
 POST /api/v1/MaterialCategoryListRoute
 minRole: GUEST
-
-请求：{ "filter"?: "all" | "mine" | "public" }
-  - "all"（默认）：返回自己的全部分类 + 他人的 public 分类
-  - "mine"：仅返回自己的分类（不含同步分类）
-  - "public"：仅返回所有 public 分类（含自己的）
-
-响应：[{
-    id, owner_id, name, description, visibility,
-    allow_others_view, allow_others_add, allow_others_delete,
-    material_count, is_mine,
-    sync?: { platform_info_id, sync_type, platform_id, display_name,
-             last_synced_at, item_count, sync_state, subscriber_count },
-    created_at, updated_at
-}]
 ```
 
-- `is_mine`：布尔值，前端据此决定是否显示编辑/删除按钮
-- `sync`：如果该分类关联了同步源，附带平台信息摘要（`sync_type` + `platform_id` + `display_name`）
-- **GUEST 身份**：`filter` 参数被忽略，始终只返回 `visibility = 'public'` 的分类（含同步分类）
-- **`material_count` 计算**：LEFT JOIN `material_category_rel` 后 COUNT(DISTINCT material_id)，与当前实现一致
+**请求模型（`MaterialCategoryListRequest`）：**
 
-**实现要点（`MaterialCategoryDb.listAll` 重构）：**
+```kotlin
+@Serializable
+data class MaterialCategoryListRequest(
+    val filter: CategoryFilter = CategoryFilter.ALL,
+    val search: String? = null,
+    val offset: Int = 0,
+    val limit: Int = 50,
+) {
+    @Serializable
+    enum class CategoryFilter {
+        @SerialName("all")    ALL,      // 自己的全部分类 + 他人的 public 分类
+        @SerialName("mine")   MINE,     // 仅自己的简易分类（不含同步分类）
+        @SerialName("sync")   SYNC,     // 仅同步分类（自己创建的 + 他人 public 的）
+        @SerialName("public") PUBLIC,   // 仅 public 分类（含同步分类）
+    }
+}
+```
+
+**响应模型（`MaterialCategoryListResponse`）：**
+
+```kotlin
+@Serializable
+data class MaterialCategoryListResponse(
+    val items: List<MaterialCategory>,  // §9.1 模型
+    val total: Int,                     // 符合条件的总数（用于前端分页 UI）
+    val offset: Int,
+    val limit: Int,
+)
+```
+
+**请求示例：**
+
+```json
+{ "filter": "all", "search": "bilibili", "offset": 0, "limit": 20 }
+```
+
+**响应示例（基于 §9.1 `MaterialCategory` 模型）：**
+
+```json
+{
+    "items": [
+        {
+            "id": "cat-abc",
+            "owner_id": "user-1",
+            "name": "Bilibili 收藏夹",
+            "description": "自动同步的收藏夹",
+            "visibility": "public",
+            "allow_others_view": true,
+            "allow_others_add": false,
+            "allow_others_delete": false,
+            "material_count": 42,
+            "is_mine": true,
+            "sync": {
+                "id": "pi-xyz",
+                "sync_type": "bilibili_favorite",
+                "platform_config": { "type": "bilibili_favorite", "media_id": 12345 },
+                "display_name": "我的收藏夹",
+                "last_synced_at": 1700000000,
+                "item_count": 42,
+                "sync_state": "idle",
+                "last_error": null,
+                "fail_count": 0,
+                "subscriber_count": 2,
+                "my_subscription": {
+                    "id": "uc-001",
+                    "enabled": true,
+                    "cron_expr": "0 */6 * * *",
+                    "freshness_window_sec": 3600
+                }
+            },
+            "created_at": 1700000000,
+            "updated_at": 1700000000
+        },
+        {
+            "id": "cat-def",
+            "owner_id": "user-1",
+            "name": "学习资料",
+            "description": "",
+            "visibility": "private",
+            "allow_others_view": false,
+            "allow_others_add": false,
+            "allow_others_delete": false,
+            "material_count": 5,
+            "is_mine": true,
+            "sync": null,
+            "created_at": 1700000000,
+            "updated_at": 1700000000
+        }
+    ],
+    "total": 15,
+    "offset": 0,
+    "limit": 20
+}
+```
+
+**字段说明：**
+
+- `is_mine`：布尔值，前端据此决定是否显示编辑/删除按钮
+- `sync`：如果该分类关联了同步源，附带 `SyncPlatformInfoSummary`（§9.3）；简易分类此字段为 `null`
+- `search`：按分类名称模糊匹配（`LIKE '%keyword%'`），可选
+- **GUEST 身份**：`filter` 参数被忽略，始终只返回 `visibility = 'public'` 的分类（含同步分类），`is_mine` 始终为 `false`
+
+**分类类型区分策略：**
+
+所有分类类型（同步分类、简易分类）统一在一个分页接口返回，通过以下方式区分：
+1. **`sync` 字段是否为 `null`**：`null` 表示简易分类，非 `null` 表示同步分类
+2. **`is_mine` 字段**：区分自己的分类和他人的分类
+3. **`filter` 参数**：前端可按需筛选特定类型
+
+前端 `groupCategories()` 函数可据此三维度分组：
+- 我的同步分类：`is_mine && sync != null`
+- 我的简易分类：`is_mine && sync == null`
+- 他人的分类：`!is_mine`
+
+**`material_count` 计算**：LEFT JOIN `material_category_rel` 后 COUNT(DISTINCT material_id)，与当前实现一致。
+
+**实现要点（`MaterialCategoryDb.listForUser` 重构）：**
 
 当前实现是无参 `listAll()` 返回全部分类。重构后签名变为：
 
 ```kotlin
-fun listAll(userId: String?, filter: String = "all"): List<MaterialCategory>
+fun listForUser(
+    userId: String?,
+    filter: CategoryFilter = CategoryFilter.ALL,
+    search: String? = null,
+    offset: Int = 0,
+    limit: Int = 50,
+): Pair<List<MaterialCategory>, Int>  // (分页结果, 总数)
 ```
 
-SQL 查询逻辑：
-1. `filter = "mine"`：`WHERE owner_id = :userId AND id NOT IN (SELECT category_id FROM material_category_sync_platform_info)`
-2. `filter = "public"`：`WHERE visibility = 'public'`
-3. `filter = "all"`：`WHERE owner_id = :userId OR visibility = 'public'`
-4. `userId = null`（Guest）：等同于 `filter = "public"`
+SQL 查询逻辑（WHERE 子句按 filter 动态拼接）：
 
-`is_mine` 字段在 SQL 中计算：`owner_id = :userId AS is_mine`。
+1. `filter = ALL`：`WHERE owner_id = :userId OR visibility = 'public'`
+2. `filter = MINE`：`WHERE owner_id = :userId AND id NOT IN (SELECT category_id FROM material_category_sync_platform_info)`
+3. `filter = SYNC`：`WHERE id IN (SELECT category_id FROM material_category_sync_platform_info) AND (owner_id = :userId OR visibility = 'public')`
+4. `filter = PUBLIC`：`WHERE visibility = 'public'`
+5. `userId = null`（Guest）：无论 filter 值，等同于 `WHERE visibility = 'public'`
 
-`sync` 字段通过 LEFT JOIN `material_category_sync_platform_info` 获取，非 null 时构造 `SyncPlatformInfoSummary`。
+搜索条件追加：`AND name LIKE '%' || :search || '%'`（search 非 null 时）。
 
-#### `MaterialCategoryCreateRoute`（重构）
+分页：`ORDER BY created_at DESC LIMIT :limit OFFSET :offset`。
+
+总数查询：同条件 `SELECT COUNT(*) ...`（不含 LIMIT/OFFSET）。
+
+`is_mine` 字段在 SQL 中计算：`CASE WHEN owner_id = :userId THEN 1 ELSE 0 END AS is_mine`。
+
+`sync` 字段通过 LEFT JOIN `material_category_sync_platform_info` 获取，非 null 时构造 `SyncPlatformInfoSummary`（§9.3）。
+
+#### `MaterialCategorySimpleCreateRoute`（重构，原 `MaterialCategoryCreateRoute`）
 
 ```
-POST /api/v1/MaterialCategoryCreateRoute
+POST /api/v1/MaterialCategorySimpleCreateRoute
 minRole: TENANT
-
-请求：{ "name": "...", "description"?: "...", "visibility"?: "private" | "public" }
-响应：{ id, owner_id, name, description, visibility, ... }
-
-错误：
-  - "分类名称不能为空"
-  - "分类名称过长"（>64 字符）
-  - "同名分类已存在"（同一用户下）
 ```
 
+**请求模型（`MaterialCategorySimpleCreateRequest`）：**
+
+```kotlin
+@Serializable
+data class MaterialCategorySimpleCreateRequest(
+    val name: String,
+    val description: String = "",
+    val visibility: String = "private",  // "private" | "public"
+)
+```
+
+**响应**：`MaterialCategory`（§9.1 模型，`sync` 字段为 `null`）
+
+**请求示例：**
+
+```json
+{ "name": "学习资料", "description": "前端学习", "visibility": "private" }
+```
+
+**响应示例：**
+
+```json
+{
+    "id": "cat-new",
+    "owner_id": "user-1",
+    "name": "学习资料",
+    "description": "前端学习",
+    "visibility": "private",
+    "allow_others_view": false,
+    "allow_others_add": false,
+    "allow_others_delete": false,
+    "material_count": 0,
+    "is_mine": true,
+    "sync": null,
+    "created_at": 1700000000,
+    "updated_at": 1700000000
+}
+```
+
+**错误：**
+- `"分类名称不能为空"`
+- `"分类名称过长"`（>64 字符）
+- `"同名分类已存在"`（同一用户下）
+
+**实现要点：**
 - `owner_id` 自动从 `context.userId!!` 获取，前端不传
 - `visibility` 默认 `private`
 - **当前 `createOrGet` 语义变更**：旧实现用 `INSERT OR IGNORE` + 按 name 查回，全局唯一。重构后改为 `INSERT OR IGNORE` + 按 `(owner_id, name)` 查回，同一用户下唯一。如果 name 已存在，返回已有分类（幂等）
 
-#### `MaterialCategoryUpdateRoute`（新增）
+#### `MaterialCategorySimpleUpdateRoute`（新增）
 
 ```
-POST /api/v1/MaterialCategoryUpdateRoute
+POST /api/v1/MaterialCategorySimpleUpdateRoute
 minRole: TENANT
-
-请求：{ "id": "...", "name"?: "...", "description"?: "...", "visibility"?: "private" | "public" }
-响应：{ success: true, category: { id, owner_id, name, ... } }
-
-错误：
-  - "分类不存在"
-  - "权限不足"（非 owner 且非 ROOT）
-  - "同名分类已存在"（同一用户下改名冲突）
-  - "同步分类不能设为私有"（关联了 material_category_sync_platform_info 的分类强制 public）
-  - "分类名称不能为空"
-  - "分类名称过长"（>64 字符）
 ```
+
+**请求模型（`MaterialCategorySimpleUpdateRequest`）：**
+
+```kotlin
+@Serializable
+data class MaterialCategorySimpleUpdateRequest(
+    val id: String,
+    val name: String? = null,
+    val description: String? = null,
+    val visibility: String? = null,  // "private" | "public"
+)
+```
+
+**响应模型：**
+
+```kotlin
+@Serializable
+data class MaterialCategoryUpdateResponse(
+    val success: Boolean = true,
+    val category: MaterialCategory,
+)
+```
+
+**请求示例：**
+
+```json
+{ "id": "cat-abc", "name": "新名称", "visibility": "public" }
+```
+
+**响应示例：**
+
+```json
+{
+    "success": true,
+    "category": {
+        "id": "cat-abc",
+        "owner_id": "user-1",
+        "name": "新名称",
+        "description": "",
+        "visibility": "public",
+        "allow_others_view": false,
+        "allow_others_add": false,
+        "allow_others_delete": false,
+        "material_count": 5,
+        "is_mine": true,
+        "sync": null,
+        "created_at": 1700000000,
+        "updated_at": 1700000001
+    }
+}
+```
+
+**错误：**
+- `"分类不存在"`
+- `"权限不足"`（非 owner 且非 ROOT）
+- `"同名分类已存在"`（同一用户下改名冲突）
+- `"该分类是同步分类，请使用 MaterialCategorySyncUpdateRoute"`（目标分类关联了 `material_category_sync_platform_info`）
+- `"分类名称不能为空"`
+- `"分类名称过长"`（>64 字符）
 
 **实现要点：**
 - 只更新请求中提供的字段（partial update），未提供的字段保持不变
 - 权限检查：`category.ownerId == context.userId || context.identity is RootUser`
-- 同步分类检查：`SELECT COUNT(*) FROM material_category_sync_platform_info WHERE category_id = :id`，如果 > 0 且请求 `visibility = "private"`，拒绝
+- **同步分类拦截**：`SELECT COUNT(*) FROM material_category_sync_platform_info WHERE category_id = :id`，如果 > 0，直接拒绝并提示使用 `MaterialCategorySyncUpdateRoute`
 - 改名时检查 `UNIQUE(owner_id, name)` 约束：先查询是否存在同名分类（排除自身 id）
 
-#### `MaterialCategoryDeleteRoute`（重构）
+#### `MaterialCategorySyncUpdateRoute`（新增）
 
 ```
-POST /api/v1/MaterialCategoryDeleteRoute
+POST /api/v1/MaterialCategorySyncUpdateRoute
+minRole: TENANT
+```
+
+**请求模型（`MaterialCategorySyncUpdateRequest`）：**
+
+```kotlin
+@Serializable
+data class MaterialCategorySyncUpdateRequest(
+    val id: String,                    // 分类 ID（非 platform_info ID）
+    val name: String? = null,
+    val description: String? = null,
+    // visibility 不可修改：同步分类强制 public
+)
+```
+
+**响应模型**：同 `MaterialCategoryUpdateResponse`
+
+**请求示例：**
+
+```json
+{ "id": "cat-sync-1", "name": "B站收藏夹（重命名）" }
+```
+
+**响应示例：**
+
+```json
+{
+    "success": true,
+    "category": {
+        "id": "cat-sync-1",
+        "owner_id": "user-1",
+        "name": "B站收藏夹（重命名）",
+        "description": "",
+        "visibility": "public",
+        "allow_others_view": true,
+        "allow_others_add": false,
+        "allow_others_delete": false,
+        "material_count": 42,
+        "is_mine": true,
+        "sync": { "..." },
+        "created_at": 1700000000,
+        "updated_at": 1700000001
+    }
+}
+```
+
+**错误：**
+- `"分类不存在"`
+- `"权限不足"`（非 owner 且非 ROOT）
+- `"该分类不是同步分类"`（目标分类未关联 `material_category_sync_platform_info`）
+- `"同名分类已存在"`（同一用户下改名冲突）
+- `"分类名称不能为空"`
+- `"分类名称过长"`（>64 字符）
+
+**实现要点：**
+- **同步分类校验**：`SELECT COUNT(*) FROM material_category_sync_platform_info WHERE category_id = :id`，如果 = 0，拒绝并提示使用 `MaterialCategorySimpleUpdateRoute`
+- **visibility 不可修改**：同步分类强制 `public`，请求中不接受 `visibility` 字段
+- 权限检查：`category.ownerId == context.userId || context.identity is RootUser`
+- 只更新 `name` 和 `description`（partial update）
+
+#### `MaterialCategorySimpleDeleteRoute`（重构，原 `MaterialCategoryDeleteRoute`）
+
+```
+POST /api/v1/MaterialCategorySimpleDeleteRoute
 minRole: TENANT
 
 请求：{ "id": "..." }
-响应：{ success: true }
+响应：{ "success": true }
 
 错误：
   - "分类不存在"
   - "权限不足"（非 owner 且非 ROOT）
-  - "请先删除关联的同步源"（有 material_category_sync_platform_info 关联时不允许直接删除分类）
+  - "该分类是同步分类，请使用 MaterialCategorySyncDeleteRoute"
 ```
 
 **实现要点：**
@@ -611,15 +876,55 @@ minRole: TENANT
 当前 `deleteById(id)` 无权限检查，直接删除。重构后：
 
 ```kotlin
-fun deleteById(id: String, userId: String, isRoot: Boolean) {
+fun simpleDeleteById(id: String, userId: String, isRoot: Boolean) {
     // 1. 查询分类是否存在
     // 2. 权限检查：owner_id == userId || isRoot
-    // 3. 检查是否有关联的 material_category_sync_platform_info
+    // 3. 同步分类拦截：SELECT COUNT(*) FROM material_category_sync_platform_info WHERE category_id = :id
+    //    如果 > 0，拒绝并提示使用 MaterialCategorySyncDeleteRoute
     // 4. 删除 material_category_rel WHERE category_id = :id
     // 5. 删除 material_category WHERE id = :id
     // 注意：不删除 material 本身
 }
 ```
+
+#### `MaterialCategorySyncDeleteRoute`（新增）
+
+```
+POST /api/v1/MaterialCategorySyncDeleteRoute
+minRole: TENANT
+
+请求：{ "id": "..." }
+响应：{ "success": true }
+
+错误：
+  - "分类不存在"
+  - "权限不足"（非 owner 且非 ROOT）
+  - "该分类不是同步分类"
+```
+
+**实现要点：**
+
+同步分类删除需要级联清理同步相关数据：
+
+```kotlin
+fun syncDeleteById(id: String, userId: String, isRoot: Boolean) {
+    // 1. 查询分类是否存在
+    // 2. 权限检查：owner_id == userId || isRoot
+    // 3. 同步分类校验：SELECT COUNT(*) FROM material_category_sync_platform_info WHERE category_id = :id
+    //    如果 = 0，拒绝并提示使用 MaterialCategorySimpleDeleteRoute
+    // 4. 删除 material_category_sync_item WHERE platform_info_id IN (SELECT id FROM material_category_sync_platform_info WHERE category_id = :id)
+    // 5. 删除 material_category_sync_user_config WHERE platform_info_id IN (SELECT id FROM material_category_sync_platform_info WHERE category_id = :id)
+    // 6. 删除 material_category_sync_platform_info WHERE category_id = :id
+    // 7. 删除 material_category_rel WHERE category_id = :id
+    // 8. 删除 material_category WHERE id = :id
+    // 注意：不删除 material 本身，仅解除关联
+}
+```
+
+**与 `MaterialCategorySimpleDeleteRoute` 的区别：**
+- Simple 版本拒绝删除同步分类（引导用户使用 Sync 版本）
+- Sync 版本级联删除 `sync_platform_info`、`sync_user_config`、`sync_item` 等同步元数据
+- 两者都删除 `material_category_rel` 关联和 `material_category` 记录本身
 
 #### `MaterialSetCategoriesRoute`（重构）
 
@@ -1912,7 +2217,7 @@ user_config C: cron = "0 3 * * *", freshness_window = 0 (不使用)
 
 #### 7.2.1 分组逻辑
 
-前端从 `MaterialCategoryListRoute` 获取完整分类列表后，按以下规则分组：
+前端从 `MaterialCategoryListRoute`（分页查询，`filter: "all"`）获取分类列表后，按以下规则分组：
 
 ```typescript
 // 分组函数（纯函数，在 useMemo 中调用）
@@ -1993,7 +2298,8 @@ interface SyncUserConfigUpdate {
 ```
 重命名流程：
   右键 → "重命名" → pill 变为 input（预填当前名称）→ Enter/blur 提交
-  → POST MaterialCategoryUpdateRoute { id, name: newName }
+  → POST MaterialCategorySimpleUpdateRoute { id, name: newName }
+    （如果是同步分类，改为 POST MaterialCategorySyncUpdateRoute { id, name: newName }）
   → 成功：刷新分类列表
   → 失败（同名）：toast 提示 "同名分类已存在"
 
@@ -2003,13 +2309,15 @@ interface SyncUserConfigUpdate {
   → 允许他人添加素材 (allow_others_add): ✅/❌
   → 允许他人删除素材 (allow_others_delete): ✅/❌
   → 任一开关变更时：
-    POST MaterialCategoryUpdateRoute { id, allow_others_view, allow_others_add, allow_others_delete }
+    POST MaterialCategorySimpleUpdateRoute { id, allow_others_view, allow_others_add, allow_others_delete }
   → 成功：刷新分类列表，🔒 图标更新
   → 注意：关闭 allow_others_view 时自动关闭 allow_others_add 和 allow_others_delete
+  → 注意：同步分类不显示此菜单项（同步分类强制 public，不可修改 visibility）
 
 删除流程：
   右键 → "删除" → 确认弹窗（"删除后分类关联将被移除，素材本身不会被删除"）
-  → POST MaterialCategoryDeleteRoute { id }
+  → 简易分类：POST MaterialCategorySimpleDeleteRoute { id }
+  → 同步分类：POST MaterialCategorySyncDeleteRoute { id }（确认弹窗额外提示"同步元数据将被清除"）
   → 成功：刷新分类列表；如果当前筛选的就是被删分类，清除 category search param
 ```
 
@@ -2027,11 +2335,11 @@ interface SyncUserConfigUpdate {
 
 ```
 CategoryPickerModal mount
-  → POST MaterialCategoryListRoute {}        // 无 filter，获取全部分类
+  → POST MaterialCategoryListRoute { filter: "all" }  // 无 filter，获取全部分类
   → 渲染 checkbox 列表
 
 用户点击"新建分类"
-  → POST MaterialCategoryCreateRoute { name } // 无 owner_id
+  → POST MaterialCategorySimpleCreateRoute { name } // 无 owner_id
   → 追加到列表并自动勾选
 
 用户点击"确认"
@@ -2053,7 +2361,7 @@ CategoryPickerModal mount
   → 渲染 checkbox 列表
 
 用户点击"新建分类"
-  → POST MaterialCategoryCreateRoute { name }           // owner_id 由后端注入
+  → POST MaterialCategorySimpleCreateRoute { name }     // owner_id 由后端注入
   → 追加到列表并自动勾选（返回的 is_mine=true 保证一致性）
 
 用户点击"确认"
@@ -2063,7 +2371,7 @@ CategoryPickerModal mount
 **过滤保证：** `filter: "mine"` 在后端排除了同步分类和他人分类，前端无需额外过滤。即使后端返回了意外数据，前端也可以用 `categories.filter(c => c.is_mine && !c.sync)` 做防御性过滤。
 
 **创建新分类时自动关联 owner：**
-- `MaterialCategoryCreateRoute` 从 `RouteAuthContext` 获取当前用户 ID 作为 `owner_id`
+- `MaterialCategorySimpleCreateRoute` 从 `RouteAuthContext` 获取当前用户 ID 作为 `owner_id`
 - 前端无需传 `owner_id`，后端自动注入
 - 创建成功后返回完整的 `MaterialCategory` 对象（含 `is_mine: true`），前端直接追加到列表
 
@@ -2758,7 +3066,7 @@ SyncUserConfigService（新增）
 
 #### 8.2.4 路由层
 
-现有 4 个路由采用 handler2 委托模式（见 §12.3.2）。Route 对象留在 `api/routes/`，业务逻辑迁移到 `material_category/route_ext/`：
+现有路由采用 handler2 委托模式（见 §12.3.2）。Route 对象留在 `api/routes/`，业务逻辑迁移到 `material_category/route_ext/`：
 
 ```kotlin
 // api/routes/MaterialCategoryListRoute.kt — 瘦壳
@@ -2864,6 +3172,7 @@ data class MaterialCategory(
     @SerialName("owner_id") val ownerId: String,
     val name: String,
     val description: String,
+    val visibility: String = "private",  // "private" | "public"
     @SerialName("allow_others_view") val allowOthersView: Boolean = false,
     @SerialName("allow_others_add") val allowOthersAdd: Boolean = false,
     @SerialName("allow_others_delete") val allowOthersDelete: Boolean = false,
@@ -3037,7 +3346,7 @@ fun SyncPlatformInfoRecord.toSummary(
 1. 创建 `material_category/` 目录结构（`db/`、`model/`、`service/`、`route_ext/`）
 2. 拆分 `db/MaterialCategory.kt` → `model/MaterialCategory.kt` + `db/MaterialCategoryRepo.kt` + `service/MaterialCategoryService.kt`
 3. 迁移 `db/MaterialCategoryDb.kt` → `material_category/db/MaterialCategoryDb.kt`
-4. 提取 4 个路由 handler → `route_ext/` handler2 扩展函数
+4. 提取路由 handler → `route_ext/` handler2 扩展函数
 5. 更新所有 import（`FredicaApi.jvm.kt`、Route 文件）
 6. 编译验证 + 运行现有测试
 7. 删除旧文件
@@ -3048,8 +3357,9 @@ fun SyncPlatformInfoRecord.toSummary(
 1. 迁移 `material_category` 表结构（添加 `owner_id` + ACL 列 `allow_others_view`/`allow_others_add`/`allow_others_delete`，重建唯一约束）
 2. 重构 `MaterialCategoryDb`：所有方法加 `userId` 参数，`listForUser` 按 ACL 过滤
 3. 重构 `MaterialCategoryRepo` 接口
-4. 重构 4 个现有路由：注入用户身份，按 ACL 权限过滤
-5. 新增 `MaterialCategoryUpdateRoute`
+4. 重构现有路由：注入用户身份，按 ACL 权限过滤；`MaterialCategoryCreateRoute` → `MaterialCategorySimpleCreateRoute`；`MaterialCategoryDeleteRoute` → `MaterialCategorySimpleDeleteRoute`
+5. 新增 `MaterialCategorySimpleUpdateRoute` + `MaterialCategorySyncUpdateRoute`
+6. 新增 `MaterialCategorySyncDeleteRoute`（级联删除同步元数据）
 
 **后端 — 同步源基础设施：**
 6. 新增 `material_category_sync_platform_info` 和 `material_category_sync_user_config` 和 `material_category_sync_item` 表
@@ -3265,16 +3575,21 @@ private val guestIdentity = AuthIdentity.Guest
 
 | ID | 测试 | 预期 |
 |----|------|------|
-| **MaterialCategoryCreateRoute** | | |
+| **MaterialCategorySimpleCreateRoute** | | |
 | RP1 | TENANT 创建自己的分类 | 成功，owner_id = 当前用户 |
 | RP2 | GUEST 创建分类 | `{ error: "..." }`（minRole = TENANT） |
 | RP3 | 创建时 name 为空 | `{ error: "分类名称不能为空" }` |
 | RP4 | 创建时 name 与自己已有分类重复 | `{ error: "分类名称已存在" }` |
-| **MaterialCategoryDeleteRoute** | | |
-| RP5 | TENANT 删除自己的分类 | 成功 |
-| RP6 | TENANT 删除他人分类 | `{ error: "无权操作" }` |
-| RP7 | ROOT 删除他人分类 | 成功 |
-| RP8 | 删除带同步源的分类 | 级联删除 sync + sync_item |
+| **MaterialCategorySimpleDeleteRoute** | | |
+| RP5 | TENANT 删除自己的简易分类 | 成功 |
+| RP6 | TENANT 删除他人简易分类 | `{ error: "无权操作" }` |
+| RP7 | ROOT 删除他人简易分类 | 成功 |
+| RP8 | 删除同步分类 | `{ error: "同步分类请使用 MaterialCategorySyncDeleteRoute" }` |
+| **MaterialCategorySyncDeleteRoute** | | |
+| RP8b | TENANT 删除自己的同步分类 | 成功，级联删除 sync_item + sync_user_config + sync_platform_info + rel |
+| RP8c | TENANT 删除他人同步分类 | `{ error: "无权操作" }` |
+| RP8d | ROOT 删除他人同步分类 | 成功 |
+| RP8e | 删除简易分类 | `{ error: "简易分类请使用 MaterialCategorySimpleDeleteRoute" }` |
 | **MaterialCategoryListRoute** | | |
 | RP9 | TENANT 列出分类 | 返回自己的全部 + 他人 allow_others_view=true，每条含 is_mine 字段 |
 | RP10 | GUEST 列出分类 | 仅返回 allow_others_view=true 分类，is_mine 全为 false |
@@ -3284,11 +3599,18 @@ private val guestIdentity = AuthIdentity.Guest
 | RP13 | TENANT 向他人 allow_others_add=false 分类添加素材 | 失败 |
 | RP14 | TENANT 向他人 allow_others_view=true 但 allow_others_add=false 分类添加素材 | 失败（可见不等于可写） |
 | RP14b | TENANT 向他人 allow_others_add=true 分类添加素材 | 成功 |
-| **MaterialCategoryUpdateRoute（新增）** | | |
-| RP15 | TENANT 修改自己分类的名称 | 成功 |
-| RP16 | TENANT 修改他人分类 | `{ error: "无权操作" }` |
-| RP17 | ROOT 修改他人分类 | 成功 |
+| **MaterialCategorySimpleUpdateRoute** | | |
+| RP15 | TENANT 修改自己简易分类的名称 | 成功 |
+| RP16 | TENANT 修改他人简易分类 | `{ error: "无权操作" }` |
+| RP17 | ROOT 修改他人简易分类 | 成功 |
 | RP18 | 修改名称与自己已有分类重复 | `{ error: "分类名称已存在" }` |
+| RP18b | 修改同步分类 | `{ error: "同步分类请使用 MaterialCategorySyncUpdateRoute" }` |
+| **MaterialCategorySyncUpdateRoute** | | |
+| RP19 | TENANT 修改自己同步分类的名称 | 成功 |
+| RP20 | TENANT 修改他人同步分类 | `{ error: "无权操作" }` |
+| RP21 | ROOT 修改他人同步分类 | 成功 |
+| RP22 | 尝试修改 visibility | `{ error: "同步分类不支持修改可见性" }` |
+| RP23 | 修改简易分类 | `{ error: "简易分类请使用 MaterialCategorySimpleUpdateRoute" }` |
 
 ### 11.5 同步源路由测试
 
@@ -3356,8 +3678,8 @@ fun se7_unknown_type_throws() {
 | FE1 | 分类列表三组渲染 | "我的分类"、"可见分类"、"同步信源" 各组正确分类 |
 | FE2 | is_mine=false 时隐藏编辑/删除按钮 | 按钮不渲染 |
 | FE3 | 同步源分类显示同步状态 | 显示 last_synced_at、item_count、enabled 状态 |
-| FE4 | 创建分类表单提交 | 调用 MaterialCategoryCreateRoute，成功后刷新列表 |
-| FE5 | 删除分类确认弹窗 | 确认后调用 MaterialCategoryDeleteRoute |
+| FE4 | 创建分类表单提交 | 调用 MaterialCategorySimpleCreateRoute，成功后刷新列表 |
+| FE5 | 删除分类确认弹窗 | 简易分类调用 MaterialCategorySimpleDeleteRoute，同步分类调用 MaterialCategorySyncDeleteRoute |
 
 ---
 
@@ -3417,10 +3739,12 @@ shared/src/commonMain/kotlin/.../material_category/
 │   ├── SyncPlatformInfoService.kt       # 平台源 Service（新增）
 │   └── SyncUserConfigService.kt         # 用户订阅 Service（新增）
 ├── route_ext/
-│   ├── MaterialCategoryCreateRouteExt.kt
-│   ├── MaterialCategoryDeleteRouteExt.kt
+│   ├── MaterialCategorySimpleCreateRouteExt.kt
+│   ├── MaterialCategorySimpleDeleteRouteExt.kt
 │   ├── MaterialCategoryListRouteExt.kt
-│   ├── MaterialCategoryUpdateRouteExt.kt    # 新增路由
+│   ├── MaterialCategorySimpleUpdateRouteExt.kt
+│   ├── MaterialCategorySyncUpdateRouteExt.kt
+│   ├── MaterialCategorySyncDeleteRouteExt.kt
 │   ├── MaterialSetCategoriesRouteExt.kt
 │   ├── MaterialCategorySyncSubscribeRouteExt.kt             # 新增
 │   ├── MaterialCategorySyncUnsubscribeRouteExt.kt           # 新增
@@ -3431,11 +3755,13 @@ shared/src/commonMain/kotlin/.../material_category/
     └── SyncBilibiliFavoriteExecutor.kt  # Phase A2 新增
 
 shared/src/commonMain/kotlin/.../api/routes/
-├── MaterialCategoryCreateRoute.kt       # 保留，handler 委托到 route_ext
-├── MaterialCategoryDeleteRoute.kt       # 保留，handler 委托到 route_ext
-├── MaterialCategoryListRoute.kt         # 保留，handler 委托到 route_ext
-├── MaterialCategoryUpdateRoute.kt       # 新增，handler 委托到 route_ext
-├── MaterialSetCategoriesRoute.kt        # 保留，handler 委托到 route_ext
+├── MaterialCategorySimpleCreateRoute.kt    # 重命名，handler 委托到 route_ext
+├── MaterialCategorySimpleDeleteRoute.kt    # 重命名，handler 委托到 route_ext
+├── MaterialCategoryListRoute.kt            # 保留，handler 委托到 route_ext
+├── MaterialCategorySimpleUpdateRoute.kt    # 新增，handler 委托到 route_ext
+├── MaterialCategorySyncUpdateRoute.kt      # 新增，handler 委托到 route_ext
+├── MaterialCategorySyncDeleteRoute.kt      # 新增，handler 委托到 route_ext
+├── MaterialSetCategoriesRoute.kt           # 保留，handler 委托到 route_ext
 ├── MaterialCategorySyncSubscribeRoute.kt               # 新增
 ├── MaterialCategorySyncUnsubscribeRoute.kt             # 新增
 ├── MaterialCategorySyncPlatformDeleteRoute.kt          # 新增
@@ -3463,15 +3789,15 @@ shared/src/commonMain/kotlin/.../api/routes/
 
 #### 12.3.2 路由 handler 提取
 
-4 个现有路由从 inline handler 转为 handler2 委托模式：
+4 个现有路由从 inline handler 转为 handler2 委托模式（重命名后）：
 
-**转换前**（以 `MaterialCategoryCreateRoute` 为例）：
+**转换前**（以 `MaterialCategorySimpleCreateRoute` 为例）：
 
 ```kotlin
-// api/routes/MaterialCategoryCreateRoute.kt
-object MaterialCategoryCreateRoute : FredicaApi.Route(
-    name = "MaterialCategoryCreateRoute",
-    path = "/api/v1/MaterialCategoryCreateRoute",
+// api/routes/MaterialCategorySimpleCreateRoute.kt
+object MaterialCategorySimpleCreateRoute : FredicaApi.Route(
+    name = "MaterialCategorySimpleCreateRoute",
+    path = "/api/v1/MaterialCategorySimpleCreateRoute",
     method = FredicaApi.HttpMethod.POST,
     minRole = AuthRole.TENANT,
 ) {
@@ -3484,10 +3810,10 @@ object MaterialCategoryCreateRoute : FredicaApi.Route(
 **转换后**：
 
 ```kotlin
-// api/routes/MaterialCategoryCreateRoute.kt — 瘦壳
-object MaterialCategoryCreateRoute : FredicaApi.Route(
-    name = "MaterialCategoryCreateRoute",
-    path = "/api/v1/MaterialCategoryCreateRoute",
+// api/routes/MaterialCategorySimpleCreateRoute.kt — 瘦壳
+object MaterialCategorySimpleCreateRoute : FredicaApi.Route(
+    name = "MaterialCategorySimpleCreateRoute",
+    path = "/api/v1/MaterialCategorySimpleCreateRoute",
     method = FredicaApi.HttpMethod.POST,
     minRole = AuthRole.TENANT,
 ) {
@@ -3496,13 +3822,13 @@ object MaterialCategoryCreateRoute : FredicaApi.Route(
 ```
 
 ```kotlin
-// material_category/route_ext/MaterialCategoryCreateRouteExt.kt — 业务逻辑
+// material_category/route_ext/MaterialCategorySimpleCreateRouteExt.kt — 业务逻辑
 package com.github.project_fredica.material_category.route_ext
 
-import com.github.project_fredica.api.routes.MaterialCategoryCreateRoute
+import com.github.project_fredica.api.routes.MaterialCategorySimpleCreateRoute
 
 @Suppress("UnusedReceiverParameter")
-suspend fun MaterialCategoryCreateRoute.handler2(param: String): ValidJsonString {
+suspend fun MaterialCategorySimpleCreateRoute.handler2(param: String): ValidJsonString {
     val user = RouteAuthContext.currentUser()
         ?: return buildJsonObject { put("error", "需要登录") }.toValidJson()
     // 业务逻辑...
@@ -3513,8 +3839,8 @@ suspend fun MaterialCategoryCreateRoute.handler2(param: String): ValidJsonString
 
 | Route 对象 | handler2 文件 |
 |-----------|--------------|
-| `MaterialCategoryCreateRoute` | `route_ext/MaterialCategoryCreateRouteExt.kt` |
-| `MaterialCategoryDeleteRoute` | `route_ext/MaterialCategoryDeleteRouteExt.kt` |
+| `MaterialCategorySimpleCreateRoute` | `route_ext/MaterialCategorySimpleCreateRouteExt.kt` |
+| `MaterialCategorySimpleDeleteRoute` | `route_ext/MaterialCategorySimpleDeleteRouteExt.kt` |
 | `MaterialCategoryListRoute` | `route_ext/MaterialCategoryListRouteExt.kt` |
 | `MaterialSetCategoriesRoute` | `route_ext/MaterialSetCategoriesRouteExt.kt` |
 
@@ -3532,7 +3858,9 @@ suspend fun MaterialCategoryCreateRoute.handler2(param: String): ValidJsonString
 | `db/SyncUserConfigDb.kt` | A1 | 用户订阅 DB 实现 |
 | `service/SyncPlatformInfoService.kt` | A1 | 平台源 Service Holder |
 | `service/SyncUserConfigService.kt` | A1 | 用户订阅 Service Holder |
-| `route_ext/MaterialCategoryUpdateRouteExt.kt` | A1 | 更新分类 handler |
+| `route_ext/MaterialCategorySimpleUpdateRouteExt.kt` | A1 | 更新简易分类 handler |
+| `route_ext/MaterialCategorySyncUpdateRouteExt.kt` | A1 | 更新同步分类 handler |
+| `route_ext/MaterialCategorySyncDeleteRouteExt.kt` | A1 | 删除同步分类 handler（级联清理） |
 | `route_ext/MaterialCategorySyncSubscribeRouteExt.kt` | A1 | 订阅路由 handler |
 | `route_ext/MaterialCategorySyncUnsubscribeRouteExt.kt` | A1 | 退订路由 handler |
 | `route_ext/MaterialCategorySyncPlatformDeleteRouteExt.kt` | A1 | 删除平台源路由 handler |
