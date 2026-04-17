@@ -281,6 +281,7 @@ export default function SubtitleAsrPostprocessPage() {
                     port: appConfig.webserver_port,
                     schema: appConfig.webserver_schema,
                     appAuthToken: appConfig.webserver_auth_token,
+                    sessionToken: appConfig.session_token,
                 },
             });
             if (scriptError) {
@@ -334,6 +335,7 @@ export default function SubtitleAsrPostprocessPage() {
                     port: appConfig.webserver_port,
                     schema: appConfig.webserver_schema,
                     appAuthToken: appConfig.webserver_auth_token,
+                    sessionToken: appConfig.session_token,
                 },
                 onSegmentStart: (index, total) => {
                     setSegmentProgress({ index, total });

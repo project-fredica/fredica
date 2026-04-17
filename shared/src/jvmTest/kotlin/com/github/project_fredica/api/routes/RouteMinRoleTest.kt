@@ -25,7 +25,8 @@ class RouteMinRoleTest {
             BilibiliVideoDownloadRoute,
             BilibiliVideoAiConclusionRoute,
             MaterialVideoTranscodeMp4Route,
-            MaterialWorkflowRoute,
+            MaterialBilibiliDownloadTranscodeRoute,
+            MaterialAsrTranscribeRoute,
             MaterialImportRoute,
             NetworkTestRoute,
         )

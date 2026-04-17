@@ -8,7 +8,7 @@ import { Link } from "react-router";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
 import { useAppFetch } from "~/util/app_fetch";
 import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
-import { startMaterialWorkflow } from "~/util/materialWorkflowApi";
+import { startAsrTranscribe } from "~/util/materialWorkflowApi";
 import { reportHttpError, print_error } from "~/util/error_handler";
 import {
     ALL_WHISPER_MODELS, WHISPER_MODEL_VRAM_HINT, WHISPER_LANGUAGES,
@@ -496,7 +496,7 @@ function AsrSchemeDetail({ materialId }: { materialId: string }) {
         setStarting(true);
         setStartError(null);
         try {
-            const { resp, data } = await startMaterialWorkflow(apiFetch, materialId, "whisper_transcribe", {
+            const { resp, data } = await startAsrTranscribe(apiFetch, materialId, {
                 model: chosenModel,
                 language: chosenLanguage,
                 allow_download: chosenAllowDownload,

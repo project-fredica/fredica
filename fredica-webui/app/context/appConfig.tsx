@@ -12,9 +12,20 @@ interface AppConfig {
     webserver_port: string | null;
     /** 协议，null 时默认使用 "http"。 */
     webserver_schema: WebserverSchema | null;
-    /** Bearer Token 鉴权令牌（游客 token），持久化到 localStorage。 */
+    /**
+     * 游客 Bearer Token（webserver_auth_token）。
+     * 服主在后台设置的固定令牌，用于允许未登录用户访问受限资源。
+     * 持久化到 localStorage，重启后保留。
+     * buildAuthHeaders 优先级低于 session_token。
+     */
     webserver_auth_token: string | null;
-    /** 用户登录后的 session token（fredica_session:xxx 格式）。 */
+    /**
+     * 登录用户的 Session Token（格式：fredica_session:xxx）。
+     * 用户登录成功后由后端颁发，存储在 localStorage 中。
+     * buildAuthHeaders 优先使用此字段（高于 webserver_auth_token），
+     * 因此已登录用户的 API 请求会以 tenant/root 身份鉴权，而非游客身份。
+     * 登出后清空为 null。
+     */
     session_token: string | null;
     /** 当前用户角色。 */
     user_role: "guest" | "tenant" | "root" | null;

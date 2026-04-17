@@ -5,7 +5,7 @@ import type { LlmResponseMeta } from "./llm";
 
 export function useInvalidateCache() {
     const { appConfig } = useAppConfig();
-    const { webserver_domain, webserver_port, webserver_schema, webserver_auth_token } = appConfig;
+    const { webserver_domain, webserver_port, webserver_schema } = appConfig;
 
     const invalidate = useCallback(async (keyHash: string) => {
         const s = webserver_schema ?? "http";
@@ -14,12 +14,12 @@ export function useInvalidateCache() {
         await fetch(`${s}://${d}:${p}/api/v1/LlmCacheInvalidateRoute`, {
             method: "POST",
             headers: {
-                ...buildAuthHeaders(webserver_auth_token),
+                ...buildAuthHeaders(appConfig),
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({ key_hash: keyHash }),
         });
-    }, [webserver_schema, webserver_domain, webserver_port, webserver_auth_token]);
+    }, [webserver_schema, webserver_domain, webserver_port, appConfig]);
 
     return { invalidate };
 }

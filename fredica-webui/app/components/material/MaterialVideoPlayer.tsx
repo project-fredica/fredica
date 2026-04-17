@@ -203,7 +203,6 @@ export function MaterialVideoPlayer({ materialId, mode, sourceType, initialSeek,
     // ── 视频 src ──────────────────────────────────────────────────────────
 
     const videoSrc = `${serverBase}/api/v1/MaterialVideoStreamRoute?material_id=${encodeURIComponent(materialId)}`;
-    const authHeaders = buildAuthHeaders(appConfig.webserver_auth_token);
 
     // ── 渲染 ──────────────────────────────────────────────────────────────
 

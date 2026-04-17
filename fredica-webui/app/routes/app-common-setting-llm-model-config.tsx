@@ -172,6 +172,7 @@ export default function Component({ }: Route.ComponentProps) {
                 domain: appConfig.webserver_domain,
                 port: appConfig.webserver_port,
                 appAuthToken: appConfig.webserver_auth_token,
+                sessionToken: appConfig.session_token,
             };
             const supplementPrompt = [
                 "请根据下面的 provider 探测结果，只补全未知的模型功能参数，并输出 JSON。",
@@ -880,6 +881,7 @@ function ConfigCheckDrawer({ model, onSuccess, onClose }: { model: LlmModelConfi
                 domain: appConfig.webserver_domain,
                 port: appConfig.webserver_port,
                 appAuthToken: appConfig.webserver_auth_token,
+                sessionToken: appConfig.session_token,
             };
             const params: LlmChatParams = mode === "direct"
                 ? { mode: "direct", base_url: model.base_url, api_key: model.api_key, model: model.model, messages_json: singleUserMessage(message) }

@@ -1,24 +1,30 @@
 /**
  * materialWorkflowApi.ts
  *
- * MaterialWorkflowRoute（启动工作流）和 MaterialWorkflowStatusRoute（查询工作流）
- * 的类型定义与客户端封装。统一管理路由路径，避免硬编码散落在各处。
+ * MaterialBilibiliDownloadTranscodeRoute、MaterialAsrTranscribeRoute（启动工作流）
+ * 和 MaterialWorkflowStatusRoute（查询工作流）的类型定义与客户端封装。
  */
 
 import { print_error } from "~/util/error_handler";
 
-/** POST 启动工作流路由的相对路径。 */
-export const MATERIAL_WORKFLOW_API_PATH = "/api/v1/MaterialWorkflowRoute";
+/** POST Bilibili 下载+转码工作流路由。 */
+export const MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH = "/api/v1/MaterialBilibiliDownloadTranscodeRoute";
+
+/** POST ASR 语音识别工作流路由。 */
+export const MATERIAL_ASR_TRANSCRIBE_API_PATH = "/api/v1/MaterialAsrTranscribeRoute";
 
 /** GET 查询工作流状态路由的相对路径。 */
 export const MATERIAL_WORKFLOW_STATUS_API_PATH = "/api/v1/MaterialWorkflowStatusRoute";
 
-export type WorkflowTemplate = "bilibili_download_transcode" | "whisper_transcribe";
-
-export interface StartWorkflowResult {
+export interface StartBilibiliDownloadTranscodeResult {
     workflow_run_id?: string;
     download_task_id?: string;
     transcode_task_id?: string;
+    error?: string;
+}
+
+export interface StartAsrTranscribeResult {
+    workflow_run_id?: string;
     extract_audio_task_id?: string;
     transcribe_task_id?: string;
     error?: string;
@@ -58,21 +64,29 @@ const ACTIVE_STATUSES   = new Set(["pending", "claimed", "running"]);
 // ── 客户端封装 ────────────────────────────────────────────────────────────────
 
 /**
- * 启动素材工作流（适用于组件/路由层，通过 useAppFetch 提供的 apiFetch 调用）。
- *
- * @example
- * const { resp } = await startMaterialWorkflow(apiFetch, material.id, "bilibili_download_transcode");
- * if (!resp.ok) reportHttpError("启动失败", resp);
+ * 启动 Bilibili 下载+转码工作流。
  */
-export async function startMaterialWorkflow(
+export async function startBilibiliDownloadTranscode(
     apiFetch: (path: string, init?: RequestInit) => Promise<{ resp: Response }>,
     materialId: string,
-    template: WorkflowTemplate,
-    extra?: Record<string, unknown>,
 ): Promise<{ resp: Response }> {
-    return apiFetch(MATERIAL_WORKFLOW_API_PATH, {
+    return apiFetch(MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH, {
         method: "POST",
-        body: JSON.stringify({ material_id: materialId, template, ...extra }),
+        body: JSON.stringify({ material_id: materialId }),
+    });
+}
+
+/**
+ * 启动 ASR 语音识别工作流（Whisper）。
+ */
+export async function startAsrTranscribe(
+    apiFetch: (path: string, init?: RequestInit) => Promise<{ resp: Response }>,
+    materialId: string,
+    extra: { model: string; language: string; allow_download: boolean; priority: string },
+): Promise<{ resp: Response }> {
+    return apiFetch(MATERIAL_ASR_TRANSCRIBE_API_PATH, {
+        method: "POST",
+        body: JSON.stringify({ material_id: materialId, ...extra }),
     });
 }
 

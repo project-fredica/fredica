@@ -45,6 +45,7 @@ export interface LlmChatConnectionConfig {
     port?: string | null;
     schema?: string | null;
     appAuthToken?: string | null;
+    sessionToken?: string | null;
 }
 
 /** LLM 响应元数据 */
@@ -178,7 +179,9 @@ export async function* llmChat(
         const resp = await fetch(`${s}://${d}:${p}/api/v1/LlmProxyChatRoute`, {
             method: "POST",
             headers: {
-                ...buildAuthHeaders(connection?.appAuthToken),
+                ...buildAuthHeaders(connection?.sessionToken
+                    ? { session_token: connection.sessionToken, webserver_auth_token: connection.appAuthToken ?? null }
+                    : connection?.appAuthToken ?? null),
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(body),

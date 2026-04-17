@@ -218,6 +218,7 @@ export async function previewPromptScript(params: {
         port?: string | null;
         schema?: string | null;
         appAuthToken?: string | null;
+        sessionToken?: string | null;
     };
     onLog?: (log: PromptSandboxLog) => void;
 }): Promise<{ promptText: string | null; promptTexts: string[] | null; error: string | null; errorType: string | null; logs: PromptSandboxLog[] }> {
@@ -231,7 +232,9 @@ export async function previewPromptScript(params: {
     const resp = await fetch(url, {
         method: "POST",
         headers: {
-            ...buildAuthHeaders(connection.appAuthToken),
+            ...buildAuthHeaders(connection.sessionToken
+                ? { session_token: connection.sessionToken, webserver_auth_token: connection.appAuthToken ?? null }
+                : connection.appAuthToken ?? null),
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ script_code: params.scriptCode }),
@@ -301,6 +304,7 @@ export async function streamPromptScriptGenerate(params: {
         port?: string | null;
         schema?: string | null;
         appAuthToken?: string | null;
+        sessionToken?: string | null;
     };
     onScriptLog?: (log: PromptSandboxLog) => void;
     onSegmentStart?: (index: number, total: number) => void;
@@ -318,7 +322,9 @@ export async function streamPromptScriptGenerate(params: {
     const resp = await fetch(url, {
         method: "POST",
         headers: {
-            ...buildAuthHeaders(connection.appAuthToken),
+            ...buildAuthHeaders(connection.sessionToken
+                ? { session_token: connection.sessionToken, webserver_auth_token: connection.appAuthToken ?? null }
+                : connection.appAuthToken ?? null),
             "Content-Type": "application/json",
         },
         body: JSON.stringify({

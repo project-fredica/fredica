@@ -9,7 +9,7 @@
  * 职责：
  * - 挂载时查询 MaterialVideoCheckRoute，决定初始状态
  * - 管理转码任务启动：
- *     - bilibili 素材 → MaterialWorkflowRoute (download+transcode DAG)
+ *     - bilibili 素材 → MaterialBilibiliDownloadTranscodeRoute (download+transcode DAG)
  *     - 其他素材      → MaterialVideoTranscodeMp4Route (transcode only)
  * - 管理 pendingSeek（字幕联动、localStorage 恢复）
  * - localStorage 进度持久化（key: fredica-video-progress-{materialId}）
@@ -21,7 +21,7 @@ import { useAppConfig } from "~/context/appConfig";
 import { buildAuthHeaders } from "~/util/app_fetch";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { json_parse } from "~/util/json";
-import { MATERIAL_WORKFLOW_API_PATH, fetchActiveWorkflows, findActiveEncodeWorkflowRunId } from "~/util/materialWorkflowApi";
+import { MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH, fetchActiveWorkflows, findActiveEncodeWorkflowRunId } from "~/util/materialWorkflowApi";
 
 // ── 状态定义 ──────────────────────────────────────────────────────────────────
 
@@ -238,11 +238,9 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
             // 其他素材：直接转码（本地文件已就绪，仅需格式转换）
             const isBilibili = sourceType === "bilibili";
             const url = isBilibili
-                ? `${serverBase}${MATERIAL_WORKFLOW_API_PATH}`
+                ? `${serverBase}${MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH}`
                 : `${serverBase}/api/v1/MaterialVideoTranscodeMp4Route`;
-            const body = isBilibili
-                ? JSON.stringify({ material_id: materialId, template: "bilibili_download_transcode" })
-                : JSON.stringify({ material_id: materialId });
+            const body = JSON.stringify({ material_id: materialId });
 
             const resp = await fetch(url, {
                 method: "POST",

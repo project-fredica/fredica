@@ -224,10 +224,10 @@ describe("V7 – encoding poll detects ready video → PAUSED (not CHECKING)", (
     });
 });
 
-// ── V6b: bilibili 素材 startEncode 调 MaterialWorkflowRoute ──────────────────
+// ── V6b: bilibili 素材 startEncode 调 MaterialBilibiliDownloadTranscodeRoute ──
 
-describe("V6b – bilibili sourceType calls MaterialWorkflowRoute", () => {
-    it("calls MaterialWorkflowRoute with bilibili_download_transcode template", async () => {
+describe("V6b – bilibili sourceType calls MaterialBilibiliDownloadTranscodeRoute", () => {
+    it("calls MaterialBilibiliDownloadTranscodeRoute", async () => {
         const mockF = vi.fn()
             // 1. Mount check → not ready
             .mockResolvedValueOnce({
@@ -256,9 +256,9 @@ describe("V6b – bilibili sourceType calls MaterialWorkflowRoute", () => {
 
         // calls[2] は startEncode の POST
         const encodeCall = mockF.mock.calls[2];
-        expect((encodeCall[0] as string)).toContain("MaterialWorkflowRoute");
+        expect((encodeCall[0] as string)).toContain("MaterialBilibiliDownloadTranscodeRoute");
         const body = JSON.parse((encodeCall[1] as RequestInit).body as string);
-        expect(body.template).toBe("bilibili_download_transcode");
+        expect(body.material_id).toBe("mat-v6b");
     });
 });
 

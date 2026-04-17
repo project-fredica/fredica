@@ -53,6 +53,7 @@ export interface SafeAppConfig {
     webserver_port: string | null;
     webserver_schema: "http" | "https" | null;
     webserver_auth_token: string | null;
+    session_token: string | null;
 }
 
 export function getSafeAppConfig(value: unknown): SafeAppConfig {
@@ -63,6 +64,7 @@ export function getSafeAppConfig(value: unknown): SafeAppConfig {
         webserver_port: typeof record?.webserver_port === "string" ? record.webserver_port : null,
         webserver_schema: schema === "http" || schema === "https" ? schema : null,
         webserver_auth_token: typeof record?.webserver_auth_token === "string" ? record.webserver_auth_token : null,
+        session_token: typeof record?.session_token === "string" ? record.session_token : null,
     };
 }
 

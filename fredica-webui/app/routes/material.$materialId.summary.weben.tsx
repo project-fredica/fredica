@@ -336,6 +336,7 @@ export default function SummaryWebenPage() {
                     port: appConfig.webserver_port,
                     schema: appConfig.webserver_schema,
                     appAuthToken: appConfig.webserver_auth_token,
+                    sessionToken: appConfig.session_token,
                 },
             });
             console.debug("[SummaryWebenPage] handlePreview: result error=", error, "promptText.length=", promptText?.length ?? 0);
@@ -381,6 +382,7 @@ export default function SummaryWebenPage() {
                     port: appConfig.webserver_port,
                     schema: appConfig.webserver_schema,
                     appAuthToken: appConfig.webserver_auth_token,
+                    sessionToken: appConfig.session_token,
                 },
             });
 
@@ -416,6 +418,7 @@ export default function SummaryWebenPage() {
                     port: appConfig.webserver_port,
                     schema: appConfig.webserver_schema,
                     appAuthToken: appConfig.webserver_auth_token,
+                    sessionToken: appConfig.session_token,
                 },
                 onChunk: chunk => {
                     setStreamText(prev => prev + chunk);

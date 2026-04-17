@@ -17,6 +17,7 @@ export async function streamLlmRouterText(params: {
         port?: string | null;
         schema?: string | null;
         appAuthToken?: string | null;
+        sessionToken?: string | null;
     };
     onChunk: (chunk: string) => void;
     signal?: AbortSignal;
@@ -28,7 +29,9 @@ export async function streamLlmRouterText(params: {
     const resp = await fetch(`${schema}://${domain}:${port}/api/v1/LlmProxyChatRoute`, {
         method: "POST",
         headers: {
-            ...buildAuthHeaders(params.connection.appAuthToken),
+            ...buildAuthHeaders(params.connection.sessionToken
+                ? { session_token: params.connection.sessionToken, webserver_auth_token: params.connection.appAuthToken ?? null }
+                : params.connection.appAuthToken ?? null),
             "Content-Type": "application/json",
         },
         body: JSON.stringify({

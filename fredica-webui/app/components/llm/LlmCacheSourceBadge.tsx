@@ -10,7 +10,7 @@ interface Props {
 
 export function LlmCacheSourceBadge({ meta, onRefresh }: Props) {
     const { appConfig } = useAppConfig();
-    const { webserver_domain, webserver_port, webserver_schema, webserver_auth_token } = appConfig;
+    const { webserver_domain, webserver_port, webserver_schema } = appConfig;
     const [invalidating, setInvalidating] = useState(false);
 
     if (!meta || meta.source !== "CACHE") return null;
@@ -25,7 +25,7 @@ export function LlmCacheSourceBadge({ meta, onRefresh }: Props) {
             const resp = await fetch(`${s}://${d}:${p}/api/v1/LlmCacheInvalidateRoute`, {
                 method: "POST",
                 headers: {
-                    ...buildAuthHeaders(webserver_auth_token),
+                    ...buildAuthHeaders(appConfig),
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ key_hash: meta.keyHash }),
