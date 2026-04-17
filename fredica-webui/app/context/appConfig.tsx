@@ -77,7 +77,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
                 // 从 localStorage 恢复时也写入 Cookie，供 <video src> 使用（session_token 优先）
                 const effectiveToken = parsed.session_token ?? parsed.webserver_auth_token;
                 if (effectiveToken) {
-                    document.cookie = `fredica_token=${effectiveToken}; path=/; SameSite=Strict`;
+                    document.cookie = `fredica_media_token=${effectiveToken}; path=/; SameSite=Strict`;
                 }
             }
         } catch {
@@ -89,9 +89,9 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         callBridge("get_server_info").then(raw => {
             const info = json_parse<Partial<AppConfig>>(raw);
             setAppConfigState(prev => ({ ...prev, ...info }));
-            // 写入 fredica_token Cookie，供 <video src> 使用
+            // 写入 fredica_media_token Cookie，供 <video src> 使用
             if (info.webserver_auth_token) {
-                document.cookie = `fredica_token=${info.webserver_auth_token}; path=/; SameSite=Strict`;
+                document.cookie = `fredica_media_token=${info.webserver_auth_token}; path=/; SameSite=Strict`;
             }
         }).catch(() => {
             // 浏览器环境或 bridge 未就绪时忽略
@@ -105,12 +105,12 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
                 console.debug('[appConfig] saved to localStorage:', next);
             } catch { }
-            // 写入 fredica_token Cookie，供 <video src> 使用（session_token 优先）
+            // 写入 fredica_media_token Cookie，供 <video src> 使用（session_token 优先）
             const effectiveToken = next.session_token ?? next.webserver_auth_token;
             if (effectiveToken) {
-                document.cookie = `fredica_token=${effectiveToken}; path=/; SameSite=Strict`;
+                document.cookie = `fredica_media_token=${effectiveToken}; path=/; SameSite=Strict`;
             } else {
-                document.cookie = `fredica_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+                document.cookie = `fredica_media_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
             }
             return next;
         });

@@ -82,6 +82,10 @@ actual suspend fun FredicaApi.Companion.getNativeRoutes(): List<FredicaApi.Route
     return listOf(
         TorchInstallCheckRoute,
         WebenConceptTypeHintsRoute,
+        LlmProxyChatRoute,
+        PromptTemplateRunRoute,
+        PromptTemplatePreviewRoute,
+        PromptScriptGenerateRoute,
     )
 }
 
@@ -431,33 +435,9 @@ object FredicaApiJvmService {
                 )
             }
 
-            // LLM 代理聊天（SSE 流式转发，需鉴权，单独注册绕过通用路由框架）
-            post("/api/v1/LlmProxyChatRoute") {
-                if (!checkAuth()) {
-                    logger.debug("check auth failed ?")
-                    return@post
-                }
-                LlmProxyChatRoute.handle(this)
-            }
-
-            // 视频流（Cookie 认证 + Range 支持，单独注册绕过通用路由框架）
+            // 视频流（Cookie 认证 + Range 支持，单独注册：GET 方法 + 自行处理 Cookie 鉴权）
             get(MaterialVideoStreamRoute.PATH) {
                 MaterialVideoStreamRoute.handle(this)
-            }
-
-            // Prompt 脚本沙箱执行（GraalJS，依赖 jvmMain，单独注册）
-            post("/api/v1/PromptTemplateRunRoute") {
-                if (!checkAuth()) return@post
-                PromptTemplateRunRoute.handle(this)
-            }
-            post("/api/v1/PromptTemplatePreviewRoute") {
-                if (!checkAuth()) return@post
-                PromptTemplatePreviewRoute.handle(this)
-            }
-            // Prompt 脚本执行 + LLM 分段生成（SSE 流式，支持 string[] 分段）
-            post("/api/v1/PromptScriptGenerateRoute") {
-                if (!checkAuth()) return@post
-                PromptScriptGenerateRoute.handle(this)
             }
 
             for (route in allRoutes) {
@@ -468,6 +448,11 @@ object FredicaApiJvmService {
 
                     FredicaApi.Route.Mode.Post -> post("/api/v1/${route.name}") {
                         handleRoute(route) { call.receiveText() }
+                    }
+
+                    FredicaApi.Route.Mode.Sse -> post("/api/v1/${route.name}") {
+                        if (!checkAuth()) return@post
+                        (route as SseRoute).handle(this)
                     }
                 }
             }

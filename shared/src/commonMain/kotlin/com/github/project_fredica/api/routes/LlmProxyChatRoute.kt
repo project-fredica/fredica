@@ -5,6 +5,7 @@ import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmModelConfig
 import com.github.project_fredica.llm.LlmMessagesJson
@@ -36,7 +37,10 @@ import kotlinx.serialization.json.put
  * 请求体：[LlmProxyChatRequest]
  * 响应：text/event-stream，含 data: 流式内容 + event: llm_source 元数据
  */
-object LlmProxyChatRoute {
+object LlmProxyChatRoute : SseRoute {
+    override val desc = "LLM 代理聊天（SSE 流式转发）"
+    override val minRole = AuthRole.TENANT
+
     private val logger = createLogger()
 
     @Serializable
@@ -51,7 +55,7 @@ object LlmProxyChatRoute {
         @SerialName("extra_fields_json")     val extraFieldsJson: String? = null,
     )
 
-    suspend fun handle(ctx: RoutingContext) {
+    override suspend fun handle(ctx: RoutingContext) {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<LlmProxyChatRequest>().getOrElse { e ->
             logger.error("LlmProxyChatRoute: 请求体解析失败", e)

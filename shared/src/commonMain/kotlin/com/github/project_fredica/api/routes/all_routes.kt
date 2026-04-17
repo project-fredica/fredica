@@ -92,5 +92,4 @@ fun FredicaApi.Route.Companion.getCommonRoutes() = listOf(
     WebenSourceListRoute,
     WorkerTaskListRoute,
     WorkerTaskWfIdListRoute,
-    // 注: LlmProxyChatRoute 使用 SSE 格式传递，因此并不在此处列入。
 )

@@ -15,7 +15,7 @@ import io.ktor.utils.io.ClosedWriteChannelException
  *
  * 以 Cookie 认证方式流式输出 video.mp4，支持 Range 分片请求（HTML5 视频 seek）。
  *
- * 认证：读取 Cookie "fredica_token"，通过 AuthService.resolveIdentity 校验 token 有效性。
+ * 认证：读取 Cookie "fredica_media_token"，通过 AuthService.resolveIdentity 校验 token 有效性。
  *
  * 响应头：
  * - ETag: 基于 materialId + 文件修改时间，用于 304 条件请求
@@ -31,7 +31,7 @@ object MaterialVideoStreamRoute {
         val call = ctx.call
 
         // Cookie 认证：通过 AuthService.resolveIdentity 校验 token 有效性
-        val token = call.request.cookies["fredica_token"]
+        val token = call.request.cookies["fredica_media_token"]
         if (token.isNullOrBlank()) {
             call.respond(HttpStatusCode.Unauthorized)
             return

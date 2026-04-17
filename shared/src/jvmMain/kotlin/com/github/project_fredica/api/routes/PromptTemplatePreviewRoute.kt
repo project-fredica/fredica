@@ -21,6 +21,7 @@ import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.prompt.PromptScriptRuntime
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -34,10 +35,13 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-object PromptTemplatePreviewRoute {
+object PromptTemplatePreviewRoute : SseRoute {
+    override val desc = "Prompt 脚本沙箱预览（SSE 流式，含日志）"
+    override val minRole = AuthRole.TENANT
+
     private val logger = createLogger { "PromptTemplatePreviewRoute" }
 
-    suspend fun handle(ctx: RoutingContext) {
+    override suspend fun handle(ctx: RoutingContext) {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<PromptScriptExecuteRequest>().getOrElse { e ->
             // 请求体解析失败属于调用方问题（客户端错误），用 warn 而非 error

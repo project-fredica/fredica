@@ -124,7 +124,7 @@ class MaterialVideoStreamRouteTest {
     @Test
     fun `missing material_id returns 400`() = testApp {
         val resp = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
         }
         assertEquals(HttpStatusCode.BadRequest, resp.status)
     }
@@ -134,7 +134,7 @@ class MaterialVideoStreamRouteTest {
     @Test
     fun `unknown material returns 404`() = testApp {
         val resp = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
             parameter("material_id", "no-such-id")
         }
         assertEquals(HttpStatusCode.NotFound, resp.status)
@@ -145,7 +145,7 @@ class MaterialVideoStreamRouteTest {
     @Test
     fun `normal request returns 200 with mp4 content type`() = testApp {
         val resp = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
             parameter("material_id", testMaterialId)
         }
         assertEquals(HttpStatusCode.OK, resp.status)
@@ -160,7 +160,7 @@ class MaterialVideoStreamRouteTest {
     @Test
     fun `range request returns 206 partial content`() = testApp {
         val resp = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
             parameter("material_id", testMaterialId)
             header(HttpHeaders.Range, "bytes=0-511")
         }
@@ -180,7 +180,7 @@ class MaterialVideoStreamRouteTest {
     fun `matching etag returns 304 no body`() = testApp {
         // 先取 ETag
         val first = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
             parameter("material_id", testMaterialId)
         }
         val etag = first.headers[HttpHeaders.ETag]
@@ -188,7 +188,7 @@ class MaterialVideoStreamRouteTest {
 
         // 带 If-None-Match 再次请求
         val second = client.get(MaterialVideoStreamRoute.PATH) {
-            cookie("fredica_token", "test-token")
+            cookie("fredica_media_token", "test-token")
             parameter("material_id", testMaterialId)
             header(HttpHeaders.IfNoneMatch, etag)
         }

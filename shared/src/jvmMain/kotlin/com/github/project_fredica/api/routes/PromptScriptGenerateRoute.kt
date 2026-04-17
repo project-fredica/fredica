@@ -27,6 +27,7 @@ import com.github.project_fredica.apputil.error
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
+import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.db.AppConfigService
 import com.github.project_fredica.llm.LlmMessagesJson
 import com.github.project_fredica.llm.LlmModelConfig
@@ -56,10 +57,13 @@ data class PromptScriptGenerateRequest(
     @SerialName("disable_cache") val disableCache: Boolean = false,
 )
 
-object PromptScriptGenerateRoute {
+object PromptScriptGenerateRoute : SseRoute {
+    override val desc = "Prompt 脚本执行 + LLM 分段生成（SSE 流式）"
+    override val minRole = AuthRole.TENANT
+
     private val logger = createLogger { "PromptScriptGenerateRoute" }
 
-    suspend fun handle(ctx: RoutingContext) {
+    override suspend fun handle(ctx: RoutingContext) {
         val call = ctx.call
         val req = call.receiveText().loadJsonModel<PromptScriptGenerateRequest>().getOrElse { e ->
             logger.warn("[PromptScriptGenerateRoute] 请求体解析失败", isHappensFrequently = false, err = e)

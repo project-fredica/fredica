@@ -6415,10 +6415,11 @@ FredicaApi.Route.Mode.Get -> {
 
 ##### 16.3 详细步骤
 
-1. **修改 `checkAuth()`**：Cookie 名 `fredica_token` → `fredica_media_token`
+1. **修改 `MaterialVideoStreamRoute.kt`**：Cookie 名 `fredica_token` → `fredica_media_token`
 2. **修改 `appConfig.tsx`**：3 处 Cookie 名更新
 3. **修改 `MaterialVideoStreamRouteTest.kt`**：Cookie 名更新
-4. **测试验证**
+4. **`checkAuth()` 不添加 Cookie fallback**：`fredica_media_token` 仅供 `<video src>` 等无法设置 header 的场景，不作为通用鉴权
+5. **测试验证**
 
 ---
 

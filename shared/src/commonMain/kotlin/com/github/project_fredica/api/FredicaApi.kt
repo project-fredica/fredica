@@ -21,7 +21,7 @@ interface FredicaApi {
 
     interface Route {
         enum class Mode {
-            Get, Post
+            Get, Post, Sse
         }
 
         val name: String get() = this::class.simpleName!!
