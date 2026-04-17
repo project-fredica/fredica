@@ -6371,6 +6371,17 @@ sequenceDiagram
     KR-->>BR: 206 Partial Content (video/mp4, Range 支持)
 ```
 
+**代码出处：**
+
+| 步骤 | 文件 | 位置 |
+|------|------|------|
+| localStorage 恢复时写入 Cookie | `fredica-webui/app/context/appConfig.tsx` | `useEffect` 内，`json_parse` 恢复后 |
+| bridge 获取 server info 后写入 | `fredica-webui/app/context/appConfig.tsx` | `callBridge("get_server_info").then(...)` 回调 |
+| 登录/配置更新时写入 | `fredica-webui/app/context/appConfig.tsx` | `setAppConfig()` 函数内 |
+| bridge 消息处理（返回 token） | `composeApp/.../messages/GetServerInfoJsMessageHandler.kt` | `handle()` 方法 |
+| `<video>` 标签渲染 | `fredica-webui/app/components/material/MaterialVideoPlayer.tsx` | `crossOrigin="use-credentials"` |
+| 服务端读取 Cookie 并验证 | `shared/jvmMain/.../api/routes/MaterialVideoStreamRoute.kt` | `handle()` 方法，`cookies["fredica_media_token"]` |
+
 **关键点：**
 - Cookie 由前端 JS `document.cookie` 写入，**不经过 Set-Cookie 响应头**
 - `crossOrigin="use-credentials"` 确保跨域 `<video>` 请求也携带 Cookie
