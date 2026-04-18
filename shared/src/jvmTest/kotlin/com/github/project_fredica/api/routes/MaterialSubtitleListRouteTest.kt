@@ -20,7 +20,7 @@ package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
-import com.github.project_fredica.db.MaterialCategoryDb
+import com.github.project_fredica.material_category.db.MaterialCategoryDb
 import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.db.MaterialDb
 import com.github.project_fredica.db.MaterialService

@@ -7,7 +7,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import com.github.project_fredica.db.MaterialCategoryService
+import com.github.project_fredica.material_category.service.MaterialCategoryService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 

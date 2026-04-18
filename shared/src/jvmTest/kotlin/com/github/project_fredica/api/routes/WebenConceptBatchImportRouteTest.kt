@@ -1,7 +1,7 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.apputil.loadJsonModel
-import com.github.project_fredica.db.MaterialCategoryDb
+import com.github.project_fredica.material_category.db.MaterialCategoryDb
 import com.github.project_fredica.db.MaterialDb
 import com.github.project_fredica.db.MaterialService
 import com.github.project_fredica.db.MaterialVideo

@@ -11,6 +11,8 @@ import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.llm.LlmRequestServiceHolder
 import com.github.project_fredica.llm.LlmRequestServiceImpl
+import com.github.project_fredica.material_category.db.MaterialCategoryDb
+import com.github.project_fredica.material_category.service.MaterialCategoryService
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine

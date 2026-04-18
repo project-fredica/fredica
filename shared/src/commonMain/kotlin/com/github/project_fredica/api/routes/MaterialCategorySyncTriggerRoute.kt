@@ -5,10 +5,10 @@ import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.auth.AuthRole
 import com.github.project_fredica.material_category.route_ext.handler2
 
-object MaterialCategoryListRoute : FredicaApi.Route {
+object MaterialCategorySyncTriggerRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post
-    override val desc = "列出所有素材分类（含视频数量）"
-    override val minRole = AuthRole.GUEST
+    override val minRole = AuthRole.TENANT
+    override val desc = "手动触发同步源同步"
 
     override suspend fun handler(param: String, context: RouteContext): ValidJsonString = handler2(param, context)
 }

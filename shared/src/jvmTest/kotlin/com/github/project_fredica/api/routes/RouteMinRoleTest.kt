@@ -77,8 +77,16 @@ class RouteMinRoleTest {
     fun m5_write_routes_require_at_least_tenant() {
         val writeRoutes = listOf(
             MaterialDeleteRoute,
-            MaterialCategoryCreateRoute,
-            MaterialCategoryDeleteRoute,
+            MaterialCategorySimpleCreateRoute,
+            MaterialCategorySimpleDeleteRoute,
+            MaterialCategorySimpleUpdateRoute,
+            MaterialCategorySimpleImportRoute,
+            MaterialCategorySyncCreateRoute,
+            MaterialCategorySyncDeleteRoute,
+            MaterialCategorySyncUpdateRoute,
+            MaterialCategorySyncSubscribeRoute,
+            MaterialCategorySyncUnsubscribeRoute,
+            MaterialCategorySyncTriggerRoute,
             MaterialSetCategoriesRoute,
             PromptTemplateSaveRoute,
             PromptTemplateDeleteRoute,
