@@ -9,7 +9,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -109,7 +111,7 @@ class TenantInviteLinkManagementRouteTest {
     @Test
     fun tl4_delete_success() = runBlocking {
         val linkId = linkDb.create("tenant-del", "To Delete", 10, futureExpiry, "admin")
-        val resp = callDelete("""{"id":"$linkId"}""")
+        val resp = callDelete(buildJsonObject { put("id", linkId) }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertNull(linkDb.findById(linkId))
         Unit
@@ -120,7 +122,7 @@ class TenantInviteLinkManagementRouteTest {
     fun tl5_delete_with_registrations() = runBlocking {
         val linkId = linkDb.create("tenant-reg", "Has Regs", 10, futureExpiry, "admin")
         regDb.record(linkId, "user-1", "1.1.1.1", "UA")
-        val resp = callDelete("""{"id":"$linkId"}""")
+        val resp = callDelete(buildJsonObject { put("id", linkId) }.toString())
         assertTrue(resp.containsKey("error"))
         assertTrue(resp["error"]!!.jsonPrimitive.content.contains("注册记录"))
         // 链接仍存在
@@ -150,7 +152,10 @@ class TenantInviteLinkManagementRouteTest {
     @Test
     fun tl8_update_label() = runBlocking {
         val linkId = linkDb.create("tenant-upd", "Old Label", 10, futureExpiry, "admin")
-        val resp = callUpdate("""{"id":"$linkId","label":"New Label"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("label", "New Label")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertEquals("New Label", linkDb.findById(linkId)!!.label)
         Unit
@@ -160,7 +165,10 @@ class TenantInviteLinkManagementRouteTest {
     @Test
     fun tl9_update_status() = runBlocking {
         val linkId = linkDb.create("tenant-sts", "Label", 10, futureExpiry, "admin")
-        val resp = callUpdate("""{"id":"$linkId","status":"disabled"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("status", "disabled")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertEquals("disabled", linkDb.findById(linkId)!!.status)
         Unit
@@ -186,7 +194,10 @@ class TenantInviteLinkManagementRouteTest {
     @Test
     fun tl12_update_invalid_status() = runBlocking {
         val linkId = linkDb.create("tenant-inv", "Label", 10, futureExpiry, "admin")
-        val resp = callUpdate("""{"id":"$linkId","status":"invalid"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("status", "invalid")
+        }.toString())
         assertTrue(resp.containsKey("error"))
         Unit
     }

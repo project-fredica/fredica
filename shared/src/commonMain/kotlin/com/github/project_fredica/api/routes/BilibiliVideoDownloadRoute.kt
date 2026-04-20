@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.json.buildJsonObject
@@ -25,6 +26,7 @@ import com.github.project_fredica.auth.AuthRole
  * 若该素材已有同类型任务处于活跃状态（pending/claimed/running），返回 TASK_ALREADY_ACTIVE 错误。
  */
 object BilibiliVideoDownloadRoute : FredicaApi.Route {
+    private val logger = createLogger()
     override val mode = FredicaApi.Route.Mode.Post
     override val desc = "为指定 Bilibili 素材启动视频下载任务"
     override val minRole = AuthRole.TENANT
@@ -32,15 +34,18 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
     override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<BilibiliVideoDownloadParam>().getOrThrow()
         val materialId = p.materialId
+        logger.debug("handler: materialId=$materialId")
         val taskType = "DOWNLOAD_BILIBILI_VIDEO"
 
         val material = MaterialVideoService.repo.findById(materialId)
             ?: return buildJsonObject { put("error", "MATERIAL_NOT_FOUND") }.toValidJson()
+                .also { logger.debug("handler: material not found id=$materialId") }
 
         val activeStatuses = setOf("pending", "claimed", "running")
         val isActive = TaskStatusService.listAll(materialId = materialId, pageSize = 200)
             .items.any { it.type == taskType && it.status in activeStatuses }
         if (isActive) {
+            logger.debug("handler: task already active materialId=$materialId")
             return buildJsonObject { put("error", "TASK_ALREADY_ACTIVE") }.toValidJson()
         }
 
@@ -78,6 +83,8 @@ object BilibiliVideoDownloadRoute : FredicaApi.Route {
                 createdAt     = nowSec,
             )
         )
+
+        logger.debug("handler: created workflow=$workflowRunId task=$taskId bvid=${material.sourceId}")
 
         return buildJsonObject {
             put("workflow_run_id", workflowRunId)

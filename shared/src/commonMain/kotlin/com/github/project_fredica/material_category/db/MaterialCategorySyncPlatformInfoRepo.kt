@@ -17,4 +17,6 @@ interface MaterialCategorySyncPlatformInfoRepo {
     suspend fun updateAfterSyncFailure(id: String, error: String)
     suspend fun setSyncState(id: String, state: String)
     suspend fun updateDisplayName(id: String, displayName: String)
+    suspend fun setLastWorkflowRunId(id: String, workflowRunId: String)
+    suspend fun findStale(syncState: String, olderThanSec: Long): List<MaterialCategorySyncPlatformInfo>
 }

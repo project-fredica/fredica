@@ -17,6 +17,7 @@ data class MaterialCategorySyncPlatformInfo(
     @SerialName("sync_state") val syncState: String = "idle",
     @SerialName("last_error") val lastError: String? = null,
     @SerialName("fail_count") val failCount: Int = 0,
+    @SerialName("last_workflow_run_id") val lastWorkflowRunId: String? = null,
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
 )

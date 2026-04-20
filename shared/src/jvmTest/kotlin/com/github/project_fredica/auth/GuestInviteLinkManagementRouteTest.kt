@@ -9,7 +9,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import kotlin.test.AfterTest
@@ -104,7 +106,7 @@ class GuestInviteLinkManagementRouteTest {
     @Test
     fun gl4_delete_success() = runBlocking {
         val linkId = linkDb.create("link-del", "To Delete", "admin")
-        val resp = callDelete("""{"id":"$linkId"}""")
+        val resp = callDelete(buildJsonObject { put("id", linkId) }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         // 验证已删除
         assertNull(linkDb.findById(linkId))
@@ -118,7 +120,7 @@ class GuestInviteLinkManagementRouteTest {
         visitDb.record(linkId, "1.1.1.1", "UA")
         visitDb.record(linkId, "2.2.2.2", "UA")
         assertEquals(2, visitDb.countByLinkId(linkId))
-        callDelete("""{"id":"$linkId"}""")
+        callDelete(buildJsonObject { put("id", linkId) }.toString())
         assertEquals(0, visitDb.countByLinkId(linkId))
         Unit
     }
@@ -145,7 +147,10 @@ class GuestInviteLinkManagementRouteTest {
     @Test
     fun gl8_update_label() = runBlocking {
         val linkId = linkDb.create("link-upd", "Old Label", "admin")
-        val resp = callUpdate("""{"id":"$linkId","label":"New Label"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("label", "New Label")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertEquals("New Label", linkDb.findById(linkId)!!.label)
         Unit
@@ -155,7 +160,10 @@ class GuestInviteLinkManagementRouteTest {
     @Test
     fun gl9_update_status() = runBlocking {
         val linkId = linkDb.create("link-sts", "Label", "admin")
-        val resp = callUpdate("""{"id":"$linkId","status":"disabled"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("status", "disabled")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertEquals("disabled", linkDb.findById(linkId)!!.status)
         Unit
@@ -165,7 +173,11 @@ class GuestInviteLinkManagementRouteTest {
     @Test
     fun gl10_update_both() = runBlocking {
         val linkId = linkDb.create("link-both", "Old", "admin")
-        val resp = callUpdate("""{"id":"$linkId","label":"New","status":"disabled"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("label", "New")
+            put("status", "disabled")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         val link = linkDb.findById(linkId)!!
         assertEquals("New", link.label)
@@ -193,7 +205,10 @@ class GuestInviteLinkManagementRouteTest {
     @Test
     fun gl13_update_invalid_status() = runBlocking {
         val linkId = linkDb.create("link-inv", "Label", "admin")
-        val resp = callUpdate("""{"id":"$linkId","status":"invalid"}""")
+        val resp = callUpdate(buildJsonObject {
+            put("id", linkId)
+            put("status", "invalid")
+        }.toString())
         // updateStatus 会抛 require 异常，被 try/catch 捕获
         assertTrue(resp.containsKey("error"))
         Unit

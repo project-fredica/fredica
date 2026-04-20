@@ -23,6 +23,9 @@ import com.github.project_fredica.db.MaterialVideo
 import com.github.project_fredica.db.MaterialVideoDb
 import com.github.project_fredica.db.MaterialVideoService
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -93,7 +96,7 @@ class MaterialVideoCheckRouteTest {
 
     private fun queryJson(materialId: String?): String {
         if (materialId == null) return "{}"
-        return """{"material_id":["$materialId"]}"""
+        return buildJsonObject { put("material_id", buildJsonArray { add(JsonPrimitive(materialId)) }) }.toString()
     }
 
     @Test

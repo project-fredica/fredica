@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAppFetch } from "~/util/app_fetch";
+import { useAppFetch, DEFAULT_SERVER_PORT } from "~/util/app_fetch";
 import { callBridge, BridgeUnavailableError } from "~/util/bridge";
 import { print_error } from "~/util/error_handler";
 import { json_parse } from "~/util/json";
 import { fetchLlmModelAvailability } from "~/util/materialWebenApi";
+import { useAppConfig } from "~/context/appConfig";
 import type { Route } from "./+types/app-desktop-home";
 
 export function meta({ }: Route.MetaArgs) {
@@ -19,9 +20,28 @@ export default function Component({
 }: Route.ComponentProps) {
     const navigate = useNavigate();
     const { apiFetch } = useAppFetch();
+    const { appConfig, isStorageLoaded } = useAppConfig();
     // null = 检测中，true = 已失效，false = 正常或未配置
     const [credExpired, setCredExpired] = useState<boolean | null>(null);
     const [modelConfigInvalid, setModelConfigInvalid] = useState<boolean | null>(null);
+
+    // 实例状态检查：未初始化时跳转 /setup
+    useEffect(() => {
+        if (!isStorageLoaded) return;
+        const s = appConfig.webserver_schema ?? "http";
+        const d = appConfig.webserver_domain ?? "localhost";
+        const p = appConfig.webserver_port ?? DEFAULT_SERVER_PORT;
+        const host = `${s}://${d}:${p}`;
+        (async () => {
+            try {
+                const resp = await fetch(`${host}/api/v1/InstanceStatusRoute`);
+                if (resp.ok) {
+                    const data: { initialized: boolean } = await resp.json();
+                    if (!data.initialized) { navigate("/setup", { replace: true }); }
+                }
+            } catch { /* 服务器未连接，留在主页 */ }
+        })();
+    }, [isStorageLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         // App 启动时通过 kmpJsBridge 检测 B 站账号登录态，

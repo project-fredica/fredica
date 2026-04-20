@@ -9,8 +9,10 @@ import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -142,7 +144,11 @@ class UserManagementRouteTest {
     @Test
     fun um5_display_name_too_long() = runBlocking {
         val longName = "a".repeat(65)
-        val resp = callWithIdentity(rootUser, UserCreateRoute::handler, """{"username":"validuser","password":"securepass1","display_name":"$longName"}""")
+        val resp = callWithIdentity(rootUser, UserCreateRoute::handler, buildJsonObject {
+            put("username", "validuser")
+            put("password", "securepass1")
+            put("display_name", longName)
+        }.toString())
         assertTrue(resp["error"]!!.jsonPrimitive.content.contains("显示名长度"))
         Unit
     }
@@ -164,7 +170,9 @@ class UserManagementRouteTest {
     @Test
     fun um7_root_disable_user_success() = runBlocking {
         val userId = userDb.createUser("target_user", "Target", "hash123")
-        val resp = callWithIdentity(rootUser, UserDisableRoute::handler, """{"user_id":"$userId"}""")
+        val resp = callWithIdentity(rootUser, UserDisableRoute::handler, buildJsonObject {
+            put("user_id", userId)
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         // 验证状态已变更
         val user = userDb.findById(userId)!!
@@ -201,7 +209,9 @@ class UserManagementRouteTest {
     fun um11_disable_already_disabled() = runBlocking {
         val userId = userDb.createUser("disabled_user", "DU", "hash123")
         userDb.updateStatus(userId, "disabled")
-        val resp = callWithIdentity(rootUser, UserDisableRoute::handler, """{"user_id":"$userId"}""")
+        val resp = callWithIdentity(rootUser, UserDisableRoute::handler, buildJsonObject {
+            put("user_id", userId)
+        }.toString())
         assertEquals("用户已处于禁用状态", resp["error"]!!.jsonPrimitive.content)
         Unit
     }
@@ -213,7 +223,9 @@ class UserManagementRouteTest {
         sessionDb.createSession(userId, "UA", "1.1.1.1")
         // 确认 session 存在
         assertTrue(sessionDb.findByUserId(userId).isNotEmpty())
-        callWithIdentity(rootUser, UserDisableRoute::handler, """{"user_id":"$userId"}""")
+        callWithIdentity(rootUser, UserDisableRoute::handler, buildJsonObject {
+            put("user_id", userId)
+        }.toString())
         // session 应被删除
         assertTrue(sessionDb.findByUserId(userId).isEmpty())
         Unit
@@ -226,7 +238,9 @@ class UserManagementRouteTest {
     fun um12_root_enable_user_success() = runBlocking {
         val userId = userDb.createUser("enable_user", "EU", "hash123")
         userDb.updateStatus(userId, "disabled")
-        val resp = callWithIdentity(rootUser, UserEnableRoute::handler, """{"user_id":"$userId"}""")
+        val resp = callWithIdentity(rootUser, UserEnableRoute::handler, buildJsonObject {
+            put("user_id", userId)
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         val user = userDb.findById(userId)!!
         assertEquals("active", user.status)
@@ -253,7 +267,9 @@ class UserManagementRouteTest {
     @Test
     fun um15_enable_already_active() = runBlocking {
         val userId = userDb.createUser("active_user", "AU", "hash123")
-        val resp = callWithIdentity(rootUser, UserEnableRoute::handler, """{"user_id":"$userId"}""")
+        val resp = callWithIdentity(rootUser, UserEnableRoute::handler, buildJsonObject {
+            put("user_id", userId)
+        }.toString())
         assertEquals("用户已处于启用状态", resp["error"]!!.jsonPrimitive.content)
         Unit
     }

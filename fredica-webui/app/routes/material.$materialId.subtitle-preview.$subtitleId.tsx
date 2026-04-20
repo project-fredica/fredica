@@ -8,7 +8,7 @@ import { BilibiliSubtitlePanel } from "~/components/bilibili/BilibiliSubtitlePan
 import { CommonSubtitlePanel, type CommonSubtitleItem } from "~/components/subtitle/CommonSubtitlePanel";
 import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 import { parseSrt } from "~/util/srtParser";
-import { type BilibiliExtra } from "~/components/material-library/materialTypes";
+import { type BilibiliExtra, isBilibiliVideo } from "~/components/material-library/materialTypes";
 import { json_parse } from "~/util/json";
 import { print_error } from "~/util/error_handler";
 
@@ -22,8 +22,8 @@ function parseSubtitleId(id: string): { source: string; key: string } {
 
 // ─── Bilibili helpers ───────────────────────────────────────────────────────
 
-function getBilibiliInfo(material: { source_type: string; source_id: string; id: string; extra: string }) {
-    if (material.source_type !== "bilibili") return null;
+function getBilibiliInfo(material: { type: string; source_type: string; source_id: string; id: string; extra: string }) {
+    if (!isBilibiliVideo(material)) return null;
     let bvid = material.source_id;
     const ext = json_parse<BilibiliExtra>(material.extra);
     if (ext?.bvid) bvid = ext.bvid;

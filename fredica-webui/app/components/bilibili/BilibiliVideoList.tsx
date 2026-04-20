@@ -6,6 +6,7 @@ import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConcl
 import { useAiConclusionStatus } from "~/components/bilibili/useAiConclusionStatus";
 import { formatDuration, formatCount, formatFavDate, buildPageWindows } from "~/util/bilibili";
 import { print_error, reportHttpError } from "~/util/error_handler";
+import { isBilibiliVideo } from "~/components/material-library/materialTypes";
 
 export interface MediaItem {
     id: number;
@@ -44,6 +45,7 @@ interface LibraryEntry {
 
 interface MaterialVideoItem {
     id: string;
+    type: string;
     source_type: string;
     source_id: string;
     category_ids: string[];
@@ -288,7 +290,7 @@ export function BilibiliVideoList(param: {
             if (!resp.ok) { reportHttpError('获取素材库状态失败', resp); return new Map(); }
             const map = new Map<string, LibraryEntry>();
             for (const v of data ?? []) {
-                if (v.source_type === 'bilibili') {
+                if (isBilibiliVideo(v)) {
                     // Key by DB ID so each page of a multi-P video has its own entry
                     map.set(v.id, { id: v.id, categoryIds: v.category_ids ?? [] });
                 }
@@ -390,8 +392,13 @@ export function BilibiliVideoList(param: {
                 reportHttpError('获取分P信息失败', resp);
                 return;
             }
+            const errMsg = (data as unknown as Record<string, unknown>)?.error;
+            if (typeof errMsg === 'string') {
+                print_error({ reason: `获取分P信息失败: ${errMsg}`, err: new Error(errMsg) });
+                return;
+            }
             type PageInfo = { page: number; title: string; duration: number; cover: string };
-            const pages: PageInfo[] = data as PageInfo[];
+            const pages: PageInfo[] = Array.isArray(data) ? data as PageInfo[] : [];
             const expanded: MediaItem[] = pages.map(p => ({
                 ...media,
                 dbId: `bilibili_bvid__${media.bvid}__P${p.page}`,

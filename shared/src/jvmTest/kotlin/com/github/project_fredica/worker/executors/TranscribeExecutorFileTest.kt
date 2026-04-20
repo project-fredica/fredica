@@ -39,7 +39,9 @@ import com.github.project_fredica.db.TaskPriority
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -339,7 +341,14 @@ class TranscribeExecutorFileTest {
 
     private fun writeChunkMeta(dir: File, prefix: String, coreStart: Double, coreEnd: Double) {
         dir.resolve("$prefix.meta.json").writeText(
-            """{"language":"zh","model_size":"large-v3","segment_count":0,"completed_at":"2026-01-01T00:00:00","core_start_sec":$coreStart,"core_end_sec":$coreEnd}"""
+            buildJsonObject {
+                put("language", "zh")
+                put("model_size", "large-v3")
+                put("segment_count", 0)
+                put("completed_at", "2026-01-01T00:00:00")
+                put("core_start_sec", coreStart)
+                put("core_end_sec", coreEnd)
+            }.toString()
         )
     }
 
@@ -474,25 +483,23 @@ class TranscribeExecutorFileTest {
         materialId = "mat-test",
         priority = TaskPriority.DEV_TEST_DEFAULT,
         createdAt = System.currentTimeMillis() / 1000,
-        payload = buildString {
-            append("{")
-            append(""""audio_path":"${audioPath.replace("\\", "\\\\")}"""")
-            append(""","output_dir":"${outputDir.replace("\\", "\\\\")}"""")
-            append(""","chunk_index":$chunkIndex""")
-            append(""","model_size":"$modelSize"""")
-            if (language != null) {
-                append(""","language":"$language"""")
-            } else {
-                append(""","language":null""")
-            }
-            append("}")
-        },
+        payload = buildJsonObject {
+            put("audio_path", audioPath)
+            put("output_dir", outputDir)
+            put("chunk_index", chunkIndex)
+            put("model_size", modelSize)
+            put("language", language)
+        }.toString(),
     )
 
     private fun writeDoneFile(dir: File, prefix: String, inputHash: String, modelSize: String, language: String?) {
-        val langJson = if (language != null) """"$language"""" else "null"
         dir.resolve("$prefix.done").writeText(
-            """{"input_hash":"$inputHash","output_hash":"fakehash","model_size":"$modelSize","language":$langJson}"""
+            buildJsonObject {
+                put("input_hash", inputHash)
+                put("output_hash", "fakehash")
+                put("model_size", modelSize)
+                put("language", language)
+            }.toString()
         )
     }
 

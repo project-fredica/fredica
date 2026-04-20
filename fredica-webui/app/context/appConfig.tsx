@@ -107,6 +107,29 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         }).catch(() => {
             // 浏览器环境或 bridge 未就绪时忽略
         });
+
+        // WebView 环境：获取 ROOT session token，使 apiFetch 携带管理员身份
+        callBridge("get_session_token").then(raw => {
+            const info = json_parse<{ session_token?: string; user_role?: string; user_display_name?: string; user_permissions?: string; not_initialized?: boolean }>(raw);
+            if (info.not_initialized) return;
+            if (info.session_token) {
+                const permissions = info.user_permissions
+                    ? info.user_permissions.split(",").map(s => s.trim()).filter(Boolean)
+                    : null;
+                setAppConfigState(prev => {
+                    const next = {
+                        ...prev,
+                        session_token: info.session_token!,
+                        user_role: (info.user_role ?? "root") as AppConfig["user_role"],
+                        user_display_name: info.user_display_name ?? null,
+                        user_permissions: permissions,
+                    };
+                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+                    document.cookie = `fredica_media_token=${info.session_token}; path=/; SameSite=Strict`;
+                    return next;
+                });
+            }
+        }).catch(() => {});
     }, []);
 
     const setAppConfig = (config: Partial<AppConfig>) => {

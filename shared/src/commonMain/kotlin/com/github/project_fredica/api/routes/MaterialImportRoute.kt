@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.github.project_fredica.apputil.bilibiliVideoId
 import com.github.project_fredica.material_category.service.MaterialCategoryService
 import com.github.project_fredica.db.MaterialType
 import com.github.project_fredica.db.MaterialVideo
@@ -15,18 +16,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 private val lenientJson = Json { ignoreUnknownKeys = true }
-
-/**
- * Builds the deterministic DB primary key for a bilibili video page.
- *
- * Format: `bilibili_bvid__{bvid}__P{page}`
- * Example: `bilibili_bvid__BV1NK4y1V7M5__P1`
- *
- * `page` is the actual 1-based page number of this item.
- * Favourites-list imports always pass `page = 1` (the representative entry).
- */
-fun bilibiliVideoId(bvid: String, page: Int = 1): String =
-    "bilibili_bvid__${bvid}__P$page"
 
 object MaterialImportRoute : FredicaApi.Route {
     override val mode = FredicaApi.Route.Mode.Post

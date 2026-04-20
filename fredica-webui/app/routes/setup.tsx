@@ -3,6 +3,8 @@ import { useNavigate } from "react-router";
 import zxcvbn from "zxcvbn";
 import { useAppConfig } from "~/context/appConfig";
 import { DEFAULT_SERVER_PORT } from "~/util/app_fetch";
+import { callBridge, BridgeUnavailableError } from "~/util/bridge";
+import { json_parse } from "~/util/json";
 
 interface InstanceStatusResponse { initialized: boolean; }
 interface InstanceInitResponse { success?: boolean; token?: string; user?: { display_name: string; role: string; permissions: string }; error?: string; }
@@ -76,15 +78,10 @@ export default function SetupPage() {
         setLoading(true);
         setError(null);
         try {
-            const host = getHost(appConfig);
-            const resp = await fetch(`${host}/api/v1/InstanceInitRoute`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: username.trim(), password }),
-            });
-            const data: InstanceInitResponse = await resp.json();
-            if (!resp.ok || data.error) {
-                setError(data.error ?? "初始化失败");
+            const raw = await callBridge("instance_init", JSON.stringify({ username: username.trim(), password }));
+            const data = json_parse<InstanceInitResponse>(raw);
+            if (data.error) {
+                setError(data.error);
                 return;
             }
             if (data.token && data.user) {
@@ -97,10 +94,14 @@ export default function SetupPage() {
                     user_display_name: data.user.display_name,
                     user_permissions: permissions,
                 });
-                navigate("/", { replace: true });
+                navigate("/app-desktop-home", { replace: true });
             }
-        } catch {
-            setError("网络错误，请检查服务器连接");
+        } catch (e) {
+            if (e instanceof BridgeUnavailableError) {
+                setError("请让服主在桌面端界面中完成初始化");
+            } else {
+                setError("初始化失败，请重试");
+            }
         } finally {
             setLoading(false);
         }

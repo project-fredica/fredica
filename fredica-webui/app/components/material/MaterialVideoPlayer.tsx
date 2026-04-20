@@ -25,7 +25,9 @@ export type VideoPlayerMode = "inline" | "floating" | "standalone";
 export interface MaterialVideoPlayerProps {
     materialId: string;
     mode: VideoPlayerMode;
-    /** 素材来源类型（"bilibili" 等），用于决定启动下载+转码还是纯转码 */
+    /** 素材类型（"video" / "audio" 等），与 sourceType 配合决定下载+转码还是纯转码 */
+    materialType?: string;
+    /** 素材来源类型（"bilibili" 等），与 materialType 配合决定下载+转码还是纯转码 */
     sourceType?: string;
     /** standalone 模式时由外部传入初始跳转位置（字幕联动） */
     initialSeek?: number;
@@ -39,7 +41,7 @@ export interface MaterialVideoPlayerProps {
 
 // ── 播放器 ────────────────────────────────────────────────────────────────────
 
-export function MaterialVideoPlayer({ materialId, mode, sourceType, initialSeek, seekRequest, onSeekRequestApplied, className }: MaterialVideoPlayerProps) {
+export function MaterialVideoPlayer({ materialId, mode, materialType, sourceType, initialSeek, seekRequest, onSeekRequestApplied, className }: MaterialVideoPlayerProps) {
     const { appConfig } = useAppConfig();
     const instanceId = useRef(crypto.randomUUID()).current;
     const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,7 +80,7 @@ export function MaterialVideoPlayer({ materialId, mode, sourceType, initialSeek,
         onPlaybackPaused,
         onForcePause,
         saveProgress,
-    } = useVideoPlayerState(materialId, sourceType);
+    } = useVideoPlayerState(materialId, materialType, sourceType);
 
     // 折叠悬浮窗或路由离开时，video 元素随 unmount 被移除；
     // React 在 unmount 期间不会通过合成事件系统派发 pause 事件（fiber 已标记销毁），

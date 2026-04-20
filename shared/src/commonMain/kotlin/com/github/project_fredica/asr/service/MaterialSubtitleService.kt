@@ -12,6 +12,7 @@ import com.github.project_fredica.asr.model.MaterialSubtitleItem
 import com.github.project_fredica.asr.model.BilibiliMaterialExtra
 import com.github.project_fredica.asr.srt.ParseSrtBlocksResult
 import com.github.project_fredica.asr.srt.SrtUtil
+import com.github.project_fredica.db.MaterialMediaSpec
 import com.github.project_fredica.db.MaterialVideoService
 import java.io.File
 
@@ -336,7 +337,7 @@ object MaterialSubtitleService {
      */
     private suspend fun scanBilibiliSubtitleItems(materialId: String): List<MaterialSubtitleItem> {
         val material = MaterialVideoService.repo.findById(materialId) ?: return emptyList()
-        if (material.sourceType != "bilibili") return emptyList()
+        if (!MaterialMediaSpec.isBilibiliVideo(material.type, material.sourceType)) return emptyList()
 
         val extra = material.extra.loadJsonModel<BilibiliMaterialExtra>().getOrNull()
         val bvid = extra?.bvid

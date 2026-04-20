@@ -83,6 +83,14 @@ object BilibiliSubtitleBodyCacheService {
             val pyBody = buildJsonObject { put("subtitle_url", subtitleUrlFieldValue) }
             logger.debug("调用 Python /bilibili/video/subtitle-body urlKey=$urlKey")
             val row = FredicaApi.PyUtil.post("/bilibili/video/subtitle-body", pyBody.toString(), timeoutMs = 5 * 60_000L)
+            logger.debug("Python 返回 urlKey=$urlKey raw_len=${row.length} raw_preview=${row.take(200)}")
+            val errorCheck = runCatching {
+                val obj = row.loadJson().getOrThrow() as? JsonObject
+                obj?.get("error")?.let { (it as? JsonPrimitive)?.content }
+            }.getOrNull()
+            if (errorCheck != null) {
+                logger.warn("Python 返回 error 字段 urlKey=$urlKey error=$errorCheck")
+            }
             row to computeIsSuccess(row)
         }
         logger.debug("返回结果 urlKey=$urlKey")
@@ -93,6 +101,12 @@ object BilibiliSubtitleBodyCacheService {
         runCatching {
             val obj = raw.loadJson().getOrThrow() as? JsonObject
             val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
+            if (code != 0) {
+                logger.debug("isSuccess=false: code=$code raw_preview=${raw.take(200)}")
+            }
             code == 0
-        }.getOrDefault(false)
+        }.getOrElse { e ->
+            logger.warn("isSuccess 解析异常 raw_preview=${raw.take(200)}: ${e.message}")
+            false
+        }
 }

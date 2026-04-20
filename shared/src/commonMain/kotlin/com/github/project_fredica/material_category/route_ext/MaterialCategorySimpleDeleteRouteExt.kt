@@ -38,15 +38,9 @@ suspend fun MaterialCategorySimpleDeleteRoute.handler2(param: String, context: R
         return buildJsonObject { put("error", "该分类是同步分类，请使用 MaterialCategorySyncDeleteRoute") }.toValidJson()
     }
 
-    MaterialCategoryService.repo.ensureUncategorized(category.ownerId)
-    val orphanIds = MaterialCategoryService.repo.findOrphanMaterialIds(p.id)
+    MaterialCategoryService.repo.reconcileOrphanMaterials(p.id, category.ownerId)
     val deleted = MaterialCategoryService.repo.deleteById(p.id, category.ownerId)
     if (!deleted) return buildJsonObject { put("error", "删除失败") }.toValidJson()
-
-    if (orphanIds.isNotEmpty()) {
-        val uncatId = MaterialCategoryDefaults.uncategorizedId(category.ownerId)
-        MaterialCategoryService.repo.linkMaterials(orphanIds, listOf(uncatId))
-    }
 
     MaterialCategoryAuditLogService.repo.insert(
         MaterialCategoryAuditLog(

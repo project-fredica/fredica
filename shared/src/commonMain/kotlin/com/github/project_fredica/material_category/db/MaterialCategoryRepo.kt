@@ -31,4 +31,6 @@ interface MaterialCategoryRepo {
     suspend fun deleteByMaterialIdExcluding(materialId: String, excludeCategoryIds: List<String>, onlyAddedBy: String? = "user")
     suspend fun findOrphanMaterialIds(categoryId: String): List<String>
     suspend fun ensureUncategorized(userId: String)
+    suspend fun reconcileOrphanMaterials(categoryId: String, ownerId: String)
+    suspend fun reconcileAllOrphanMaterials()
 }

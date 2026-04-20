@@ -6,6 +6,7 @@ uvicorn[standard]
 websockets
 starlette
 bilibili-api-python
+curl_cffi
 aiohttp
 pydantic
 psutil

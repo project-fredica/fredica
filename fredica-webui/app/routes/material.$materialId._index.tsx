@@ -93,7 +93,7 @@ export default function MaterialOverviewPage() {
 
             {/* Video player */}
             <section>
-                <MaterialVideoPlayer materialId={material.id} mode="inline" sourceType={material.source_type} />
+                <MaterialVideoPlayer materialId={material.id} mode="inline" materialType={material.type} sourceType={material.source_type} />
             </section>
 
             {/* Capability grid */}

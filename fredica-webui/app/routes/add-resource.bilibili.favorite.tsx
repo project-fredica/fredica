@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import { SyncSourceCreateButton } from "~/components/bilibili/SyncSourceCreateButton";
 
 /** 从链接或纯数字中提取 fid */
 function extractFid(input: string): string {
@@ -72,13 +73,21 @@ export default function Component() {
                             <p className="mt-1.5 text-xs text-red-600">{validationError}</p>
                         )}
                     </div>
-                    <button
-                        type="submit"
-                        disabled={!urlInput.trim()}
-                        className="w-full md:w-auto px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        获取视频列表
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <button
+                            type="submit"
+                            disabled={!urlInput.trim()}
+                            className="w-full md:w-auto px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            获取视频列表
+                        </button>
+                        {fidFromUrl && (
+                            <SyncSourceCreateButton
+                                syncType="bilibili_favorite"
+                                platformConfig={{ media_id: Number(fidFromUrl) }}
+                            />
+                        )}
+                    </div>
                 </form>
             </div>
 

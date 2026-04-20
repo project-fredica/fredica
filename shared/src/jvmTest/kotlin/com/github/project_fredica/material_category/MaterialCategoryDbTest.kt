@@ -1,6 +1,7 @@
 package com.github.project_fredica.material_category
 
 import com.github.project_fredica.material_category.db.MaterialCategoryDb
+import com.github.project_fredica.material_category.model.MaterialCategoryDefaults
 import kotlinx.coroutines.runBlocking
 import org.ktorm.database.Database
 import java.io.File
@@ -166,7 +167,95 @@ class MaterialCategoryDbTest {
     }
 
     @Test
-    fun mc12_close_view_cascades_add_delete() = runBlocking {
+    fun mc12_ensureUncategorized_uses_correct_name() = runBlocking {
+        categoryDb.ensureUncategorized("user-a")
+        val cat = categoryDb.getById(MaterialCategoryDefaults.uncategorizedId("user-a"))
+        assertNotNull(cat)
+        assertEquals(MaterialCategoryDefaults.UNCATEGORIZED_NAME, cat.name)
+        assertEquals("待分类", cat.name)
+        Unit
+    }
+
+    @Test
+    fun mc13_reconcileOrphanMaterials_moves_orphans_to_uncategorized() = runBlocking {
+        val cat = categoryDb.create(ownerId = "user-a", name = "将删除", description = "")
+        categoryDb.linkMaterials(listOf("mat-1", "mat-2"), listOf(cat.id), addedBy = "user")
+
+        categoryDb.reconcileOrphanMaterials(cat.id, "user-a")
+
+        val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
+        val uncatCat = categoryDb.getById(uncatId)
+        assertNotNull(uncatCat, "待分类 category should be created")
+        assertEquals("待分类", uncatCat.name)
+
+        var count = 0
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT COUNT(*) FROM material_category_rel WHERE category_id = ?").use { ps ->
+                ps.setString(1, uncatId)
+                ps.executeQuery().use { rs -> if (rs.next()) count = rs.getInt(1) }
+            }
+        }
+        assertEquals(2, count, "Both orphan materials should be linked to 待分类")
+        Unit
+    }
+
+    @Test
+    fun mc14_reconcileOrphanMaterials_skips_when_no_orphans() = runBlocking {
+        val cat1 = categoryDb.create(ownerId = "user-a", name = "分类A", description = "")
+        val cat2 = categoryDb.create(ownerId = "user-a", name = "分类B", description = "")
+        categoryDb.linkMaterials(listOf("mat-1"), listOf(cat1.id, cat2.id), addedBy = "user")
+
+        categoryDb.reconcileOrphanMaterials(cat1.id, "user-a")
+
+        val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
+        val uncatCat = categoryDb.getById(uncatId)
+        assertNull(uncatCat, "待分类 category should NOT be created when there are no orphans")
+        Unit
+    }
+
+    @Test
+    fun mc15_reconcileOrphanMaterials_only_moves_true_orphans() = runBlocking {
+        val cat1 = categoryDb.create(ownerId = "user-a", name = "分类A", description = "")
+        val cat2 = categoryDb.create(ownerId = "user-a", name = "分类B", description = "")
+        categoryDb.linkMaterials(listOf("mat-1"), listOf(cat1.id, cat2.id), addedBy = "user")
+        categoryDb.linkMaterials(listOf("mat-2"), listOf(cat1.id), addedBy = "user")
+
+        categoryDb.reconcileOrphanMaterials(cat1.id, "user-a")
+
+        val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
+        var uncatCount = 0
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT COUNT(*) FROM material_category_rel WHERE category_id = ?").use { ps ->
+                ps.setString(1, uncatId)
+                ps.executeQuery().use { rs -> if (rs.next()) uncatCount = rs.getInt(1) }
+            }
+        }
+        assertEquals(1, uncatCount, "Only mat-2 (true orphan) should be moved to 待分类")
+
+        var mat1InCat2 = false
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT 1 FROM material_category_rel WHERE material_id = ? AND category_id = ?").use { ps ->
+                ps.setString(1, "mat-1")
+                ps.setString(2, cat2.id)
+                ps.executeQuery().use { rs -> mat1InCat2 = rs.next() }
+            }
+        }
+        assertTrue(mat1InCat2, "mat-1 should still be in cat2")
+        Unit
+    }
+
+    @Test
+    fun mc16_ensureUncategorized_idempotent() = runBlocking {
+        categoryDb.ensureUncategorized("user-a")
+        categoryDb.ensureUncategorized("user-a")
+        val cat = categoryDb.getById(MaterialCategoryDefaults.uncategorizedId("user-a"))
+        assertNotNull(cat)
+        assertEquals("待分类", cat.name)
+        Unit
+    }
+
+    @Test
+    fun mc17_close_view_cascades_add_delete() = runBlocking {
         val cat = categoryDb.create(ownerId = "user-a", name = "test", description = "")
         categoryDb.update(cat.id, "user-a", allowOthersView = true, allowOthersAdd = true, allowOthersDelete = true)
         val before = categoryDb.getById(cat.id)
@@ -181,6 +270,83 @@ class MaterialCategoryDbTest {
         assertFalse(after.allowOthersView)
         assertFalse(after.allowOthersAdd)
         assertFalse(after.allowOthersDelete)
+        Unit
+    }
+
+    private fun createMaterialTable() {
+        db.useConnection { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS material (
+                        id          TEXT PRIMARY KEY,
+                        type        TEXT NOT NULL,
+                        title       TEXT NOT NULL DEFAULT '',
+                        source_type TEXT NOT NULL DEFAULT '',
+                        source_id   TEXT NOT NULL DEFAULT '',
+                        cover_url   TEXT NOT NULL DEFAULT '',
+                        description TEXT NOT NULL DEFAULT '',
+                        extra       TEXT NOT NULL DEFAULT '{}',
+                        created_at  INTEGER NOT NULL,
+                        updated_at  INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+    }
+
+    private fun insertMaterial(id: String) {
+        val now = System.currentTimeMillis() / 1000L
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "INSERT INTO material (id, type, title, created_at, updated_at) VALUES (?, 'video', '', ?, ?)"
+            ).use { ps ->
+                ps.setString(1, id)
+                ps.setLong(2, now)
+                ps.setLong(3, now)
+                ps.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    fun mc18_reconcileAllOrphanMaterials_assigns_to_uncategorized() = runBlocking {
+        createMaterialTable()
+        insertMaterial("mat-1")
+        insertMaterial("mat-2")
+        insertMaterial("mat-3")
+        val cat = categoryDb.create(ownerId = "user-a", name = "分类A", description = "")
+        categoryDb.linkMaterials(listOf("mat-1"), listOf(cat.id), addedBy = "user")
+
+        categoryDb.reconcileAllOrphanMaterials()
+
+        val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
+        val uncatCat = categoryDb.getById(uncatId)
+        assertNotNull(uncatCat)
+        assertEquals("待分类", uncatCat.name)
+
+        var uncatCount = 0
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT COUNT(*) FROM material_category_rel WHERE category_id = ?").use { ps ->
+                ps.setString(1, uncatId)
+                ps.executeQuery().use { rs -> if (rs.next()) uncatCount = rs.getInt(1) }
+            }
+        }
+        assertEquals(2, uncatCount, "mat-2 and mat-3 should be in 待分类")
+        Unit
+    }
+
+    @Test
+    fun mc19_reconcileAllOrphanMaterials_noop_when_no_orphans() = runBlocking {
+        createMaterialTable()
+        insertMaterial("mat-1")
+        val cat = categoryDb.create(ownerId = "user-a", name = "分类A", description = "")
+        categoryDb.linkMaterials(listOf("mat-1"), listOf(cat.id), addedBy = "user")
+
+        categoryDb.reconcileAllOrphanMaterials()
+
+        val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
+        val uncatCat = categoryDb.getById(uncatId)
+        assertNull(uncatCat, "待分类 should NOT be created when there are no orphans")
         Unit
     }
 }

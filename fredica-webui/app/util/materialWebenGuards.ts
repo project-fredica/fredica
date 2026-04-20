@@ -30,6 +30,7 @@ export function getSafeWorkspaceMaterial(value: unknown): MaterialVideo {
     const record = asRecord(value);
     return {
         id: asString(record?.id),
+        type: asString(record?.type),
         source_type: asString(record?.source_type),
         source_id: asString(record?.source_id),
         title: asString(record?.title),

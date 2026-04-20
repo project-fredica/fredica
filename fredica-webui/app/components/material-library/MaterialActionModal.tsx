@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Loader, X, Trash2, ExternalLink, Copy, Check, FolderOpen, BadgeInfo, Clock3 } from "lucide-react";
 import { Link } from "react-router";
-import { type MaterialCategory, type MaterialVideo, SOURCE_BADGE, formatDuration, type BilibiliExtra } from "./materialTypes";
+import { type MaterialCategory, type MaterialVideo, getSourceBadge, formatDuration, type BilibiliExtra, isBilibiliVideo } from "./materialTypes";
 import { InfoTab } from "./InfoTab";
 import { json_parse } from "~/util/json";
 import { print_error } from "~/util/error_handler";
@@ -21,15 +21,16 @@ export function MaterialActionModal({
     onDeleteVideo: (id: string) => void;
     onOpenAiConclusion: (bvid: string) => void;
 }) {
-    const sourceBadge = SOURCE_BADGE[actionTarget.source_type] ?? { label: actionTarget.source_type, className: 'bg-gray-100 text-gray-600' };
+    const sourceBadge = getSourceBadge(actionTarget.source_type) ?? { label: actionTarget.source_type, className: 'bg-gray-100 text-gray-600' };
     const videoCats = (categories ?? []).filter(c => actionTarget.category_ids.includes(c.id));
-    const bilibiliPage = actionTarget.source_type === 'bilibili'
+    const isBilibili = isBilibiliVideo(actionTarget);
+    const bilibiliPage = isBilibili
         ? parseInt(actionTarget.id.match(/__P(\d+)$/)?.[1] ?? '1', 10)
         : 1;
-    const bilibiliExtra = actionTarget.source_type === 'bilibili'
+    const bilibiliExtra = isBilibili
         ? json_parse<BilibiliExtra>(actionTarget.extra)
         : null;
-    const bilibiliUrl = actionTarget.source_type === 'bilibili'
+    const bilibiliUrl = isBilibili
         ? `https://www.bilibili.com/video/${bilibiliExtra?.bvid ?? actionTarget.source_id}${bilibiliPage > 1 ? `?p=${bilibiliPage}` : ''}`
         : null;
     const copyItems = useMemo(() => {

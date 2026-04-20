@@ -5,8 +5,12 @@ import com.github.project_fredica.api.routes.TenantInviteLandingRoute
 import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -52,7 +56,9 @@ class TenantInviteLandingRouteTest {
     private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
 
     private fun queryParam(pathId: String): String =
-        """{"path_id":["$pathId"]}"""
+        buildJsonObject {
+            put("path_id", buildJsonArray { add(JsonPrimitive(pathId)) })
+        }.toString()
 
     private suspend fun callHandler(pathId: String): JsonObject {
         val result = TenantInviteLandingRoute.handler(queryParam(pathId), noContext)

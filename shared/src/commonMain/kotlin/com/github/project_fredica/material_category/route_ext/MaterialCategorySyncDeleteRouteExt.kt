@@ -7,7 +7,7 @@ import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.auth.AuthIdentity
 import com.github.project_fredica.material_category.model.MaterialCategoryAuditLog
-import com.github.project_fredica.material_category.model.MaterialCategoryDefaults
+
 import com.github.project_fredica.material_category.service.MaterialCategoryAuditLogService
 import com.github.project_fredica.material_category.service.MaterialCategoryService
 import com.github.project_fredica.material_category.service.MaterialCategorySyncItemService
@@ -46,15 +46,9 @@ suspend fun MaterialCategorySyncDeleteRoute.handler2(param: String, context: Rou
     MaterialCategorySyncPlatformInfoService.repo.deleteById(syncInfo.id)
 
     // Handle orphan materials
-    MaterialCategoryService.repo.ensureUncategorized(category.ownerId)
-    val orphanIds = MaterialCategoryService.repo.findOrphanMaterialIds(p.id)
+    MaterialCategoryService.repo.reconcileOrphanMaterials(p.id, category.ownerId)
     val deleted = MaterialCategoryService.repo.deleteById(p.id, category.ownerId)
     if (!deleted) return buildJsonObject { put("error", "删除失败") }.toValidJson()
-
-    if (orphanIds.isNotEmpty()) {
-        val uncatId = MaterialCategoryDefaults.uncategorizedId(category.ownerId)
-        MaterialCategoryService.repo.linkMaterials(orphanIds, listOf(uncatId))
-    }
 
     MaterialCategoryAuditLogService.repo.insert(
         MaterialCategoryAuditLog(

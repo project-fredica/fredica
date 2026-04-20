@@ -1,7 +1,6 @@
 package com.github.project_fredica.api.routes
 
 import com.github.project_fredica.api.FredicaApi
-import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
@@ -9,6 +8,7 @@ import com.github.project_fredica.auth.AuthRole
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import com.github.project_fredica.db.MaterialVideoService
+import com.github.project_fredica.db.toMediaSpec
 import com.github.project_fredica.db.WorkflowRun
 import com.github.project_fredica.db.WorkflowRunStatusService
 import com.github.project_fredica.db.Task
@@ -51,25 +51,12 @@ object MaterialVideoTranscodeMp4Route : FredicaApi.Route {
         }
 
         val nowSec = System.currentTimeMillis() / 1000L
-        val mediaDir = AppUtil.Paths.materialMediaDir(material.id)
+        val spec = material.toMediaSpec()
         val workflowRunId = UUID.randomUUID().toString()
         val taskId = UUID.randomUUID().toString()
 
-        val payload = buildJsonObject {
-                // Bilibili 下载路径。
-                // Prefer .m4s pair (DASH); fall back to .flv for older downloads
-                val videoM4s = mediaDir.resolve("video.m4s")
-                val audioM4s = mediaDir.resolve("audio.m4s")
-                val videoFlv = mediaDir.resolve("video.flv")
-                if (videoM4s.exists() && audioM4s.exists()) {
-                    put("input_video", videoM4s.absolutePath)
-                    put("input_audio", audioM4s.absolutePath)
-                } else {
-                    put("input_video", videoFlv.absolutePath)
-                }
-                put("output_path", mediaDir.resolve("video.mp4").absolutePath)
-                put("hw_accel", "auto")
-        }.toString()
+        val payload = spec.buildTranscodePayload()
+            ?: return buildJsonObject { put("error", "INPUT_NOT_FOUND") }.toValidJson()
 
         WorkflowRunStatusService.create(
             WorkflowRun(

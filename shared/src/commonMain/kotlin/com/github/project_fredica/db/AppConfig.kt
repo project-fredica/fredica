@@ -1,6 +1,5 @@
 package com.github.project_fredica.db
 
-import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
 import com.github.project_fredica.llm.LlmDefaultRoles
 import com.github.project_fredica.llm.LlmModelConfig
 import com.github.project_fredica.llm.LlmTestConfig
@@ -61,15 +60,15 @@ data class AppConfig(
     @SerialName("instance_initialized") val instanceInitialized: String = "false",
     @SerialName("salt_imk_b64") val saltImkB64: String = "",
     @SerialName("salt_auth_b64") val saltAuthB64: String = "",
-    // Bilibili 登录态（留空则匿名请求；仅当出现"账号未登录"类错误时才需要配置）
-    @SerialName("bilibili_sessdata") override val bilibiliSessdata: String = "",
-    @SerialName("bilibili_bili_jct") override val bilibiliBiliJct: String = "",
-    @SerialName("bilibili_buvid3") override val bilibiliBuvid3: String = "",
-    @SerialName("bilibili_dedeuserid") override val bilibiliDedeuserid: String = "",
-    @SerialName("bilibili_ac_time_value") override val bilibiliAcTimeValue: String = "",
-    @SerialName("bilibili_buvid4") override val bilibiliBuvid4: String = "",
-    @SerialName("bilibili_proxy") override val bilibiliProxy: String = "",
-) : BilibiliApiPythonCredentialConfig, LlmTestConfig {
+    // [已迁移] Bilibili 登录态已迁移至 bilibili_account_pool 表，由 BilibiliAccountPoolService 管理
+    // @SerialName("bilibili_sessdata") val bilibiliSessdata: String = "",
+    // @SerialName("bilibili_bili_jct") val bilibiliBiliJct: String = "",
+    // @SerialName("bilibili_buvid3") val bilibiliBuvid3: String = "",
+    // @SerialName("bilibili_dedeuserid") val bilibiliDedeuserid: String = "",
+    // @SerialName("bilibili_ac_time_value") val bilibiliAcTimeValue: String = "",
+    // @SerialName("bilibili_buvid4") val bilibiliBuvid4: String = "",
+    @SerialName("bilibili_proxy") val bilibiliProxy: String = "",
+) : LlmTestConfig {
     // 从 llmDefaultRolesJson 中取 devTestModelId，再从 llmModelsJson 中查找对应模型
     private val devTestModel: LlmModelConfig? get() {
         val roles = llmDefaultRolesJson.loadJsonModel<LlmDefaultRoles>().getOrNull() ?: return null

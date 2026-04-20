@@ -2,49 +2,17 @@
 import datetime
 import os
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Optional
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from loguru import logger
 import bilibili_api
-from bilibili_api import Credential
 from bilibili_api.video import VideoDownloadURLDataDetecter
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from pydantic import BaseModel
 from starlette.websockets import WebSocket
 
 from fredica_pyutil_server.util.task_endpoint_util import TaskEndpointInEventLoopThread
-
-
-async def _make_credential(
-        sessdata: Optional[str] = None,
-        bili_jct: Optional[str] = None,
-        buvid3: Optional[str] = None,
-        buvid4: Optional[str] = None,
-        dedeuserid: Optional[str] = None,
-        ac_time_value: Optional[str] = None,
-        proxy: Optional[str] = None,
-) -> Optional[Credential]:
-    """有任意字段非空时构建 Credential，否则返回 None（匿名请求）。"""
-    if any([sessdata, bili_jct, buvid3, buvid4, dedeuserid, ac_time_value]):
-        c = Credential(
-            sessdata=sessdata or None,
-            bili_jct=bili_jct or None,
-            buvid3=buvid3 or None,
-            buvid4=buvid4 or None,
-            dedeuserid=dedeuserid or None,
-            ac_time_value=ac_time_value or None,
-            proxy=proxy or None,
-        )
-        if ac_time_value and await c.check_refresh():
-            logger.info("credential refresh ... old value is {}", str(c))
-            await c.refresh()
-            logger.info("credential refresh success , new value is {}", str(c))
-        if not await c.check_valid():
-            logger.error("credential invalid , value is {}", str(c))
-            return None
-        return c
-    return None
 
 
 _BILIBILI_HEADERS = {
@@ -63,9 +31,7 @@ class _CredentialBody(BaseModel):
     dedeuserid: Optional[str] = None
     ac_time_value: Optional[str] = None
     proxy: Optional[str] = None
-
-
-_CredQ = Annotated[Optional[str], Query(default=None)]
+    impersonate: Optional[str] = None
 
 
 class _BvidBody(BaseModel):
@@ -76,67 +42,76 @@ class _BvidBody(BaseModel):
     dedeuserid: Optional[str] = None
     ac_time_value: Optional[str] = None
     proxy: Optional[str] = None
+    impersonate: Optional[str] = None
+
+
+_CRED_KEYS = ("sessdata", "bili_jct", "buvid3", "buvid4", "dedeuserid", "ac_time_value")
+
+
+def _build_context(param: dict) -> dict:
+    return {
+        "credential": {k: param.get(k) for k in _CRED_KEYS},
+        "proxy": param.get("proxy") or "",
+        "impersonate": param.get("impersonate") or "",
+    }
+
+
+@_router.post("/get-info/{bvid}")
+async def get_info(bvid: str, body: _BvidBody):
+    logger.debug("[route] bilibili/video/get-info bvid={}", bvid)
+    from fredica_pyutil_server.subprocess.bilibili._common import run_in_subprocess
+    from fredica_pyutil_server.subprocess.bilibili.video import get_info_worker
+    param = body.model_dump()
+    result = await run_in_subprocess(get_info_worker, {
+        "bvid": bvid,
+        "context": _build_context(param),
+    })
+    logger.debug("[route] bilibili/video/get-info bvid={} done error={}", bvid, result.get("error"))
+    return result
 
 
 @_router.post("/get-pages/{bvid}")
 async def get_pages(bvid: str, body: _BvidBody):
-    credential = await _make_credential(
-        body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
-        body.dedeuserid, body.ac_time_value, body.proxy,
-    )
-    v = bilibili_api.video.Video(bvid=bvid, credential=credential)
-
-    return await v.get_pages()
+    logger.debug("[route] bilibili/video/get-pages bvid={}", bvid)
+    from fredica_pyutil_server.subprocess.bilibili._common import run_in_subprocess
+    from fredica_pyutil_server.subprocess.bilibili.video import get_pages_worker
+    param = body.model_dump()
+    result = await run_in_subprocess(get_pages_worker, {
+        "bvid": bvid,
+        "context": _build_context(param),
+    })
+    logger.debug("[route] bilibili/video/get-pages bvid={} done", bvid)
+    return result
 
 
 @_router.post("/ai-conclusion/{bvid}/{page_index}")
 async def get_ai_conclusion(bvid: str, page_index: int, body: _CredentialBody):
-    try:
-        credential = await _make_credential(
-            body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
-            body.dedeuserid, body.ac_time_value, body.proxy,
-        )
-        v = bilibili_api.video.Video(bvid=bvid, credential=credential)
-        return await v.get_ai_conclusion(page_index=page_index)
-    except bilibili_api.exceptions.ResponseCodeException as e:
-        return e.raw
-    except Exception as e:
-        logger.warning("[bilibili] get_ai_conclusion failed bvid={} page_index={}: {}", bvid, page_index, e)
-        return {"code": -1, "message": repr(e), "model_result": None}
+    from fredica_pyutil_server.subprocess.bilibili._common import run_in_subprocess
+    from fredica_pyutil_server.subprocess.bilibili.video import get_ai_conclusion_worker
+    param = body.model_dump()
+    return await run_in_subprocess(get_ai_conclusion_worker, {
+        "bvid": bvid,
+        "page_index": page_index,
+        "context": _build_context(param),
+    })
 
 
 @_router.post("/subtitle-meta/{bvid}/{page_index}")
 async def get_subtitle_meta(bvid: str, page_index: int, body: _CredentialBody):
-    logger.debug("[bilibili] subtitle-meta start bvid={} page_index={} has_credential={}", bvid, page_index,
-                 bool(body.sessdata))
-    try:
-        credential = await _make_credential(
-            body.sessdata, body.bili_jct, body.buvid3, body.buvid4,
-            body.dedeuserid, body.ac_time_value, body.proxy,
-        )
-        v = bilibili_api.video.Video(bvid=bvid, credential=credential)
-        cid = await v.get_cid(page_index=page_index)
-        logger.debug("[bilibili] subtitle-meta got cid={} bvid={} page_index={}", cid, bvid, page_index)
-        subtitle_info = await v.get_subtitle(cid=cid)
-        subtitles_meta = subtitle_info.get("subtitles", [])
-        logger.debug("[bilibili] subtitle-meta done bvid={} page_index={} tracks= allow_submit={}",
-                     bvid, page_index, len(subtitles_meta), subtitle_info.get("allow_submit"))
-        for item in subtitles_meta:
-            logger.debug("[bilibili]   track lan={} lan_doc={} type={} id={}",
-                         item.get("lan"), item.get("lan_doc"), item.get("type"), item.get("id"))
-        return {
-            "code": 0,
-            "message": "ok",
-            "allow_submit": subtitle_info.get("allow_submit", False),
-            "subtitles": subtitles_meta,
-        }
-    except bilibili_api.exceptions.ResponseCodeException as e:
-        logger.warning("[bilibili] subtitle-meta ResponseCodeException bvid={} page_index={} code={} msg={}", bvid,
-                       page_index, e.code, e.msg)
-        return {"code": e.code, "message": e.msg, "subtitles": None}
-    except Exception as e:
-        logger.warning("[bilibili] get_subtitle_meta failed bvid={} page_index={}: {}", bvid, page_index, e)
-        return {"code": -1, "message": repr(e), "subtitles": None}
+    logger.debug("[route] bilibili/video/subtitle-meta bvid={} page_index={} has_sessdata={}", bvid, page_index, bool(body.sessdata))
+    from fredica_pyutil_server.subprocess.bilibili._common import run_in_subprocess
+    from fredica_pyutil_server.subprocess.bilibili.video import get_subtitle_meta_worker
+    param = body.model_dump()
+    result = await run_in_subprocess(get_subtitle_meta_worker, {
+        "bvid": bvid,
+        "page_index": page_index,
+        "context": _build_context(param),
+    })
+    if isinstance(result, dict) and "error" in result:
+        logger.warning("[route] bilibili/video/subtitle-meta bvid={} page_index={} error={}", bvid, page_index, result["error"])
+    else:
+        logger.debug("[route] bilibili/video/subtitle-meta bvid={} page_index={} done code={}", bvid, page_index, result.get("code") if isinstance(result, dict) else "?")
+    return result
 
 
 class _SubtitleBodyBody(BaseModel):
@@ -176,47 +151,25 @@ async def get_subtitle_body(body: _SubtitleBodyBody):
 
 @_router.websocket("/download-task/{bvid}/{page}")
 async def download_task_endpoint(websocket: WebSocket, bvid: str, page: int):
-    """
-    下载 B 站视频到指定本地路径。
-
-    WebSocket 协议：
-      1. 连接建立后发送 init_param_and_run 启动下载：
-         {"command": "init_param_and_run", "data": {"output_dir": "/path/to/dir"}}
-      2. 服务端实时推送 progress / done / error 消息
-      3. 可随时发送 cancel / pause / resume / status 命令
-    """
     endpoint = BilibiliVideoDownloadTaskEndpoint(websocket=websocket, bvid=bvid, page=page)
     await endpoint.start_and_wait()
 
 
 class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
-    """
-    下载 B 站视频（视频流 + 音频流）到本地，通过 WebSocket 实时推送进度。
-
-    init_param_and_run data 格式：
-        {"output_dir": str}   # 本地输出目录（自动创建）
-
-    WebSocket 推送消息格式：
-        # 各阶段下载进度
-        {"type": "progress", "stage": "video"|"audio",
-         "bytes_done": int, "total_bytes": int}
-        # 完成
-        {"type": "done", "video_path": str, "audio_path": Optional[str]}
-        # 出错
-        {"type": "error", "message": str}
-    """
 
     def __init__(self, *, websocket: WebSocket, bvid: str, page: int):
         super().__init__(tag=f"bilibili-download-{bvid}-p{page}", websocket=websocket)
         self._bvid = bvid
         self._page = page
 
-    async def _run(self, param: Any) -> None:
+    async def _run(self, param) -> None:
+        from bilibili_api import select_client
+        select_client("curl_cffi")
+
         output_dir: str = os.path.abspath(param["output_dir"])
         os.makedirs(output_dir, exist_ok=True)
         logger.debug("[{}] output_dir is {}", self.tag, output_dir)
 
-        # 获取下载地址
         video = bilibili_api.video.Video(bvid=self._bvid)
         try:
             url_info = await video.get_download_url(page_index=self._page - 1, html5=True)
@@ -228,20 +181,16 @@ class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
         streams = detector.detect_best_streams()
 
         if detector.check_flv_mp4_stream():
-            # FLV 流下载
             video_stream = streams[0]
             video_path = os.path.join(output_dir, "video.flv")
-            # 下载视频流
             ok = await self._download_stream(video_stream.url, video_path, "video",
-                                             percent_start=0,
-                                             percent_weight=100)
+                                             percent_start=0, percent_weight=100)
             if not ok or self._cancel_flag:
                 return
             await self.send_json({"type": "done", "video_path": video_path, "audio_path": None})
             with open(os.path.join(output_dir, "download_flv.done"), mode='wt'):
                 pass
         else:
-            # MP4 流下载
             video_stream, audio_stream = streams[0], streams[1]
             video_path = os.path.join(output_dir, "video.m4s")
             audio_path = os.path.join(output_dir, "audio.m4s")
@@ -251,17 +200,13 @@ class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
             logger.debug("[{}] audio stream: codec={}, quality={}", self.tag,
                          audio_stream.video_codecs, audio_stream.video_quality)
 
-            # 下载视频流
             ok = await self._download_stream(video_stream.url, video_path, "video",
-                                             percent_start=0,
-                                             percent_weight=50)
+                                             percent_start=0, percent_weight=50)
             if not ok or self._cancel_flag:
                 return
 
-            # 下载音频流
             ok = await self._download_stream(audio_stream.url, audio_path, "audio",
-                                             percent_start=50,
-                                             percent_weight=100)
+                                             percent_start=50, percent_weight=100)
             if not ok or self._cancel_flag:
                 return
 
@@ -270,16 +215,7 @@ class BilibiliVideoDownloadTaskEndpoint(TaskEndpointInEventLoopThread):
                 pass
         logger.info("[{}] download finished", self.tag)
 
-    async def _download_stream(self,
-                               url: str,
-                               out_path: str,
-                               stage: str,
-                               percent_start: int,
-                               percent_weight: int) -> bool:
-        """
-        下载单条流（视频或音频），每个 chunk 推送一次进度。
-        返回 True 表示下载完成，False 表示出错。
-        """
+    async def _download_stream(self, url, out_path, stage, percent_start, percent_weight) -> bool:
         stage_offset = 0 if stage == "video" else percent_weight
         try:
             client = bilibili_api.get_client()

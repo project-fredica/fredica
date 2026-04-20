@@ -5,6 +5,10 @@ import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.auth.AuthIdentity
+import com.github.project_fredica.db.TaskDb
+import com.github.project_fredica.db.TaskService
+import com.github.project_fredica.db.WorkflowRunDb
+import com.github.project_fredica.db.WorkflowRunService
 import com.github.project_fredica.material_category.db.*
 import com.github.project_fredica.material_category.model.*
 import com.github.project_fredica.material_category.route_ext.*
@@ -22,6 +26,8 @@ class MaterialCategoryRouteTest {
     private lateinit var userConfigDb: MaterialCategorySyncUserConfigDb
     private lateinit var syncItemDb: MaterialCategorySyncItemDb
     private lateinit var auditLogDb: MaterialCategoryAuditLogDb
+    private lateinit var workflowRunDb: WorkflowRunDb
+    private lateinit var taskDb: TaskDb
     private lateinit var tmpFile: File
 
     private val tenantUser = AuthIdentity.TenantUser(
@@ -55,12 +61,20 @@ class MaterialCategoryRouteTest {
         userConfigDb = MaterialCategorySyncUserConfigDb(db)
         syncItemDb = MaterialCategorySyncItemDb(db)
         auditLogDb = MaterialCategoryAuditLogDb(db)
-        runBlocking { categoryDb.initialize() }
+        workflowRunDb = WorkflowRunDb(db)
+        taskDb = TaskDb(db)
+        runBlocking {
+            categoryDb.initialize()
+            workflowRunDb.initialize()
+            taskDb.initialize()
+        }
         MaterialCategoryService.initialize(categoryDb)
         MaterialCategorySyncPlatformInfoService.initialize(platformInfoDb)
         MaterialCategorySyncUserConfigService.initialize(userConfigDb)
         MaterialCategorySyncItemService.initialize(syncItemDb)
         MaterialCategoryAuditLogService.initialize(auditLogDb)
+        TaskService.initialize(taskDb)
+        WorkflowRunService.initialize(workflowRunDb)
     }
 
     @AfterTest
@@ -103,7 +117,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt04_simple_create_long_name_fails() = runBlocking {
         val longName = "a".repeat(65)
-        val param = """{"name":"$longName"}"""
+        val param = buildJsonObject { put("name", longName) }.toString()
         val result = parseJson(MaterialCategorySimpleCreateRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("过长"))
@@ -115,7 +129,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt05_simple_update_name() = runBlocking {
         val cat = categoryDb.create("user-a", "原名", "")
-        val param = """{"id":"${cat.id}","name":"新名"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "新名") }.toString()
         val result = parseJson(MaterialCategorySimpleUpdateRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         val updated = categoryDb.getById(cat.id)!!
@@ -126,7 +140,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt06_simple_update_non_owner_fails() = runBlocking {
         val cat = categoryDb.create("user-b", "test", "")
-        val param = """{"id":"${cat.id}","name":"hacked"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "hacked") }.toString()
         val result = parseJson(MaterialCategorySimpleUpdateRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("权限"))
@@ -136,7 +150,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt07_simple_update_root_can_update_others() = runBlocking {
         val cat = categoryDb.create("user-a", "test", "")
-        val param = """{"id":"${cat.id}","name":"root-renamed"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "root-renamed") }.toString()
         val result = parseJson(MaterialCategorySimpleUpdateRoute.handler2(param, ctx(rootUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         Unit
@@ -146,7 +160,7 @@ class MaterialCategoryRouteTest {
     fun rt08_simple_update_uncategorized_name_fails() = runBlocking {
         categoryDb.ensureUncategorized("user-a")
         val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
-        val param = """{"id":"$uncatId","name":"renamed"}"""
+        val param = buildJsonObject { put("id", uncatId); put("name", "renamed") }.toString()
         val result = parseJson(MaterialCategorySimpleUpdateRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("默认分类"))
@@ -165,7 +179,7 @@ class MaterialCategoryRouteTest {
                 createdAt = nowSec, updatedAt = nowSec,
             )
         )
-        val param = """{"id":"${cat.id}","name":"new-name"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "new-name") }.toString()
         val result = parseJson(MaterialCategorySimpleUpdateRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("同步分类"))
@@ -177,7 +191,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt10_simple_delete_success() = runBlocking {
         val cat = categoryDb.create("user-a", "to-delete", "")
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         assertNull(categoryDb.getById(cat.id))
@@ -188,7 +202,7 @@ class MaterialCategoryRouteTest {
     fun rt11_simple_delete_uncategorized_fails() = runBlocking {
         categoryDb.ensureUncategorized("user-a")
         val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
-        val param = """{"id":"$uncatId"}"""
+        val param = buildJsonObject { put("id", uncatId) }.toString()
         val result = parseJson(MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("默认分类"))
@@ -198,7 +212,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt12_simple_delete_non_owner_fails() = runBlocking {
         val cat = categoryDb.create("user-b", "test", "")
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("权限"))
@@ -210,7 +224,7 @@ class MaterialCategoryRouteTest {
     fun rt13_simple_delete_orphans_moved_to_uncategorized() = runBlocking {
         val cat = categoryDb.create("user-a", "to-delete", "")
         categoryDb.linkMaterials(listOf("mat-1"), listOf(cat.id), addedBy = "user")
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         val uncatId = MaterialCategoryDefaults.uncategorizedId("user-a")
@@ -231,7 +245,7 @@ class MaterialCategoryRouteTest {
                 categoryId = cat.id, createdAt = nowSec, updatedAt = nowSec,
             )
         )
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("同步分类"))
@@ -243,7 +257,10 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt15_simple_import_success() = runBlocking {
         val cat = categoryDb.create("user-a", "import-target", "")
-        val param = """{"material_ids":["mat-1","mat-2"],"category_ids":["${cat.id}"]}"""
+        val param = buildJsonObject {
+            put("material_ids", buildJsonArray { add(JsonPrimitive("mat-1")); add(JsonPrimitive("mat-2")) })
+            put("category_ids", buildJsonArray { add(JsonPrimitive(cat.id)) })
+        }.toString()
         val result = parseJson(MaterialCategorySimpleImportRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         assertEquals(2, result["material_count"]?.jsonPrimitive?.int)
@@ -253,7 +270,10 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt16_simple_import_empty_materials_fails() = runBlocking {
         val cat = categoryDb.create("user-a", "test", "")
-        val param = """{"material_ids":[],"category_ids":["${cat.id}"]}"""
+        val param = buildJsonObject {
+            put("material_ids", buildJsonArray {})
+            put("category_ids", buildJsonArray { add(JsonPrimitive(cat.id)) })
+        }.toString()
         val result = parseJson(MaterialCategorySimpleImportRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         Unit
@@ -262,7 +282,10 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt17_simple_import_no_permission_fails() = runBlocking {
         val cat = categoryDb.create("user-b", "private-cat", "")
-        val param = """{"material_ids":["mat-1"],"category_ids":["${cat.id}"]}"""
+        val param = buildJsonObject {
+            put("material_ids", buildJsonArray { add(JsonPrimitive("mat-1")) })
+            put("category_ids", buildJsonArray { add(JsonPrimitive(cat.id)) })
+        }.toString()
         val result = parseJson(MaterialCategorySimpleImportRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("无权"))
@@ -273,7 +296,10 @@ class MaterialCategoryRouteTest {
     fun rt18_simple_import_with_allow_others_add() = runBlocking {
         val cat = categoryDb.create("user-b", "shared-cat", "")
         categoryDb.update(cat.id, "user-b", allowOthersView = true, allowOthersAdd = true)
-        val param = """{"material_ids":["mat-1"],"category_ids":["${cat.id}"]}"""
+        val param = buildJsonObject {
+            put("material_ids", buildJsonArray { add(JsonPrimitive("mat-1")) })
+            put("category_ids", buildJsonArray { add(JsonPrimitive(cat.id)) })
+        }.toString()
         val result = parseJson(MaterialCategorySimpleImportRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         Unit
@@ -284,7 +310,11 @@ class MaterialCategoryRouteTest {
         val cat1 = categoryDb.create("user-a", "cat1", "")
         val cat2 = categoryDb.create("user-a", "cat2", "")
         categoryDb.linkMaterials(listOf("mat-1"), listOf(cat1.id), addedBy = "user")
-        val param = """{"material_ids":["mat-1"],"category_ids":["${cat2.id}"],"replace_existing":true}"""
+        val param = buildJsonObject {
+            put("material_ids", buildJsonArray { add(JsonPrimitive("mat-1")) })
+            put("category_ids", buildJsonArray { add(JsonPrimitive(cat2.id)) })
+            put("replace_existing", true)
+        }.toString()
         val result = parseJson(MaterialCategorySimpleImportRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         Unit
@@ -315,7 +345,7 @@ class MaterialCategoryRouteTest {
         val bPub = categoryDb.create("user-b", "b-public", "")
         categoryDb.update(bPub.id, "user-b", allowOthersView = true)
 
-        val param = """{"filter":"MINE"}"""
+        val param = """{"filter":"mine"}"""
         val result = parseJson(MaterialCategoryListRoute.handler2(param, ctx(tenantUser)))
         val items = result["items"]!!.jsonArray
         val names = items.map { it.jsonObject["name"]!!.jsonPrimitive.content }
@@ -330,7 +360,7 @@ class MaterialCategoryRouteTest {
         val bPub = categoryDb.create("user-b", "b-public", "")
         categoryDb.update(bPub.id, "user-b", allowOthersView = true)
 
-        val param = """{"filter":"PUBLIC"}"""
+        val param = """{"filter":"public"}"""
         val result = parseJson(MaterialCategoryListRoute.handler2(param, ctx(tenantUser)))
         val items = result["items"]!!.jsonArray
         val names = items.map { it.jsonObject["name"]!!.jsonPrimitive.content }
@@ -566,7 +596,7 @@ class MaterialCategoryRouteTest {
                 categoryId = cat.id, createdAt = nowSec, updatedAt = nowSec,
             )
         )
-        val param = """{"id":"${cat.id}","name":"新同步名"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "新同步名") }.toString()
         val result = parseJson(MaterialCategorySyncUpdateRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         val updated = categoryDb.getById(cat.id)!!
@@ -577,7 +607,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt37_sync_update_non_sync_category_fails() = runBlocking {
         val cat = categoryDb.create("user-a", "normal-cat", "")
-        val param = """{"id":"${cat.id}","name":"new-name"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "new-name") }.toString()
         val result = parseJson(MaterialCategorySyncUpdateRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("不是同步分类"))
@@ -602,7 +632,7 @@ class MaterialCategoryRouteTest {
                 createdAt = nowSec, updatedAt = nowSec,
             )
         )
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySyncDeleteRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
         assertNull(categoryDb.getById(cat.id))
@@ -614,7 +644,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt39_sync_delete_non_sync_fails() = runBlocking {
         val cat = categoryDb.create("user-a", "normal-del", "")
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySyncDeleteRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("不是同步分类"))
@@ -632,7 +662,7 @@ class MaterialCategoryRouteTest {
                 createdAt = nowSec, updatedAt = nowSec,
             )
         )
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         val result = parseJson(MaterialCategorySyncDeleteRoute.handler2(param, ctx(tenantUser)))
         assertNotNull(result["error"])
         assertTrue(result["error"]!!.jsonPrimitive.content.contains("正在运行"))
@@ -660,9 +690,9 @@ class MaterialCategoryRouteTest {
         val param = """{"platform_info_id":"pi-trig"}"""
         val result = parseJson(MaterialCategorySyncTriggerRoute.handler2(param, ctx(tenantUser)))
         assertTrue(result["success"]?.jsonPrimitive?.boolean == true)
-        assertEquals("pending", result["sync_state"]?.jsonPrimitive?.content)
+        assertNotNull(result["workflow_run_id"]?.jsonPrimitive?.content)
         val updated = platformInfoDb.getById("pi-trig")!!
-        assertEquals("pending", updated.syncState)
+        assertEquals("syncing", updated.syncState)
         Unit
     }
 
@@ -749,7 +779,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt46_simple_delete_writes_audit_log() = runBlocking {
         val cat = categoryDb.create("user-a", "audit-del", "")
-        val param = """{"id":"${cat.id}"}"""
+        val param = buildJsonObject { put("id", cat.id) }.toString()
         MaterialCategorySimpleDeleteRoute.handler2(param, ctx(tenantUser))
         val logs = auditLogDb.listByCategoryId(cat.id, 10)
         assertTrue(logs.isNotEmpty())
@@ -761,7 +791,7 @@ class MaterialCategoryRouteTest {
     @Test
     fun rt47_simple_update_writes_audit_log() = runBlocking {
         val cat = categoryDb.create("user-a", "audit-upd", "")
-        val param = """{"id":"${cat.id}","name":"renamed"}"""
+        val param = buildJsonObject { put("id", cat.id); put("name", "renamed") }.toString()
         MaterialCategorySimpleUpdateRoute.handler2(param, ctx(tenantUser))
         val logs = auditLogDb.listByCategoryId(cat.id, 10)
         assertTrue(logs.isNotEmpty())

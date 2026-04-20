@@ -22,6 +22,7 @@ import { buildAuthHeaders } from "~/util/app_fetch";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { json_parse } from "~/util/json";
 import { MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH, fetchActiveWorkflows, findActiveEncodeWorkflowRunId } from "~/util/materialWorkflowApi";
+import { isBilibiliVideo } from "~/components/material-library/materialTypes";
 
 // ── 状态定义 ──────────────────────────────────────────────────────────────────
 
@@ -97,11 +98,12 @@ function loadProgressFromStorage(materialId: string): number | null {
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 /**
- * @param materialId  素材 ID
- * @param sourceType  素材来源类型（"bilibili" 等）。bilibili 素材启动下载+转码双任务流水线，
- *                   其他素材直接启动转码任务。
+ * @param materialId    素材 ID
+ * @param materialType  素材类型（"video" / "audio" 等）
+ * @param sourceType    素材来源类型（"bilibili" / "bilibili_favorite" 等）。
+ *                      bilibili 视频启动下载+转码双任务流水线，其他素材直接启动转码任务。
  */
-export function useVideoPlayerState(materialId: string, sourceType?: string): VideoPlayerStateResult {
+export function useVideoPlayerState(materialId: string, materialType?: string, sourceType?: string): VideoPlayerStateResult {
     const { appConfig } = useAppConfig();
     const [state, setState] = useState<VideoPlayerInternalState>("checking");
     const [fileMtime, setFileMtime] = useState<number | null>(null);
@@ -236,7 +238,8 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
         try {
             // bilibili 素材：下载 + 转码双任务流水线（下载任务携带 check_skip，已有文件自动跳过）
             // 其他素材：直接转码（本地文件已就绪，仅需格式转换）
-            const isBilibili = sourceType === "bilibili";
+            const isBilibili = materialType != null && sourceType != null
+                && isBilibiliVideo({ type: materialType, source_type: sourceType });
             const url = isBilibili
                 ? `${serverBase}${MATERIAL_BILIBILI_DOWNLOAD_TRANSCODE_API_PATH}`
                 : `${serverBase}/api/v1/MaterialVideoTranscodeMp4Route`;
@@ -279,7 +282,7 @@ export function useVideoPlayerState(materialId: string, sourceType?: string): Vi
             print_error({ reason: "启动转码请求异常", err: e });
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [materialId, serverBase, sourceType]);
+    }, [materialId, serverBase, materialType, sourceType]);
 
     const onPlaybackStarted = useCallback((currentTime: number) => {
         currentTimeRef.current = currentTime;

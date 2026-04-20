@@ -6,6 +6,7 @@ import com.github.project_fredica.apputil.warn
 import com.github.project_fredica.asr.model.BilibiliMaterialExtra
 import com.github.project_fredica.asr.model.BilibiliSubtitleBodyPayload
 import com.github.project_fredica.asr.model.BilibiliSubtitleMeta
+import com.github.project_fredica.db.MaterialMediaSpec
 import com.github.project_fredica.db.MaterialVideoService
 
 /**
@@ -79,19 +80,43 @@ object BilibiliSubtitleUtil {
      * 支持来源：bilibili（从 material.extra.bvid + 字幕 meta/body 缓存读取）
      */
     suspend fun fetchSubtitleTextFromCache(materialId: String, language: String? = null): String? {
-        val material = MaterialVideoService.repo.findById(materialId) ?: return null
-        if (material.sourceType != "bilibili") return null
+        val material = MaterialVideoService.repo.findById(materialId)
+        if (material == null) {
+            logger.debug("fetchSubtitleTextFromCache: material not found id=$materialId")
+            return null
+        }
+        if (!MaterialMediaSpec.isBilibiliVideo(material.type, material.sourceType)) {
+            logger.debug("fetchSubtitleTextFromCache: not bilibili video id=$materialId type=${material.type} sourceType=${material.sourceType}")
+            return null
+        }
 
         val bvid = material.extra.loadJsonModel<BilibiliMaterialExtra>()
-            .getOrNull()?.bvid?.takeIf { it.isNotBlank() } ?: return null
+            .getOrNull()?.bvid?.takeIf { it.isNotBlank() }
+        if (bvid == null) {
+            logger.debug("fetchSubtitleTextFromCache: no bvid in extra id=$materialId")
+            return null
+        }
 
         val metaCache = BilibiliSubtitleMetaCacheService.repo.queryBest(bvid, pageIndex = 0)
-            ?: return null
-        val subtitleUrl = extractFirstSubtitleUrl(metaCache.rawResult, language) ?: return null
+        if (metaCache == null) {
+            logger.debug("fetchSubtitleTextFromCache: no meta cache bvid=$bvid")
+            return null
+        }
+        val subtitleUrl = extractFirstSubtitleUrl(metaCache.rawResult, language)
+        if (subtitleUrl == null) {
+            logger.debug("fetchSubtitleTextFromCache: no subtitle url bvid=$bvid language=$language")
+            return null
+        }
 
         val urlKey = extractSubtitleUrlKey(subtitleUrl)
-        val bodyCache = BilibiliSubtitleBodyCacheService.repo.queryBest(urlKey) ?: return null
+        val bodyCache = BilibiliSubtitleBodyCacheService.repo.queryBest(urlKey)
+        if (bodyCache == null) {
+            logger.debug("fetchSubtitleTextFromCache: no body cache bvid=$bvid urlKey=$urlKey")
+            return null
+        }
 
-        return parseSubtitleBodyText(bodyCache.rawResult)
+        val text = parseSubtitleBodyText(bodyCache.rawResult)
+        logger.debug("fetchSubtitleTextFromCache: bvid=$bvid language=$language textLen=${text?.length ?: 0}")
+        return text
     }
 }

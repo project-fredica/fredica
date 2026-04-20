@@ -17,6 +17,18 @@ data class MaterialVideo(
     val id: String,
     val type: String = MaterialType.VIDEO,
     val title: String,
+    /**
+     * 素材来源类型。Material 域的合法值：
+     *  - `"bilibili"` — 手动导入（[MaterialImportRoute]）
+     *  - `"bilibili_favorite"` — 收藏夹同步
+     *  - `"bilibili_uploader"` — UP主投稿同步
+     *  - `"bilibili_season"` — 合集同步
+     *  - `"bilibili_series"` — 列表同步
+     *  - `"bilibili_video_pages"` — 视频分P同步
+     *
+     * 判断是否 bilibili 视频请用 [MaterialMediaSpec.isBilibiliVideo]（需同时传入 type 和 sourceType），
+     * 不要硬编码字符串比较。
+     */
     @SerialName("source_type")      val sourceType: String,
     @SerialName("source_id")        val sourceId: String,
     @SerialName("cover_url")        val coverUrl: String,

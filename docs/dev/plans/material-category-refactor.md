@@ -105,9 +105,9 @@ CREATE TABLE material_category_simple (
   - 同步分类自动创建时默认 `allow_others_view=1`（其余两项为 0）
 - **`description` 字段说明**：简易分类的 `description` 由用户自由编辑；同步分类自动创建时 `description` 默认为空，显示名来源于 `material_category_sync_platform_info.display_name`（也可允许应用端覆盖）
 
-#### 3.1.1 "未分类"默认分类（每用户固定 ID）
+#### 3.1.1 "待分类"默认分类（每用户固定 ID）
 
-每个用户拥有一个不可删除的"未分类"默认分类，用于收容删除分类时产生的孤儿素材。
+每个用户拥有一个不可删除的"待分类"默认分类，用于收容删除分类时产生的孤儿素材。
 
 **固定 ID 规则：** `uncategorized:{userId}`（如 `uncategorized:user-abc-123`）
 
@@ -121,7 +121,7 @@ CREATE TABLE material_category_simple (
 ```kotlin
 object MaterialCategoryDefaults {
     fun uncategorizedId(userId: String) = "uncategorized:$userId"
-    const val UNCATEGORIZED_NAME = "未分类"
+    const val UNCATEGORIZED_NAME = "待分类"
 
     fun ensureUncategorized(userId: String) {
         val id = uncategorizedId(userId)
@@ -993,7 +993,7 @@ fun simpleDeleteById(id: String, userId: String, isRoot: Boolean) {
         //     AND material_id NOT IN (
         //         SELECT material_id FROM material_category_rel WHERE category_id != :id
         //     )
-        // 4b. 将孤儿素材移入该用户的"未分类"默认分类
+        // 4b. 将孤儿素材移入该用户的"待分类"默认分类
         //     INSERT OR IGNORE INTO material_category_rel (material_id, category_id)
         //     VALUES (:orphanMaterialId, :uncategorizedId)
         MaterialCategoryDefaults.ensureUncategorized(category.ownerId)
@@ -1037,7 +1037,7 @@ fun syncDeleteById(id: String, userId: String, isRoot: Boolean) {
         // 4b. 删除 material_category_sync_user_config WHERE platform_info_id IN (SELECT id FROM ... WHERE category_id = :id)
         // 4c. 删除 material_category_sync_platform_info WHERE category_id = :id
         // 4d. 找出孤儿素材（仅属于当前分类，删除后无其他分类关联）
-        // 4e. 将孤儿素材移入该用户的"未分类"默认分类
+        // 4e. 将孤儿素材移入该用户的"待分类"默认分类
         MaterialCategoryDefaults.ensureUncategorized(category.ownerId)
         val uncatId = MaterialCategoryDefaults.uncategorizedId(category.ownerId)
         // ... 批量 INSERT OR IGNORE 孤儿素材到 uncatId
@@ -1052,6 +1052,8 @@ fun syncDeleteById(id: String, userId: String, isRoot: Boolean) {
 - Simple 版本拒绝删除同步分类（引导用户使用 Sync 版本）
 - Sync 版本级联删除 `sync_platform_info`、`sync_user_config`、`sync_item` 等同步元数据
 - 两者都删除 `material_category_rel` 关联和 `material_category_simple` 记录本身
+
+> **实现说明（Issue 6）：** 孤儿素材对账逻辑已提取为 `MaterialCategoryDb.reconcileOrphanMaterials(categoryId, ownerId)` 可复用函数，两个删除路由（`MaterialCategorySimpleDeleteRouteExt`、`MaterialCategorySyncDeleteRouteExt`）均调用此函数而非内联实现。`reconcileOrphanMaterials` 在无孤儿素材时不创建"待分类"默认分类（避免不必要的副作用）。另新增 `reconcileAllOrphanMaterials()` 函数，在应用启动时（`FredicaApi.onAppReady()`）异步执行，修复因异常中断导致的遗留孤儿素材。该函数查询 `material` 表中无任何分类关联的素材，然后为 `material_category_simple` 中的每个 `owner_id` 创建"待分类"并关联所有孤儿素材（注意：`material` 表无 `owner_id` 列，因此无法按素材归属分配，当前实现将孤儿素材关联到所有已知用户的"待分类"下）。
 
 #### `MaterialCategorySimpleImportRoute`（合并原 `MaterialImportRoute` + `MaterialSetCategoriesRoute`）
 
@@ -1270,7 +1272,7 @@ override suspend fun handler(param: String, context: RouteContext): ValidJsonStr
 | `bilibili_series` | `[B站列表] {series_id}` | `[B站列表] 222` |
 | `bilibili_video_pages` | `[B站分P] {bvid}` | `[B站分P] BV1xx` |
 
-首次同步完成后，Executor 可用平台返回的真实名称（收藏夹标题、UP 主昵称等）更新 `platform_info.display_name`。
+每次同步时，Executor 调用平台元数据 API 获取真实名称（收藏夹标题、UP 主昵称等）并更新 `platform_info.display_name`，确保名称始终与平台保持同步。
 
 **事务设计 — `createWithCategory`：**
 
@@ -1498,7 +1500,7 @@ fun deletePlatformInfo(platformInfoId: String, userId: String, isRoot: Boolean) 
 
 **为什么不删除 material：** 同一个 bilibili 视频可能被多个分类引用（用户手动导入 + 同步分类），删除同步源只应解除分类关联，不应删除素材数据。素材的生命周期由 `MaterialDeleteRoute` 单独管理。
 
-> **注：** 删除同步源后，已导入的素材（`material` 表的记录及视频文件）继续保留在"未分类"下。如果 Bilibili 平台上的内容已下线（视频被删除或收藏夹失效），对应素材的存档价值不受影响——这正是本地存档的意义。用户可在素材库中手动删除不需要的素材。
+> **注：** 删除同步源后，已导入的素材（`material` 表的记录及视频文件）继续保留在"待分类"下。如果 Bilibili 平台上的内容已下线（视频被删除或收藏夹失效），对应素材的存档价值不受影响——这正是本地存档的意义。用户可在素材库中手动删除不需要的素材。
 
 #### `MaterialCategorySyncTriggerRoute`（重构）
 
@@ -1898,6 +1900,10 @@ protected suspend fun upsertMaterialsAndLink(
 }
 ```
 
+**实现说明（Issue 2）：** 同步执行器的核心修复是确保 `doSync()` 中构造完整的 `MaterialVideo` 对象（包含 title、cover、description、duration、extra 等字段），并通过 `upsertMaterialsAndLink()` 同时写入 `material` + `material_video` 表和 `material_category_rel` 关联。修复前仅创建 `material_category_rel` 条目而缺少 `material` 表记录，导致同步素材在素材库中不可见。所有 5 个 Bilibili 同步执行器均使用 `bilibiliVideoId(bvid, page)` 格式生成确定性 materialId，保证同一视频不会重复创建。前端配合修复：分类选择从 `useState` 改为 `useSearchParams` 驱动（URL param `?category={id}`），实现分类筛选持久化。
+
+**实现说明（Issue 9）：** `bilibiliVideoId(bvid, page)` 函数已从 `MaterialImportRoute.kt` 迁移至 `shared/src/commonMain/kotlin/.../apputil/bilibiliUtil.kt`，作为共享工具函数供所有 executor 和路由引用（`import com.github.project_fredica.apputil.bilibiliVideoId`）。
+
 **时序图 — Executor 执行完整流程：**
 
 ```
@@ -2005,13 +2011,11 @@ class MaterialCategorySyncBilibiliFavoriteExecutor : MaterialCategorySyncCategor
         val newCursor = allMedias.maxOfOrNull { it.favTime }?.toString() ?: cursor
         val totalCount = MaterialCategorySyncPlatformInfoService.repo.countSyncItems(payload.platformInfoId)
 
-        // 4. 首次同步完成后，用收藏夹真实标题更新 display_name
-        if (cursor.isEmpty()) {
-            val info = fetchFavoriteInfo(identity.mediaId)
-            if (info != null) {
-                MaterialCategorySyncPlatformInfoService.repo.updateDisplayName(payload.platformInfoId, info.title)
-                MaterialCategoryService.repo.updateName(payload.categoryId, "[B站收藏夹] ${info.title}")
-            }
+        // 4. 每次同步时获取收藏夹真实标题，更新 display_name（确保与平台保持同步）
+        val info = fetchFavoriteInfo(identity.mediaId)
+        if (info != null) {
+            MaterialCategorySyncPlatformInfoService.repo.updateDisplayName(payload.platformInfoId, info.title)
+            MaterialCategoryService.repo.updateName(payload.categoryId, "[B站收藏夹] ${info.title}")
         }
 
         return MaterialCategorySyncDoResult(
@@ -2072,7 +2076,7 @@ object BilibiliUploaderGetVideoListRoute : FredicaApi.Route {
 - `sync_cursor` 记录最后一条的 `pubdate`（发布时间，epoch sec）
 - UP 主投稿按 `pubdate` 降序返回，增量逻辑与收藏夹一致
 - **首次同步上限**：UP 主投稿量可能很大（数千条），首次同步设置上限 500 条（约 17 页 × 30 条/页），避免单次任务耗时过长
-- 首次同步完成后，用 UP 主昵称更新 `display_name`：`[B站UP主] {nickname}`
+- 每次同步时获取 UP 主昵称更新 `display_name`：`[B站UP主] {nickname}`，确保名称始终与平台保持同步
 
 **UP 主投稿 API 返回字段映射：**
 
@@ -2115,7 +2119,7 @@ async def get_season_video_list(body: _SeasonBody):
 - 合集通常是有限集合（几十到几百条），**全量同步**即可，无需增量游标
 - 每次同步拉取全部视频列表，与已有 `material_category_sync_item` 做 diff
 - `sync_cursor` 不使用（保持空字符串），每次全量拉取
-- 首次同步后用合集标题更新 `display_name`：`[B站合集] {season_name}`
+- 每次同步时获取合集标题更新 `display_name`：`[B站合集] {season_name}`，确保名称始终与平台保持同步
 
 **全量同步 vs 增量同步的选择依据：**
 
@@ -2152,7 +2156,7 @@ async def get_series_video_list(body: _SeriesBody):
     }
 ```
 
-**同步流程**：与合集（§6.4）完全一致，全量同步。旧版列表（series）和新版合集（season）的 bilibili API 不同但同步逻辑一致。
+**同步流程**：与合集（§6.4）完全一致，全量同步。旧版列表（series）和新版合集（season）的 bilibili API 不同但同步逻辑一致。每次同步时获取列表标题更新 `display_name`：`[B站列表] {series_name}`。
 
 ### 6.6 Bilibili 多 P 视频同步（BilibiliVideoPages）
 
@@ -2173,7 +2177,7 @@ async def get_series_video_list(body: _SeriesBody):
 | `duration` | `duration` | 分 P 时长（秒） |
 | `cid` | `extra.cid` | 分 P 的 cid |
 
-**注意**：多 P 视频的封面 URL 需要从视频主信息获取（所有分 P 共享同一封面），Executor 需额外调用一次 `Video(bvid).get_info()` 获取封面和视频标题。
+**注意**：多 P 视频的封面 URL 需要从视频主信息获取（所有分 P 共享同一封面），Executor 需额外调用一次 `Video(bvid).get_info()` 获取封面和视频标题。每次同步时用视频标题更新 `display_name`：`[B站多P] {video_title}`。
 
 ### 6.7 自动同步设计
 
@@ -2463,11 +2467,11 @@ function groupCategories(categories: MaterialCategory[]) {
 
 #### 7.2.2 各分组交互行为
 
-| 分组 | 点击 pill | 右键/长按菜单 | 额外 UI |
-|------|----------|--------------|---------|
-| 我的分类 | 筛选素材列表 | 重命名 / 权限设置 / 删除 | 🔒 图标表示 `allow_others_view=false` |
-| 他人分类 | 筛选素材列表 | 无菜单（或仅"添加素材"当 `allow_others_add=true`） | 👤 显示 owner 用户名 |
-| 同步信源 | 筛选素材列表 | 立即同步 / 更新订阅设置 / 取消订阅（仅订阅者） | 同步状态标签（见 §7.6） |
+| 分组 | 点击 pill | 内联按钮 | 额外 UI |
+|------|----------|---------|---------|
+| 我的分类 | 筛选素材列表 | 重命名（Pencil 图标 → 模态框）/ 删除（X 图标） | 🔒 图标表示 `allow_others_view=false` |
+| 他人分类 | 筛选素材列表 | 无按钮 | 👤 显示 owner 用户名 |
+| 同步信源 | 筛选素材列表 | 立即同步（RefreshCw 图标）/ 展开详情（ChevronRight 图标）→ SyncDetailPanel 中：立即同步 / 查看详情 / 删除数据源（仅 owner） | 同步状态标签（见 §7.6） |
 
 **"全部"虚拟 pill：** 仅出现在"我的分类"分组中，点击后清除分类筛选，显示用户可见的全部素材。计数 = 用户可见的去重素材总数。
 
@@ -2483,6 +2487,8 @@ const effectiveCategoryId = searchParams.get("category") ?? null;
 
 重构后保持相同模式，但 `MaterialCategoryPanel` 内部按分组渲染。`effectiveCategoryId` 不区分分类类型——点击任何分组的 pill 都设置同一个 `category` search param，素材列表的 API 调用不变。
 
+> **实现说明（Issue 2）：** `selectedCategoryId` 已从 `useState` 改为 `useSearchParams` 驱动，URL param 为 `?category={id}`。刷新页面或分享链接时分类选择自动恢复。
+
 **新增 props：**
 
 ```typescript
@@ -2491,57 +2497,41 @@ interface MaterialCategoryPanelProps {
     effectiveCategoryId: string | null;
     // ... 现有 props 保持不变 ...
     onSyncTrigger?: (platformInfoId: string) => Promise<void>;   // 触发同步
-    onSyncSubscriptionUpdate?: (platformInfoId: string, updates: Partial<MaterialCategorySyncUserConfigUpdate>) => Promise<void>;  // 更新订阅设置（启用/禁用/cron）
-    onSyncUnsubscribe?: (platformInfoId: string) => Promise<void>;  // 取消订阅
-    onSyncPlatformDelete?: (platformInfoId: string) => Promise<void>;  // 删除平台数据源（仅 owner 或 ROOT）
-    onCategoryUpdate?: (id: string, updates: { name?: string; allow_others_view?: boolean; allow_others_add?: boolean; allow_others_delete?: boolean }) => Promise<void>;
-}
-
-interface MaterialCategorySyncUserConfigUpdate {
-    enabled: boolean;
-    cron_expr: string;
-    freshness_window_sec: number;
+    onDeleteCategory: (id: string) => void;                       // 删除分类
+    onRenameCategory?: (id: string, currentName: string) => void; // 重命名分类
 }
 ```
 
-**权限说明：**
-- `onSyncTrigger`：该数据源的任何订阅者均可触发手动同步
-- `onSyncSubscriptionUpdate`：修改自己的订阅设置（cron、启用/禁用）
-- `onSyncUnsubscribe`：取消自己的订阅（不影响其他订阅者）
-- `onSyncPlatformDelete`：仅 owner（category.ownerId == userId）或 ROOT 可删除平台数据源
-```
+> **实现说明（Issue 4）：** 订阅管理（cron、启用/禁用、取消订阅、删除数据源）已从 `MaterialCategoryPanel` 移至独立路由 `material-library.sync.$syncId.tsx`（见 §7.6）。面板不再需要 `onSyncSubscriptionUpdate`、`onSyncUnsubscribe`、`onSyncPlatformDelete` 等 props，同步分类通过 `useNavigate` 跳转到独立管理页面。
 
-#### 7.2.4 分类编辑交互（内联编辑）
+#### 7.2.4 分类编辑交互（内联按钮 + 模态框）
 
-"我的分类"中的 pill 右键菜单触发内联编辑：
+> **实现说明（Issue 8）：** 已移除右键菜单模式（不适配移动端浏览器），改为内联按钮 + 模态框设计。
+
+**我的分类 `CategoryPill`：**
+- 内联 Pencil 图标按钮 → 打开重命名模态框
+- 内联 X 图标按钮 → 直接触发删除
+
+**同步分类 `SyncCategoryPill`：**
+- 内联 RefreshCw 图标按钮（title="立即同步"）→ 触发同步
+- 内联 ChevronRight/ChevronDown 展开按钮 → 展开 `SyncDetailPanel`
+- `SyncDetailPanel` 中包含"立即同步"、"查看详情"（跳转独立路由）、"删除数据源"（仅 owner）
 
 ```
 重命名流程：
-  右键 → "重命名" → pill 变为 input（预填当前名称）→ Enter/blur 提交
+  点击 Pencil 按钮 → 弹出模态框（预填当前名称）→ 修改后点击"确认"
   → POST MaterialCategorySimpleUpdateRoute { id, name: newName }
-    （如果是同步分类，改为 POST MaterialCategorySyncUpdateRoute { id, name: newName }）
   → 成功：刷新分类列表
-  → 失败（同名）：toast 提示 "同名分类已存在"
-
-切换可见性流程：
-  右键 → "权限设置" → 弹出权限面板（三个开关）
-  → 允许他人查看 (allow_others_view): ✅/❌
-  → 允许他人添加素材 (allow_others_add): ✅/❌
-  → 允许他人删除素材 (allow_others_delete): ✅/❌
-  → 任一开关变更时：
-    POST MaterialCategorySimpleUpdateRoute { id, allow_others_view, allow_others_add, allow_others_delete }
-  → 成功：刷新分类列表，🔒 图标更新
-  → 注意：关闭 allow_others_view 时自动关闭 allow_others_add 和 allow_others_delete
-  → 注意：同步分类不显示此菜单项（同步分类强制 `allow_others_view=true`，权限不可修改）
+  → 失败：reportHttpError('重命名分类失败', resp)
 
 删除流程：
-  右键 → "删除" → 确认弹窗（"删除后分类关联将被移除，素材本身不会被删除"）
+  点击 X 按钮 → 直接调用 onDeleteCategory(id)
   → 简易分类：POST MaterialCategorySimpleDeleteRoute { id }
-  → 同步分类：POST MaterialCategorySyncDeleteRoute { id }（确认弹窗额外提示"同步元数据将被清除"）
+  → 同步分类：通过 SyncDetailPanel "删除数据源"按钮触发
   → 成功：刷新分类列表；如果当前筛选的就是被删分类，清除 category search param
 ```
 
-**右键菜单实现：** 使用 `@radix-ui/react-context-menu` 或简单的 `useState` + absolute positioned div。考虑到项目当前未使用 Radix，推荐用 `useState<{ x: number; y: number; categoryId: string } | null>` + `onContextMenu` 实现轻量级右键菜单。
+**重命名模态框实现：** `MaterialCategoryPanel` 内部 `useState<{ id: string; name: string } | null>` 控制模态框显隐，固定定位 + `bg-black/30 backdrop-blur-sm` 遮罩，居中卡片含输入框 + 取消/确认按钮。
 
 ### 7.3 分类选择弹窗（重构 `CategoryPickerModal`）
 
@@ -2859,125 +2849,77 @@ const SYNC_TYPE_LABELS: Record<string, string> = {
 
 #### 7.6.2 展开详情面板
 
-点击同步信源条目展开详情（使用 `useState<string | null>` 控制展开的 platformInfoId）：
+点击同步信源条目的展开按钮（`useState<string | null>` 控制 expandedSyncId），显示简化的摘要面板 `SyncDetailPanel`：
 
 ```
 ┌─────────────────────────────────────────────┐
-│ 🔄 收藏夹:默认收藏夹                       │
+│ 收藏夹:默认收藏夹              [idle 标签]  │
 │                                             │
-│ 平台：Bilibili                              │
-│ 类型：收藏夹 (bilibili_favorite)            │
-│ 参数：media_id = 12345                      │
-│ 已同步：156 个素材                          │
-│ 上次同步：2026-04-17 14:30                  │
-│ 同步状态：idle / syncing / failed           │
-│ 我的订阅：已启用 (cron: 0 */6 * * *)       │
-│ 订阅者：3 人                                │
+│ 类型：收藏夹    素材数：156                 │
+│ 订阅者：3       上次同步：2分钟前           │
 │                                             │
-│ [立即同步]  [更新订阅设置]  [取消订阅]      │
-│ （仅 owner 或 ROOT 时显示 [删除数据源]）      │
+│ [立即同步]  [查看详情]                      │
 └─────────────────────────────────────────────┘
 ```
 
-**参数显示逻辑：** 根据 `sync_type` 解析 `platform_config` 并格式化：
+> **实现说明（Issue 4）：** 订阅管理、取消订阅、删除数据源等操作已迁移至独立路由 `material-library.sync.$syncId.tsx`（`/material-library/sync/:syncId`）。`SyncDetailPanel` 仅保留摘要信息 + "立即同步"按钮 + "查看详情"导航链接。同步进行中时（`sync.last_workflow_run_id` 存在且 `sync_state === 'syncing'`），面板内嵌 `WorkflowInfoPanel` 展示实时进度。
 
-```typescript
-function formatPlatformConfig(syncType: string, config: Record<string, unknown>): string {
-    switch (syncType) {
-        case "bilibili_favorite": return `media_id = ${config.media_id}`;
-        case "bilibili_uploader": return `mid = ${config.mid}`;
-        case "bilibili_season":   return `season_id = ${config.season_id}, mid = ${config.mid}`;
-        case "bilibili_series":   return `series_id = ${config.series_id}, mid = ${config.mid}`;
-        case "bilibili_video_pages": return `bvid = ${config.bvid}`;
-        default: return JSON.stringify(config);
-    }
-}
-```
+**独立同步管理路由** `material-library.sync.$syncId.tsx` 包含：
+- 同步信息网格（类型、素材数、订阅者、上次同步时间）
+- `WorkflowInfoPanel` 展示最近同步任务（使用 `sync.last_workflow_run_id`）
+- 内联订阅设置（启用/禁用开关、`CronExpressionInput` 定时同步、新鲜度窗口）
+- 危险操作区（取消订阅、删除数据源，均带二次确认）
 
 #### 7.6.3 操作按钮的 API 调用链
 
-**立即同步：**
+**立即同步（素材库页面 SyncDetailPanel 内联按钮 + 独立管理路由）：**
 
 ```
 点击"立即同步"
-  → 按钮变为 loading 状态
   → POST MaterialCategorySyncTriggerRoute { platform_info_id }
   → 成功：返回 { workflow_run_id }
-  → 前端进入同步进度轮询（见 §7.6.4）
-  → 已在运行（already_running: true）：toast "同步任务正在运行中"，仍可轮询已有 workflow_run_id
+  → 已在运行（already_running: true）：toast "同步任务正在运行中"
+  → 刷新分类列表
 ```
 
-**更新订阅设置：**
+**更新订阅设置（独立管理路由 `/material-library/sync/:syncId`）：**
 
 ```
-点击"更新订阅设置" → 弹出设置面板
+内联表单（非 modal）：
   → 启用/禁用开关
-  → cron 表达式输入（默认 "0 */6 * * *"）
+  → CronExpressionInput 组件（5 个预设 + 自定义 cron 输入）
   → 新鲜度窗口（秒）
   → POST MaterialCategorySyncUserConfigUpdateRoute { user_config_id, enabled, cron_expr, freshness_window_sec }
-  → 成功：刷新分类列表
+  → 成功：显示"已保存"提示，刷新数据
 ```
 
-**取消订阅：**
+> **实现说明（Issue 5）：** `CronExpressionInput` 组件提供 5 个预设选项（每30分钟、每1小时、每6小时、每12小时、每天8:00）+ 自定义模式。替代了原始 cron 文本输入框，降低用户使用门槛。
+
+**取消订阅（独立管理路由 危险操作区）：**
 
 ```
 点击"取消订阅"
-  → 确认弹窗："取消订阅后将不再参与此数据源的同步调度。已同步的素材不会被删除。确认取消？"
+  → 确认面板："取消订阅后将不再自动同步此数据源。"
   → POST MaterialCategorySyncUnsubscribeRoute { user_config_id }
-  → 成功：刷新分类列表（如果是最后一个订阅者，同步分类消失）
+  → 成功：导航回素材库页面
 ```
 
-**删除平台数据源（仅 owner 或 ROOT）：**
+**删除数据源（独立管理路由 危险操作区，仅 owner）：**
 
 ```
 点击"删除数据源"
-  → 确认弹窗："删除后将移除平台数据源及所有订阅关系。已同步的素材不会被删除。确认删除？"
-  → POST MaterialCategorySyncPlatformDeleteRoute { platform_info_id }
-  → 成功：刷新分类列表（同步分类消失）
-  → 失败（权限不足）：toast "权限不足，无法删除"
-  → 失败（SYNC_RUNNING）：toast "请等待当前同步完成后再删除"
+  → 确认面板（红色警告）："此操作不可撤销！删除将同时删除所有同步元数据和订阅者配置。已导入的素材不会被删除。"
+  → POST MaterialCategorySyncDeleteRoute { id }
+  → 成功：导航回素材库页面
 ```
 
 #### 7.6.4 同步进度轮询
 
-触发同步后，前端需要展示进度。复用现有的 `WorkerTaskListRoute` 轮询模式（与 `WebenSourceAnalysisModal` 相同）：
+> **实现说明（Issue 3）：** 同步进度展示复用 `WorkflowInfoPanel` 组件（与 `WebenSourceAnalysisModal` 相同），通过 `last_workflow_run_id` 字段驱动。该字段已添加到 `MaterialCategorySyncPlatformInfoSummary` 数据模型中，由 `MaterialCategoryListRoute` 返回。
 
-```typescript
-// 同步进度 hook
-function useMaterialCategorySyncProgress(workflowRunId: string | null) {
-    const [progress, setProgress] = useState<MaterialCategorySyncProgress | null>(null);
-    const { appFetch } = useAppFetch();
+**素材库页面 `SyncDetailPanel`：** 当 `sync.last_workflow_run_id` 存在且 `sync_state === 'syncing'` 时，内嵌 `<WorkflowInfoPanel workflowRunId={sync.last_workflow_run_id} defaultExpanded />` 展示实时进度。
 
-    useEffect(() => {
-        if (!workflowRunId) return;
-        const timer = setInterval(async () => {
-            const resp = await appFetch("/api/v1/MaterialWorkflowStatusRoute", {
-                method: "GET",
-                params: { workflow_run_id: workflowRunId },
-            });
-            if (!resp.ok) return;
-            const data = await resp.json();
-            setProgress(data);
-            // 终态时停止轮询
-            if (data.workflow_run.status === "completed" || data.workflow_run.status === "failed") {
-                clearInterval(timer);
-            }
-        }, 2000);
-        return () => clearInterval(timer);
-    }, [workflowRunId]);
-
-    return progress;
-}
-```
-
-**进度显示：** 在同步信源条目中，同步运行时显示进度条替代"最近同步"时间：
-
-```
-┌─────────────────────────────────────────────┐
-│ 🔄 收藏夹:默认收藏夹                       │
-│    ████████░░░░░░░░ 同步中 52%              │
-└─────────────────────────────────────────────┘
-```
+**独立管理路由：** 当 `sync.last_workflow_run_id` 存在时，始终展示 `<WorkflowInfoPanel>` 面板（`active={sync.sync_state === "syncing"}`），允许用户查看最近一次同步任务的详情。
 
 #### 7.6.5 权限控制
 
@@ -2992,10 +2934,11 @@ const isRoot = currentUser.role === "root";
 const canDelete = isOwner || isRoot;
 ```
 
-**方案：** 在 `MaterialCategorySyncPlatformInfoSummary` 中包含 `my_subscription: MaterialCategorySyncUserConfigSummary | null`、`subscriber_count: Int`、`owner_id: String` 字段。前端据此决定：
-- `my_subscription != null`：显示"立即同步"、"更新订阅设置"、"取消订阅"按钮
-- `canDelete`（isOwner || isRoot）：额外显示"删除数据源"按钮
-- `my_subscription == null`：仅显示"订阅此数据源"按钮（调用 `MaterialCategorySyncSubscribeRoute`，允许其他用户订阅已有的平台数据源）
+**方案：** 在 `MaterialCategorySyncPlatformInfoSummary` 中包含 `my_subscription: MaterialCategorySyncUserConfigSummary | null`、`subscriber_count: Int`、`owner_id: String`、`last_workflow_run_id: String?` 字段。前端据此决定：
+- 素材库页面：SyncCategoryPill 内联"立即同步"按钮；展开 SyncDetailPanel 显示"立即同步"、"查看详情"（跳转 `/material-library/sync/:syncId`）；owner 额外显示"删除数据源"
+- 同步管理独立路由（`material-library.sync.$syncId.tsx`）：内联订阅设置表单（含 `CronExpressionInput`）、危险操作区（取消订阅 / 删除数据源）
+- `canDelete`（isOwner || isRoot）：在 SyncDetailPanel 和独立路由危险区均可删除
+- `my_subscription == null`：仅显示"订阅此数据源"按钮（调用 `MaterialCategorySyncSubscribeRoute`）
 
 ---
 
@@ -3643,7 +3586,7 @@ private val guestIdentity = AuthIdentity.Guest
 
 ---
 
-### Phase A0：包结构重组（见 §11）
+### Phase A0：包结构重组（见 §11） <Badge type="tip" text="已完成" />
 
 纯重构，无行为变更，独立 commit。
 
@@ -3661,7 +3604,7 @@ private val guestIdentity = AuthIdentity.Guest
 
 ---
 
-### Phase A1：分类用户化 + 同步源基础设施
+### Phase A1：分类用户化 + 同步源基础设施 <Badge type="tip" text="已完成" />
 
 #### A1 实施步骤
 
@@ -3707,7 +3650,14 @@ private val guestIdentity = AuthIdentity.Guest
 | MC9 | `update(categoryId, userId=B)` 非 owner | 失败 |
 | MC10 | `listForUser` 返回的 `isMine` 字段 | A 的分类 isMine=true，B 的可见分类 isMine=false |
 | MC11 | `listForUser` 返回的 `materialCount` | 正确统计 `material_category_rel` 中的关联数 |
-| MC12 | 关闭 `allow_others_view` 时自动关闭 `allow_others_add` 和 `allow_others_delete` | 三个 ACL 字段联动 |
+| MC12 | `ensureUncategorized` 使用正确名称 | 创建"待分类"分类，id = `uncategorized:{userId}` |
+| MC13 | `reconcileOrphanMaterials` 移动孤儿素材 | 删除分类后，仅属于该分类的素材移入"待分类" |
+| MC14 | `reconcileOrphanMaterials` 无孤儿时跳过 | 所有素材仍有其他分类归属时，不创建"待分类" |
+| MC15 | `reconcileOrphanMaterials` 只移动真正的孤儿 | 多分类素材保留原关联，仅单分类素材移入"待分类" |
+| MC16 | `ensureUncategorized` 幂等 | 重复调用不报错，不重复创建 |
+| MC17 | 关闭 `allow_others_view` 时自动关闭 `allow_others_add` 和 `allow_others_delete` | 三个 ACL 字段联动 |
+| MC18 | `reconcileAllOrphanMaterials` 全局孤儿归类 | 未关联任何分类的素材移入所有 owner 的"待分类" |
+| MC19 | `reconcileAllOrphanMaterials` 无孤儿时无操作 | 所有素材均有分类时，不创建"待分类" |
 
 ##### A1-T2 `MaterialCategoryInitializeTest`（新增）
 
@@ -3832,8 +3782,8 @@ fun se7_unknown_type_throws() {
 | RP7 | ROOT 删除他人简易分类 | 成功 |
 | RP8 | 删除同步分类 | `{ error: "同步分类请使用 MaterialCategorySyncDeleteRoute" }` |
 | RP8f | 删除默认分类（id = "uncategorized:xxx"） | `{ error: "默认分类不可删除" }` |
-| RP8g | 删除分类时存在孤儿素材（素材仅属于该分类） | 孤儿素材自动移入"未分类"，事务原子完成，返回成功 |
-| RP8h | 删除分类时无孤儿素材（素材属于多个分类） | 仅删除 rel，不创建"未分类"关联，返回成功 |
+| RP8g | 删除分类时存在孤儿素材（素材仅属于该分类） | 孤儿素材自动移入"待分类"，事务原子完成，返回成功 |
+| RP8h | 删除分类时无孤儿素材（素材属于多个分类） | 仅删除 rel，不创建"待分类"关联，返回成功 |
 | **MaterialCategorySyncDeleteRoute** | | |
 | RP8b | TENANT 删除自己的同步分类 | 成功，级联删除 sync_item + sync_user_config + sync_platform_info + rel |
 | RP8c | TENANT 删除他人同步分类 | `{ error: "权限不足" }` |
@@ -3896,30 +3846,41 @@ fun se7_unknown_type_throws() {
 
 **文件位置**：`fredica-webui/tests/`
 
-| ID | 测试 | 预期 |
-|----|------|------|
-| FE1 | 分类列表三组渲染 | "我的分类"、"可见分类"、"同步信源" 各组正确分类 |
-| FE2 | is_mine=false 时隐藏编辑/删除按钮 | 按钮不渲染 |
-| FE4 | 创建分类表单提交 | 调用 MaterialCategorySimpleCreateRoute，成功后刷新列表 |
-| FE5 | 删除分类确认弹窗 | 简易分类调用 MaterialCategorySimpleDeleteRoute，同步分类调用 MaterialCategorySyncDeleteRoute |
+| ID | 文件 | 测试 | 预期 |
+|----|------|------|------|
+| FE1 | `MaterialCategoryPanel.test.tsx` | 分类列表三组渲染 | "我的分类"、"公开分类"、"同步信源" 各组标题可见，分类按 `is_mine` + `sync` 正确分组 |
+| FE1b | 同上 | 空分组不渲染标题 | 无公开分类时不显示"公开分类"标题 |
+| FE1c | 同上 | "全部"按钮仅在"我的分类"组 | "全部"pill 在我的分类组首位，点击清除 category 筛选 |
+| FE2 | 同上 | is_mine=false 时隐藏编辑/删除 | 公开分类 pill 无 X 按钮，无重命名按钮 |
+| FE2b | 同上 | 同步分类 pill 显示同步状态标签 | `sync_state=syncing` 时显示"同步中"，`idle` 显示相对时间 |
+| FE2c | 同上 | 我的分类内联按钮 + 重命名模态框 | 点击 Pencil 按钮弹出重命名模态框，确认后调用 onRenameCategory |
+| FE2d | 同上 | 同步分类内联按钮 | 内联"立即同步"按钮触发 onSyncTrigger；展开面板显示"删除数据源"（owner） |
+| FE3 | 同上 | 同步源展开详情面板 | 点击同步分类 pill 展开详情，显示平台参数、同步状态、订阅信息 |
+| FE4 | 同上 | 创建分类表单提交 | 调用 MaterialCategorySimpleCreateRoute，成功后刷新列表 |
+| FE5 | 同上 | 删除分类确认弹窗 | 简易分类调用 SimpleDeleteRoute，同步分类调用 SyncDeleteRoute |
+| FE8 | `CategoryPickerModal.test.tsx` | 仅显示 is_mine 且非同步分类 | mock API 返回混合分类，modal 只渲染 `is_mine=true && !sync` 的条目 |
+| FE8b | 同上 | 新建分类后自动勾选 | 创建成功后新分类出现在列表中且已勾选 |
+| FE9 | `materialTypes.test.ts` | groupCategories 纯函数 | 输入混合分类数组，输出 `{ mine, publicOthers, synced }` 正确分组 |
+| FE9b | 同上 | sync 优先级高于 is_mine | `is_mine=true` 且 `sync!=null` 的分类归入 synced 组 |
+| FE10 | `material-library._index.test.tsx` | 页面加载分类列表 | mock fetch 返回分类数据，MaterialCategoryPanel 渲染三组 |
 
 ##### A1 测试汇总
 
 | 测试文件 | 测试数 | 覆盖范围 |
 |---------|--------|---------|
-| `MaterialCategoryDbTest` | MC1–MC12（12） | 分类 CRUD + ACL 权限隔离 |
+| `MaterialCategoryDbTest` | MC1–MC19（19） | 分类 CRUD + ACL 权限隔离 + 待分类 + 孤儿归类 |
 | `MaterialCategoryInitializeTest` | IN1–IN5+IN4b+IN4c（7） | 建表逻辑 + 约束 + 索引 |
 | `MaterialCategorySyncPlatformInfoDbTest` | SP1–SP9（9） | 平台源 CRUD + 状态更新 |
 | `MaterialCategorySyncUserConfigDbTest` | UC1–UC8（8） | 用户订阅 CRUD |
 | `MaterialCategorySyncPlatformIdentitySerializationTest` | SE1–SE8（8） | sealed interface 多态序列化 |
 | `MaterialCategoryRouteTest` | RP1–RP23+变体（31） | 全部分类路由权限 |
 | `MaterialCategorySyncRouteTest` | SY1–SY14（17） | 同步源 CRUD 路由 |
-| 前端测试 | FE1–FE5（4） | 分类面板渲染 + 交互 |
-| **合计** | **~96** | |
+| 前端测试 | FE1–FE10（15） | 分类面板渲染 + 交互 + 分组逻辑 + 选择器 |
+| **合计** | **~114** | |
 
 ---
 
-### Phase A2：Bilibili 收藏夹同步 + 后端补全
+### Phase A2：Bilibili 收藏夹同步 + 后端补全 <Badge type="tip" text="已完成" />
 
 #### A2 实施步骤
 
@@ -3965,6 +3926,9 @@ fun se7_unknown_type_throws() {
 | EX4 | 同步失败（Python 服务不可用） | sync_state → "failed"，fail_count 递增，last_error 记录 |
 | EX5 | 同步失败后重试（指数退避） | fail_count 递增，next_retry_at 按指数退避计算 |
 | EX6 | 同步写入 material_category_rel | added_by = 'sync'，不影响 user 手动关联 |
+| EX7 | 显示名为空时从 API 获取 | 同步后 display_name 更新为收藏夹标题 |
+| EX8 | 获取显示名失败不影响同步 | API 异常时同步仍成功，display_name 保持空 |
+| EX9 | 已有显示名时更新为最新 | 每次同步均获取最新标题，display_name 更新 |
 
 ##### A2-T3 `MaterialCategorySyncSchedulerTest`（超时恢复测试）
 
@@ -3975,25 +3939,33 @@ fun se7_unknown_type_throws() {
 
 ##### A2-T4 前端测试
 
-| ID | 测试 | 预期 |
-|----|------|------|
-| FE3 | 同步源分类显示同步状态 | 显示 last_synced_at、item_count、enabled 状态 |
-| FE6 | 手动触发同步按钮 | 调用 MaterialCategorySyncTriggerRoute，按钮变为 loading 状态 |
-| FE7 | 订阅管理面板 | cron_expr / freshness_window_sec 编辑 + 保存 |
+| ID | 文件 | 测试 | 预期 |
+|----|------|------|------|
+| FE3 | `MaterialCategoryPanel.test.tsx` | 同步源分类显示同步状态 | 显示 last_synced_at 相对时间、item_count、sync_state 标签 |
+| FE6 | 同上 | 手动触发同步按钮 | 点击"立即同步"→ 调用 MaterialCategorySyncTriggerRoute → 按钮变 loading |
+| FE6b | 同上 | 触发同步后进度轮询 | 返回 workflow_run_id 后开始 2s 轮询，终态时停止 |
+| FE6c | 同上 | 同步进度条显示 | syncing 状态时 pill 内显示进度条替代时间 |
+| FE7 | `SyncSubscriptionSettingsModal.test.tsx` | 订阅管理面板 | cron_expr / freshness_window_sec 编辑 + 保存调用 UserConfigUpdateRoute |
+| FE7b | 同上 | 取消订阅确认 | 确认弹窗 → 调用 UnsubscribeRoute → 刷新列表 |
+| FE7c | 同上 | 删除数据源（仅 owner） | 非 owner 不显示按钮；owner 点击 → 确认 → 调用 PlatformDeleteRoute |
+| FE11 | `useMaterialCategorySyncProgress.test.ts` | 进度 hook 轮询 | 传入 workflowRunId 后每 2s 调用 API，终态停止 |
+| FE11b | 同上 | workflowRunId 为 null 时不轮询 | 无 API 调用 |
+| FE12 | `add-resource.bilibili.test.tsx` | 全部 tab 可点击 | 4 个 tab 均无 disabled 状态，无"即将推出"badge |
+| FE12b | 同上 | favorite tab 显示"创建为同步分类"按钮 | 按钮可见，点击调用 SyncCreateRoute |
 
 ##### A2 测试汇总
 
 | 测试文件 | 测试数 | 覆盖范围 |
 |---------|--------|---------|
 | `MaterialCategorySyncTriggerRouteTest` | SY10–SY15c（5） | 触发路由 + 防滥用 |
-| `MaterialCategorySyncBilibiliFavoriteExecutorTest` | EX1–EX6（6） | 收藏夹同步执行器 |
+| `MaterialCategorySyncBilibiliFavoriteExecutorTest` | EX1–EX9（9） | 收藏夹同步执行器 + 显示名更新 |
 | `MaterialCategorySyncSchedulerTest` | SY15–SY16（2） | 超时恢复 |
-| 前端测试 | FE3+FE6+FE7（3） | 同步状态 + 触发 + 订阅管理 |
-| **合计** | **~16** | |
+| 前端测试 | FE3–FE12b（11） | 同步状态 + 触发 + 进度轮询 + 订阅管理 + add-resource |
+| **合计** | **~27** | |
 
 ---
 
-### Phase A3：其他 Bilibili 同步类型
+### Phase A3：其他 Bilibili 同步类型 <Badge type="tip" text="已完成" />
 
 #### A3 实施步骤
 
@@ -4016,32 +3988,51 @@ fun se7_unknown_type_throws() {
 | EU2 | 增量同步（pubdate 游标） | 仅拉取 pubdate > cursor 的投稿 |
 | EU3 | 同步成功 + 状态更新 | sync_state → "idle"，cursor 更新为最新 pubdate |
 | EU4 | 同步失败 + 指数退避 | fail_count 递增，last_error 记录 |
+| EU5 | 同步创建 material 记录 | material_video 表有对应记录，字段正确 |
+| EU6 | 显示名为空时从 API 获取 | 同步后 display_name 更新为 UP 主昵称 |
+| EU7 | 获取显示名失败不影响同步 | API 异常时同步仍成功，display_name 保持空 |
+| EU8 | 已有显示名时更新为最新 | 每次同步均获取最新昵称，display_name 更新 |
 | **MaterialCategorySyncBilibiliSeasonExecutorTest** | | |
 | ES1 | 全量同步合集 | 拉取全部剧集，写入 sync_item，item_count 正确 |
 | ES2 | 重复同步（幂等） | 已存在的 sync_item 不重复写入 |
 | ES3 | 同步成功 + 状态更新 | sync_state → "idle" |
+| ES4 | 同步失败 + 状态更新 | sync_state → "failed"，fail_count 递增 |
+| ES5 | 同步创建 material 记录 | material_video 表有对应记录，字段正确 |
+| ES6 | 显示名为空时从 API 获取 | 同步后 display_name 更新为合集标题 |
+| ES7 | 获取显示名失败不影响同步 | API 异常时同步仍成功，display_name 保持空 |
+| ES8 | 已有显示名时更新为最新 | 每次同步均获取最新标题，display_name 更新 |
 | **MaterialCategorySyncBilibiliSeriesExecutorTest** | | |
 | ER1 | 全量同步列表 | 拉取全部视频，写入 sync_item |
 | ER2 | 重复同步（幂等） | 已存在的 sync_item 不重复写入 |
 | ER3 | 同步成功 + 状态更新 | sync_state → "idle" |
+| ER4 | 同步失败 + 状态更新 | sync_state → "failed"，fail_count 递增 |
+| ER5 | 同步创建 material 记录 | material_video 表有对应记录，字段正确 |
+| ER6 | 显示名为空时从 API 获取 | 同步后 display_name 更新为列表标题 |
+| ER7 | 获取显示名失败不影响同步 | API 异常时同步仍成功，display_name 保持空 |
+| ER8 | 已有显示名时更新为最新 | 每次同步均获取最新标题，display_name 更新 |
 | **MaterialCategorySyncBilibiliVideoPagesExecutorTest** | | |
 | EV1 | 全量同步多 P 视频 | 拉取全部分 P，写入 sync_item |
 | EV2 | 重复同步（幂等） | 已存在的 sync_item 不重复写入 |
 | EV3 | 同步成功 + 状态更新 | sync_state → "idle" |
+| EV4 | 同步失败 + 状态更新 | sync_state → "failed"，fail_count 递增 |
+| EV5 | 同步创建 material 记录 | material_video 表有对应记录，字段正确 |
+| EV6 | 显示名为空时从 API 获取 | 同步后 display_name 更新为视频标题 |
+| EV7 | 获取显示名失败不影响同步 | API 异常时同步仍成功，display_name 保持空 |
+| EV8 | 已有显示名时更新为最新 | 每次同步均获取最新标题，display_name 更新 |
 
 ##### A3 测试汇总
 
 | 测试文件 | 测试数 | 覆盖范围 |
 |---------|--------|---------|
-| `MaterialCategorySyncBilibiliUploaderExecutorTest` | EU1–EU4（4） | UP 主投稿同步 |
-| `MaterialCategorySyncBilibiliSeasonExecutorTest` | ES1–ES3（3） | 合集同步 |
-| `MaterialCategorySyncBilibiliSeriesExecutorTest` | ER1–ER3（3） | 列表同步 |
-| `MaterialCategorySyncBilibiliVideoPagesExecutorTest` | EV1–EV3（3） | 多 P 同步 |
-| **合计** | **~13** | |
+| `MaterialCategorySyncBilibiliUploaderExecutorTest` | EU1–EU8（8） | UP 主投稿同步 + material 记录创建 + 显示名更新 |
+| `MaterialCategorySyncBilibiliSeasonExecutorTest` | ES1–ES8（8） | 合集同步 + material 记录创建 + 显示名更新 |
+| `MaterialCategorySyncBilibiliSeriesExecutorTest` | ER1–ER8（8） | 列表同步 + material 记录创建 + 显示名更新 |
+| `MaterialCategorySyncBilibiliVideoPagesExecutorTest` | EV1–EV8（8） | 多 P 同步 + material 记录创建 + 显示名更新 |
+| **合计** | **32** | |
 
 ---
 
-### Phase A4：完善与优化（未来）
+### Phase A4：完善与优化（未来） <Badge type="danger" text="待开发" />
 
 - `BilibiliCollectedFavorites`：收藏的合集同步（需登录凭据）
 - 素材 `owner_id` 字段（素材级别的用户隔离）
@@ -4052,16 +4043,80 @@ fun se7_unknown_type_throws() {
 
 ---
 
+### Phase A5：Bilibili 账号池独立数据表 + IP 检测 + JsBridge 重构 <Badge type="danger" text="待开发" />
+
+> 将 Bilibili 账号池从 `AppConfig.bilibili_accounts_json`（JSON blob）迁移到独立数据表，新增 IP 检测后端，所有接口走 JsBridge（服主专用配置）。
+
+#### A5 背景
+
+当前问题：
+1. 账号池存储在 `AppConfig.bilibili_accounts_json`（JSON 字符串 blob），且 AppConfig 中仍保留旧单账号字段（`bilibiliSessdata` 等）
+2. 前端"批量检测 IP"按钮调用 `callBridge("check_bilibili_ip")`，但后端无对应 handler 和 Python 端点
+3. 账号池属于服主专用配置，所有接口必须走 JsBridge（非 HTTP 路由），JsBridge 应薄封装，业务逻辑在 Service 层
+
+#### A5 数据模型
+
+```sql
+CREATE TABLE bilibili_account_pool (
+    id                TEXT PRIMARY KEY,
+    label             TEXT NOT NULL DEFAULT '',
+    is_anonymous      INTEGER NOT NULL DEFAULT 0,
+    is_default        INTEGER NOT NULL DEFAULT 0,
+    sessdata          TEXT NOT NULL DEFAULT '',
+    bili_jct          TEXT NOT NULL DEFAULT '',
+    buvid3            TEXT NOT NULL DEFAULT '',
+    buvid4            TEXT NOT NULL DEFAULT '',
+    dedeuserid        TEXT NOT NULL DEFAULT '',
+    ac_time_value     TEXT NOT NULL DEFAULT '',
+    proxy             TEXT NOT NULL DEFAULT '',
+    rate_limit_sec    REAL NOT NULL DEFAULT 1.0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
+    last_ip           TEXT NOT NULL DEFAULT '',
+    last_ip_checked_at INTEGER NOT NULL DEFAULT 0,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+);
+```
+
+Kotlin 模型 `BilibiliAccount` 实现 `BilibiliApiPythonCredentialConfig` 接口（`shared/.../apputil/bilibiliUtil.kt`）。
+
+#### A5 实施步骤
+
+| 子阶段 | 内容 | 新建/修改文件 |
+|--------|------|-------------|
+| A5.1 Foundation | Model + Repo + Db + Service + Bootstrap 初始化 + 自动迁移（AppConfig → 新表） | `bilibili_account_pool/model/BilibiliAccount.kt`（NEW）<br/>`bilibili_account_pool/db/BilibiliAccountPoolRepo.kt`（NEW）<br/>`bilibili_account_pool/db/BilibiliAccountPoolDb.kt`（NEW, jvmMain）<br/>`bilibili_account_pool/service/BilibiliAccountPoolService.kt`（NEW）<br/>`FredicaApi.jvm.kt`（MODIFY） |
+| A5.2 Python IP 端点 | `/bilibili/ip/check` POST 端点，通过 proxy 访问 bilibili API 获取出口 IP | `fredica_pyutil_server/routes/bilibili_ip.py`（NEW） |
+| A5.3 JsBridge Handlers | 3 个新 handler（get/save/check_ip）+ 2 个重构（check_credential/try_refresh → 委托 Service） | `GetBilibiliAccountPoolJsMessageHandler.kt`（NEW）<br/>`SaveBilibiliAccountPoolJsMessageHandler.kt`（NEW）<br/>`CheckBilibiliIpJsMessageHandler.kt`（NEW）<br/>`CheckBilibiliCredentialJsMessageHandler.kt`（MODIFY）<br/>`TryRefreshBilibiliCredentialJsMessageHandler.kt`（MODIFY）<br/>`AppWebViewMessages.kt`（MODIFY） |
+| A5.4 Executor 集成 | 替换 `MaterialCategorySyncBilibiliUploaderExecutor` 中的 placeholder accounts | `MaterialCategorySyncBilibiliUploaderExecutor.kt`（MODIFY）<br/>`MaterialCategorySyncBilibiliUploaderExecutorTest.kt`（MODIFY） |
+| A5.5 消费方更新 | `BilibiliVideoSubtitleRouteExt` 使用新 Service 替代 AppConfig | `BilibiliVideoSubtitleRouteExt.kt`（MODIFY） |
+| A5.6 前端迁移 | 切换 bridge 调用：`get_bilibili_account_pool` / `save_bilibili_account_pool` | `app-desktop-setting-bilibili-account-pool-config.tsx`（MODIFY） |
+
+#### A5 关键设计
+
+- **Service 核心方法**：`resolveProxy(account)` 处理 `"USE_APP"` 哨兵值；`getDefaultCredentialConfig()` 返回默认账号；`buildSyncAccountList()` 构建 L1 scheduler 格式
+- **自动迁移**：Service 初始化后检查新表是否为空 + AppConfig 有旧数据 → 自动迁移
+- **JsBridge 薄封装**：handler 只做参数解析 + 调用 Service + 回调结果，业务逻辑全在 Service
+
+#### A5 测试
+
+| 测试 | 覆盖 |
+|------|------|
+| `BilibiliAccountPoolDbTest` | CRUD、upsertAll 幂等性、getDefault、updateIpCheckResult |
+| `MaterialCategorySyncBilibiliUploaderExecutorTest`（现有 10 个 eu 测试） | 确认新 Service 初始化后仍通过 |
+
+---
+
 ### 全局测试汇总
 
 | Phase | 测试数 | 主要覆盖 |
 |-------|--------|---------|
 | A0 | 0（编译 + 现有测试） | 包结构重组验证 |
-| A1 | ~96 | DB CRUD + ACL + 建表 + 序列化 + 路由权限 + 同步源路由 + 前端 |
-| A2 | ~16 | 触发路由 + 收藏夹执行器 + 调度器超时 + 前端同步 UI |
-| A3 | ~13 | 4 种同步执行器 |
+| A1 | ~107 | DB CRUD + ACL + 建表 + 序列化 + 路由权限 + 同步源路由 + 前端（15） |
+| A2 | ~24 | 触发路由 + 收藏夹执行器 + 调度器超时 + 前端同步 UI（11） |
+| A3 | 20 | 4 种同步执行器 + material 记录创建 |
 | A4 | TBD | 随功能补充 |
-| **总计** | **~125+** | |
+| A5 | ~15+ | 账号池 DB CRUD + 现有执行器回归 |
+| **总计** | **~166+** | |
 
 ---
 
@@ -4645,3 +4700,13 @@ graph TD
     SyncProgress --> A_WFStatus
     AuditPanel --> A_AuditLog
 ```
+
+---
+
+## 13. 相关文档索引
+
+| 文档 | 说明 |
+|------|------|
+| [B站UP主同步 — 反风控子进程体系设计](bilibili-uploader-anti-risk-control.md) | 账号池架构、L1/L2 抓取分层、412 风控应对策略、WebSocket 长任务框架 |
+| [bilibili-api 子进程封装工具](bilibili-api-subprocess-util.md) | `run_in_subprocess` 实现、ProcessPoolExecutor → 每请求独立子进程演进、全局状态隔离原理 |
+| [Bilibili AI 总结](bilibili-ai-conclusion.md) | Bilibili AI 总结功能设计 |

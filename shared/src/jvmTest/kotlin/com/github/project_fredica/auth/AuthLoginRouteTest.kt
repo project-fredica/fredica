@@ -6,8 +6,10 @@ import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -88,7 +90,12 @@ class AuthLoginRouteTest {
     }
 
     private suspend fun callLogin(username: String, password: String, ip: String = "1.1.1.1", ua: String = "TestAgent"): JsonObject {
-        val param = """{"username":"$username","password":"$password","ip_address":"$ip","user_agent":"$ua"}"""
+        val param = buildJsonObject {
+            put("username", username)
+            put("password", password)
+            put("ip_address", ip)
+            put("user_agent", ua)
+        }.toString()
         val result = AuthLoginRoute.handler(param, RouteContext(identity = null, clientIp = ip, userAgent = ua))
         return result.str.loadJson().getOrThrow() as JsonObject
     }

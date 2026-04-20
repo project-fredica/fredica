@@ -7,7 +7,9 @@ import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -185,7 +187,10 @@ class UserSelfServiceRouteTest {
     @Test
     fun us9_root_update_other() = runBlocking {
         val targetId = userDb.createUser("bob", "Bob", "hash123")
-        val resp = callWithIdentity(rootUser, UserUpdateDisplayNameRoute::handler, """{"user_id":"$targetId","display_name":"BobNew"}""")
+        val resp = callWithIdentity(rootUser, UserUpdateDisplayNameRoute::handler, buildJsonObject {
+            put("user_id", targetId)
+            put("display_name", "BobNew")
+        }.toString())
         assertTrue(resp["success"]!!.jsonPrimitive.boolean)
         assertEquals("BobNew", resp["display_name"]!!.jsonPrimitive.content)
         val user = userDb.findById(targetId)!!
@@ -197,7 +202,9 @@ class UserSelfServiceRouteTest {
     @Test
     fun us10_display_name_too_long() = runBlocking {
         val longName = "a".repeat(65)
-        val resp = callWithIdentity(tenantUser, UserUpdateDisplayNameRoute::handler, """{"display_name":"$longName"}""")
+        val resp = callWithIdentity(tenantUser, UserUpdateDisplayNameRoute::handler, buildJsonObject {
+            put("display_name", longName)
+        }.toString())
         assertTrue(resp["error"]!!.jsonPrimitive.content.contains("显示名长度需 1-64"))
         Unit
     }

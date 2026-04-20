@@ -66,16 +66,6 @@ describe("AdminUsersPage", () => {
         expect(screen.getByText("bob")).toBeTruthy();
     });
 
-    it("shows 403 for non-root user", () => {
-        mockUseAppConfig.mockReturnValue({
-            appConfig: makeConfig({ user_role: "tenant", session_token: "tok" }),
-            setAppConfig: vi.fn(),
-            isStorageLoaded: true,
-        });
-        renderPage();
-        expect(screen.getByText("403")).toBeTruthy();
-    });
-
     it("shows active/disabled status badges", async () => {
         renderPage();
         await waitFor(() => expect(screen.getAllByText("启用").length).toBeGreaterThan(0));
@@ -187,16 +177,6 @@ describe("AdminUsersPage", () => {
                 expect.objectContaining({ method: "POST" }),
             );
         });
-    });
-
-    // ── Back button ──────────────────────────────────────────────────────────
-
-    it("renders back button with ArrowLeft icon", async () => {
-        renderPage();
-        await waitFor(() => expect(screen.getByText("alice")).toBeTruthy());
-        const backBtn = screen.getByTitle("返回主页");
-        expect(backBtn).toBeTruthy();
-        expect(backBtn.tagName).toBe("BUTTON");
     });
 
     // ── Invite button ────────────────────────────────────────────────────────

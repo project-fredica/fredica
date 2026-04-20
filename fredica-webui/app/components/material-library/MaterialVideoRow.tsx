@@ -6,7 +6,7 @@ import { MaterialTaskBadge } from "~/components/MaterialTaskBadge";
 import { BilibiliAiConclusionButton } from "~/components/bilibili/BilibiliAiConclusionButton";
 import {
     type MaterialVideo, type MaterialCategory, type MaterialTask, type BilibiliExtra,
-    SOURCE_BADGE, formatDuration, formatCount,
+    getSourceBadge, formatDuration, formatCount, isBilibiliVideo,
 } from "./materialTypes";
 import { json_parse } from "~/util/json";
 
@@ -30,20 +30,21 @@ export function MaterialVideoRow({
     onSelectCategory: (id: string) => void;
 }) {
     const buildProxyUrl = useImageProxyUrl();
-    const sourceBadge = SOURCE_BADGE[video.source_type] ?? { label: video.source_type, className: 'bg-gray-100 text-gray-600' };
+    const sourceBadge = getSourceBadge(video.source_type) ?? { label: video.source_type, className: 'bg-gray-100 text-gray-600' };
     const isDeleting = deletingVideoIds.has(video.id);
     const videoTasks = tasksMap.get(video.id);
     const videoCats = (categories ?? []).filter(c => video.category_ids.includes(c.id));
 
-    const bilibiliPage = video.source_type === 'bilibili'
+    const isBilibili = isBilibiliVideo(video);
+    const bilibiliPage = isBilibili
         ? parseInt(video.id.match(/__P(\d+)$/)?.[1] ?? '1', 10)
         : 1;
-    const bilibiliUrl = video.source_type === 'bilibili'
+    const bilibiliUrl = isBilibili
         ? `https://www.bilibili.com/video/${video.source_id}${bilibiliPage > 1 ? `?p=${bilibiliPage}` : ''}`
         : null;
 
     let extraInfo: ReactNode = null;
-    if (video.source_type === 'bilibili') {
+    if (isBilibili) {
         const ext = json_parse<BilibiliExtra>(video.extra);
         extraInfo = (
             <div className="flex items-center gap-3 text-xs text-gray-400">
@@ -85,7 +86,7 @@ export function MaterialVideoRow({
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sourceBadge.className}`}>
                         {sourceBadge.label}
                     </span>
-                    {video.source_type === 'bilibili' && video.id in downloadStatusMap && (
+                    {isBilibili && video.id in downloadStatusMap && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${downloadStatusMap[video.id] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                             {downloadStatusMap[video.id] ? '已下载' : '未下载'}
                         </span>
@@ -123,7 +124,7 @@ export function MaterialVideoRow({
                         打开
                     </button>
                 )}
-                {video.source_type === 'bilibili' && (
+                {isBilibili && (
                     <BilibiliAiConclusionButton
                         bvid={video.source_id}
                         pageIndex={bilibiliPage - 1}

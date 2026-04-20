@@ -3,6 +3,7 @@ package com.github.project_fredica.api.routes
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.auth.AuthRole
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
 
 object BilibiliFavoriteGetPageRoute : FredicaApi.Route {
+    private val logger = createLogger()
     override val mode: FredicaApi.Route.Mode
         get() = FredicaApi.Route.Mode.Post
     override val desc: String
@@ -19,6 +21,7 @@ object BilibiliFavoriteGetPageRoute : FredicaApi.Route {
 
     override suspend fun handler(param: String, context: RouteContext): ValidJsonString {
         val p = param.loadJsonModel<BilibiliFavoriteGetPageParam>().getOrThrow()
+        logger.debug("handler: fid=${p.fid} page=${p.page}")
         val body = buildJsonObject { put("fid", p.fid); put("page", p.page) }.toValidJson()
         return ValidJsonString(FredicaApi.PyUtil.post("/bilibili/favorite/get-page", body.str))
     }

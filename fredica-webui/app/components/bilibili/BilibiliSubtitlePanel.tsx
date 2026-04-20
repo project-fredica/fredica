@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader, Captions, RefreshCw, ChevronDown, ChevronUp, AlertCircle, Download } from "lucide-react";
 import { useAppFetch } from "~/util/app_fetch";
+import { print_error } from "~/util/error_handler";
 import { CommonSubtitlePanel, type CommonSubtitleItem } from "~/components/subtitle/CommonSubtitlePanel";
 import { convertToSrt, downloadSrt } from "~/util/subtitleExport";
 
@@ -63,10 +64,19 @@ function SubtitleBodyPanel({ materialId, selectedLan, metaItem, isUpdate, onSeek
             method: "POST",
             body: JSON.stringify({ subtitle_url: metaItem.subtitle_url, is_update: isUpdate }),
         }, { timeout: 5 * 60 * 1000, signal: abort.signal })
-            .then(({ data }) => { if (!cancelled) setResult(data); })
+            .then(({ data }) => {
+                if (cancelled) return;
+                const errMsg = (data as unknown as Record<string, unknown>)?.error;
+                if (typeof errMsg === "string") {
+                    setResult({ code: -1, message: errMsg, body: null });
+                } else {
+                    setResult(data);
+                }
+            })
             .catch((err) => {
-                if (!cancelled && err?.name !== "AbortError")
-                    setResult({ code: -1, message: "请求失败", body: null });
+                if (cancelled || err?.name === "AbortError") return;
+                print_error({ reason: "获取字幕 body 失败", err, variables: { subtitle_url: metaItem.subtitle_url } });
+                setResult({ code: -1, message: "请求失败", body: null });
             })
             .finally(() => { if (!cancelled) setLoading(false); });
 
@@ -146,7 +156,11 @@ export function BilibiliSubtitlePanel({
             body: JSON.stringify({ bvid, page_index: pageIndex, is_update: refreshCount > 0 }),
         }, { timeout: 5 * 60 * 1000 })
             .then(({ data }) => {
-                if (!cancelled) {
+                if (cancelled) return;
+                const errMsg = (data as unknown as Record<string, unknown>)?.error;
+                if (typeof errMsg === "string") {
+                    setMetaResult({ code: -1, message: errMsg, subtitles: null });
+                } else {
                     setMetaResult(data);
                     if (data && data.subtitles && data.subtitles.length > 0) {
                         const match = initialLan && data.subtitles.find(s => s.lan === initialLan);
@@ -154,8 +168,10 @@ export function BilibiliSubtitlePanel({
                     }
                 }
             })
-            .catch(() => {
-                if (!cancelled) setMetaResult({ code: -1, message: "请求失败", subtitles: null });
+            .catch((err) => {
+                if (cancelled) return;
+                print_error({ reason: "获取字幕元信息失败", err, variables: { bvid, pageIndex } });
+                setMetaResult({ code: -1, message: "请求失败", subtitles: null });
             })
             .finally(() => { if (!cancelled) setMetaLoading(false); });
 

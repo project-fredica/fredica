@@ -9,7 +9,7 @@ import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.apputil.loadJsonModel
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.bilibili_account_pool.service.BilibiliAccountPoolService
 import com.github.project_fredica.db.BilibiliAiConclusionCacheService
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -29,18 +29,11 @@ object BilibiliVideoAiConclusionRoute : FredicaApi.Route {
         val p = param.loadJsonModel<BilibiliVideoAiConclusionParam>().getOrThrow()
         logger.debug("请求 bvid=${p.bvid} page=${p.pageIndex} is_update=${p.isUpdate}")
 
-        val cfg = AppConfigService.repo.getConfig()
+        val cfg = BilibiliAccountPoolService.getDefaultCredentialConfig()
+            ?: return buildJsonObject { put("error", "未配置默认 B 站账号") }.toValidJson()
 
         val raw = BilibiliAiConclusionCacheService.fetchOrLoad(p.bvid, p.pageIndex, p.isUpdate) {
-            val pyBody = buildJsonObject {
-                put("sessdata", cfg.bilibiliSessdata)
-                put("bili_jct", cfg.bilibiliBiliJct)
-                put("buvid3", cfg.bilibiliBuvid3)
-                put("buvid4", cfg.bilibiliBuvid4)
-                put("dedeuserid", cfg.bilibiliDedeuserid)
-                put("ac_time_value", cfg.bilibiliAcTimeValue)
-                put("proxy", cfg.bilibiliProxy)
-            }.toValidJson()
+            val pyBody = BilibiliAccountPoolService.buildPyCredentialBody(cfg).toValidJson()
             logger.debug("调用 Python bvid=${p.bvid} page=${p.pageIndex}")
             val pyResult = FredicaApi.PyUtil.post(
                 "/bilibili/video/ai-conclusion/${p.bvid}/${p.pageIndex}", pyBody.str

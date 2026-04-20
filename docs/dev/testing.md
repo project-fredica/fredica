@@ -56,37 +56,6 @@ npx vitest run tests/context/floatingPlayer.test.tsx
        Tests  26 passed (26)
 ```
 
-### 测试用例覆盖一览
-
-| 文件 | 用例 | 说明 |
-|------|------|------|
-| `videoPlayerChannel.test.ts` | C1 | `playing(instanceId=自身)` → `onForcePause` 不调用 |
-| | C2 | `playing(instanceId=他人)` → `onForcePause` 调用一次 |
-| | C3 | `seek-and-play(tabId不匹配)` → `onSeekAndPlay` 不调用 |
-| | C4 | `seek-and-play(tabId匹配)` → `onSeekAndPlay(42)` |
-| | C5 | 同一 seekId 发两次 → 只响应一次 |
-| | C6 | 环形缓冲（容量 20）溢出后接受旧 seekId |
-| | C8 | 组件 unmount → 广播 `destroyed`，channel 关闭 |
-| | C9 | `broadcastSeekPassive` 100ms 内连续调用 → channel 只收 1 条 |
-| `useVideoPlayerState.test.ts` | V1 | 挂载后初始状态为 `checking` |
-| | V2 | check 成功，无 pendingSeek → `paused`，fileMtime 正确 |
-| | V3 | check 成功，预设 pendingSeek{autoPlay:true} → 保留 |
-| | V4 | check 成功，预设 pendingSeek{autoPlay:false} → 保留 |
-| | V5 | check 返回 not ready → `needs_encode` |
-| | V6 | `startEncode()` → `encoding`，调用 TranscodeMp4Route |
-| | V7 | encoding 轮询检测到就绪 → 回到 `checking` |
-| | V8 | `onPlaybackStarted()` → `playing` |
-| | V9 | `onPlaybackPaused()` → `paused` |
-| | V10 | playing 时 `onForcePause()` → `paused` |
-| | V11 | paused 时 `onForcePause()` → 无变化 |
-| | V12 | 暂停时写入 `localStorage[fredica-video-progress-*]` |
-| | V13 | localStorage 记录在 30 天内 → pendingSeek 恢复 |
-| | V14 | localStorage 记录超过 30 天 → pendingSeek 为 null |
-| `floatingPlayer.test.tsx` | F1 | 初始：`isVisible=false`，`currentMaterialId=null` |
-| | F2 | `openFloatingPlayer('mat-1')` → `isVisible=true` |
-| | F3 | `openFloatingPlayer('mat-1', 42)` → `pendingSeek={seconds:42, autoPlay:true}` |
-| | F4 | `closeFloatingPlayer()` → `isVisible=false`，`currentMaterialId=null` |
-
 ### 关键 Mock 策略
 
 **`MockBroadcastChannel`**（`tests/mocks/broadcastChannel.ts`）
@@ -131,29 +100,21 @@ vi.mock("~/context/appConfig", () => ({
 
 ---
 
-## Kotlin / Gradle 测试（shared 模块）
+## Kotlin / Gradle 测试
 
-测试文件位于 `shared/src/jvmTest/kotlin/`，按包结构组织：
-
-```
-shared/src/jvmTest/kotlin/.../
-├── db/          # Task、WorkflowRun、Weben、对账等
-├── worker/      # WorkerEngine、DagEngine、Executor
-├── llm/         # LLM SSE 客户端
-└── python/      # Python 服务通信
-```
+shared 模块和 composeApp 模块都需要运行 jvmTest 测试。
 
 ### 运行命令
 
 ```shell
-# 运行全部测试（跳过 UP-TO-DATE 缓存）
+# 运行 shared 模块全部测试（--rerun-tasks 跳过 UP-TO-DATE 缓存）（可选 --info 参数带详细日志）
 ./gradlew :shared:jvmTest --rerun-tasks
 
 # 运行单个测试类
 ./gradlew :shared:jvmTest --tests "com.github.project_fredica.db.TaskDbTest"
 
-# 带详细日志
-./gradlew :shared:jvmTest --rerun-tasks --info
+# 运行 composeApp 模块全部测试（--rerun-tasks 跳过 UP-TO-DATE 缓存）（可选 --info 参数带详细日志）
+./gradlew :composeApp:jvmTest --rerun-tasks
 ```
 
 ### 关键约定

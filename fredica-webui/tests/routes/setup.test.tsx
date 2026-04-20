@@ -15,6 +15,12 @@ vi.mock("~/context/appConfig", () => ({ useAppConfig: vi.fn() }));
 import { useAppConfig } from "~/context/appConfig";
 const mockUseAppConfig = vi.mocked(useAppConfig);
 
+const mockCallBridge = vi.fn();
+vi.mock("~/util/bridge", () => ({
+    callBridge: (...args: unknown[]) => mockCallBridge(...args),
+    BridgeUnavailableError: class BridgeUnavailableError extends Error {},
+}));
+
 function makeConfig(overrides: Record<string, unknown> = {}) {
     return {
         webserver_domain: "localhost", webserver_port: "7631",
@@ -95,9 +101,7 @@ describe("SetupPage", () => {
     });
 
     it("shows error on failed init", async () => {
-        global.fetch = vi.fn()
-            .mockResolvedValueOnce({ ok: true, json: async () => ({ initialized: false }) } as Response)
-            .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "用户名已存在" }) } as Response);
+        mockCallBridge.mockResolvedValueOnce(JSON.stringify({ error: "用户名已存在" }));
         renderSetup();
         await userEvent.type(screen.getByPlaceholderText("admin"), "admin1");
         await userEvent.type(screen.getByPlaceholderText("至少 8 位"), "StrongPass123!");
@@ -107,15 +111,10 @@ describe("SetupPage", () => {
     });
 
     it("saves session and navigates on successful init", async () => {
-        global.fetch = vi.fn()
-            .mockResolvedValueOnce({ ok: true, json: async () => ({ initialized: false }) } as Response)
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    token: "new-session-tok",
-                    user: { display_name: "admin1", role: "root", permissions: "" },
-                }),
-            } as Response);
+        mockCallBridge.mockResolvedValueOnce(JSON.stringify({
+            token: "new-session-tok",
+            user: { display_name: "admin1", role: "root", permissions: "" },
+        }));
         renderSetup();
         await userEvent.type(screen.getByPlaceholderText("admin"), "admin1");
         await userEvent.type(screen.getByPlaceholderText("至少 8 位"), "StrongPass123!");
@@ -123,7 +122,7 @@ describe("SetupPage", () => {
         await userEvent.click(screen.getByRole("button", { name: "完成初始化" }));
         await waitFor(() => {
             expect(mockSetAppConfig).toHaveBeenCalledWith(expect.objectContaining({ session_token: "new-session-tok" }));
-            expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true });
+            expect(mockNavigate).toHaveBeenCalledWith("/app-desktop-home", { replace: true });
         });
     });
 });

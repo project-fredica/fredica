@@ -6,13 +6,25 @@ import com.github.project_fredica.apputil.*
 import com.github.project_fredica.apputil.internalReadNetworkProxy
 import com.github.project_fredica.asr.service.BilibiliSubtitleBodyCacheService
 import com.github.project_fredica.asr.service.BilibiliSubtitleMetaCacheService
+import com.github.project_fredica.bilibili_account_pool.db.BilibiliAccountInfoDb
+import com.github.project_fredica.bilibili_account_pool.db.BilibiliAccountPoolDb
+import com.github.project_fredica.bilibili_account_pool.service.BilibiliAccountInfoService
+import com.github.project_fredica.bilibili_account_pool.service.BilibiliAccountPoolService
 import com.github.project_fredica.auth.*
 import com.github.project_fredica.db.*
 import com.github.project_fredica.db.weben.*
 import com.github.project_fredica.llm.LlmRequestServiceHolder
 import com.github.project_fredica.llm.LlmRequestServiceImpl
+import com.github.project_fredica.material_category.db.MaterialCategoryAuditLogDb
 import com.github.project_fredica.material_category.db.MaterialCategoryDb
+import com.github.project_fredica.material_category.db.MaterialCategorySyncItemDb
+import com.github.project_fredica.material_category.db.MaterialCategorySyncPlatformInfoDb
+import com.github.project_fredica.material_category.db.MaterialCategorySyncUserConfigDb
+import com.github.project_fredica.material_category.service.MaterialCategoryAuditLogService
 import com.github.project_fredica.material_category.service.MaterialCategoryService
+import com.github.project_fredica.material_category.service.MaterialCategorySyncItemService
+import com.github.project_fredica.material_category.service.MaterialCategorySyncPlatformInfoService
+import com.github.project_fredica.material_category.service.MaterialCategorySyncUserConfigService
 import com.github.project_fredica.python.PythonUtil
 import com.github.project_fredica.worker.TaskCancelService
 import com.github.project_fredica.worker.WorkerEngine
@@ -149,6 +161,10 @@ object FredicaApiJvmService {
             MaterialDb(database).also          { it.initialize(); MaterialService.initialize(it) }
             MaterialVideoDb(database).also     { it.initialize(); MaterialVideoService.initialize(it) }
             MaterialCategoryDb(database).also  { it.initialize(); MaterialCategoryService.initialize(it) }
+            MaterialCategorySyncPlatformInfoDb(database).also { MaterialCategorySyncPlatformInfoService.initialize(it) }
+            MaterialCategorySyncUserConfigDb(database).also   { MaterialCategorySyncUserConfigService.initialize(it) }
+            MaterialCategorySyncItemDb(database).also         { MaterialCategorySyncItemService.initialize(it) }
+            MaterialCategoryAuditLogDb(database).also         { MaterialCategoryAuditLogService.initialize(it) }
             MaterialTaskDb(database).also      { it.initialize(); MaterialTaskService.initialize(it) }
             // Worker 任务队列
             TaskDb(database).also              { it.initialize(); TaskService.initialize(it) }
@@ -164,6 +180,9 @@ object FredicaApiJvmService {
             BilibiliAiConclusionCacheDb(database).also  { it.initialize(); BilibiliAiConclusionCacheService.initialize(it) }
             BilibiliSubtitleMetaCacheDb(database).also  { it.initialize(); BilibiliSubtitleMetaCacheService.initialize(it) }
             BilibiliSubtitleBodyCacheDb(database).also  { it.initialize(); BilibiliSubtitleBodyCacheService.initialize(it) }
+            // Bilibili 账号池
+            BilibiliAccountPoolDb(database).also { it.initialize(); BilibiliAccountPoolService.initialize(it) }
+            BilibiliAccountInfoDb(database).also { it.initialize(); BilibiliAccountInfoService.initialize(it) }
             // LLM 响应缓存
             LlmResponseCacheDb(database).also { it.initialize(); LlmResponseCacheService.initialize(it) }
             // Weben 知识图谱
@@ -209,6 +228,11 @@ object FredicaApiJvmService {
                 AsrSpawnChunksExecutor,
                 TranscribeExecutor,
                 DownloadTorchExecutor,
+                MaterialCategorySyncBilibiliFavoriteExecutor,
+                MaterialCategorySyncBilibiliUploaderExecutor,
+                MaterialCategorySyncBilibiliSeasonExecutor,
+                MaterialCategorySyncBilibiliSeriesExecutor,
+                MaterialCategorySyncBilibiliVideoPagesExecutor,
             ),
         )
         logger.debug("WorkerEngine started")
@@ -317,12 +341,19 @@ object FredicaApiJvmService {
      */
     fun onAppReady() {
         val logger = createLogger()
-        logger.info("[onAppReady] KCEF 初始化完成，启动后台 WebenSource 对账任务…")
+        logger.info("[onAppReady] KCEF 初始化完成，启动后台对账任务…")
         CurrentInstanceHandler.engineScope.launch(Dispatchers.IO) {
             try {
                 WebenSourceListRoute.startupReconcileAll()
             } catch (e: Throwable) {
                 logger.warn("[onAppReady] startupReconcileAll failed", isHappensFrequently = false, err = e)
+            }
+        }
+        CurrentInstanceHandler.engineScope.launch(Dispatchers.IO) {
+            try {
+                MaterialCategoryService.repo.reconcileAllOrphanMaterials()
+            } catch (e: Throwable) {
+                logger.warn("[onAppReady] reconcileAllOrphanMaterials failed", isHappensFrequently = false, err = e)
             }
         }
     }

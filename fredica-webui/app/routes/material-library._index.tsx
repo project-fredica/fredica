@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
+import { toast } from "react-toastify";
 import { useAppFetch } from "~/util/app_fetch";
 import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { print_error, reportHttpError } from "~/util/error_handler";
 import { BilibiliAiConclusionModal } from "~/components/bilibili/BilibiliAiConclusionModal";
 import {
     type MaterialVideo, type MaterialCategory, type MaterialTask,
-    POLL_INTERVAL_MS, PAGE_SIZE,
+    POLL_INTERVAL_MS, PAGE_SIZE, isBilibiliVideo,
 } from "~/components/material-library/materialTypes";
 import { MaterialCategoryPanel } from "~/components/material-library/MaterialCategoryPanel";
 import { MaterialVideoRow } from "~/components/material-library/MaterialVideoRow";
@@ -17,7 +18,15 @@ export default function LibraryPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const taskIdParam = searchParams.get('task_id') ?? '';
 
-    const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+    const selectedCategoryId = searchParams.get('category') ?? null;
+    const setSelectedCategoryId = useCallback((id: string | null) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (id) next.set('category', id);
+            else next.delete('category');
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
     const [page, setPage] = useState(1);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -48,14 +57,14 @@ export default function LibraryPage() {
         try {
             const [videosResp, categoriesResp] = await Promise.all([
                 apiFetch<MaterialVideo[]>('/api/v1/MaterialListRoute', { method: 'POST', body: '{}' }, { timeout: 15_000, silent: true }),
-                apiFetch<MaterialCategory[]>('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true }),
+                apiFetch<{ items: MaterialCategory[]; total: number }>('/api/v1/MaterialCategoryListRoute', { method: 'POST', body: '{}' }, { silent: true }),
             ]);
             const fetchedVideos = videosResp.data ?? [];
             setVideos(fetchedVideos);
             setVideosError(null);
-            setCategories(categoriesResp.data);
+            setCategories(categoriesResp.data?.items ?? null);
 
-            const bilibiliIds = fetchedVideos.filter(v => v.source_type === 'bilibili').map(v => v.id);
+            const bilibiliIds = fetchedVideos.filter(v => isBilibiliVideo(v)).map(v => v.id);
             if (bilibiliIds.length > 0) {
                 const { resp: dsResp, data: dsData } = await apiFetch(
                     '/api/v1/MaterialDownloadStatusRoute',
@@ -130,7 +139,7 @@ export default function LibraryPage() {
     const handleDeleteCategory = async (id: string) => {
         setDeletingCategoryIds(prev => new Set([...prev, id]));
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialCategoryDeleteRoute', { method: 'POST', body: JSON.stringify({ id }) });
+            const { resp } = await apiFetch('/api/v1/MaterialCategorySimpleDeleteRoute', { method: 'POST', body: JSON.stringify({ id }) });
             if (resp.ok) { if (selectedCategoryId === id) setSelectedCategoryId(null); await fetchData(); }
             else reportHttpError('删除分类失败', resp);
         } finally {
@@ -143,10 +152,45 @@ export default function LibraryPage() {
         if (!name || creatingCategory) return;
         setCreatingCategory(true);
         try {
-            const { resp } = await apiFetch('/api/v1/MaterialCategoryCreateRoute', { method: 'POST', body: JSON.stringify({ name }) });
+            const { resp } = await apiFetch('/api/v1/MaterialCategorySimpleCreateRoute', { method: 'POST', body: JSON.stringify({ name }) });
             if (resp.ok) { setNewCategoryName(''); await fetchData(); }
             else reportHttpError('创建分类失败', resp);
         } finally { setCreatingCategory(false); }
+    };
+
+    const handleRenameCategory = async (id: string, newName: string) => {
+        try {
+            const { resp } = await apiFetch('/api/v1/MaterialCategorySimpleUpdateRoute', {
+                method: 'POST',
+                body: JSON.stringify({ id, name: newName }),
+            });
+            if (resp.ok) await fetchData();
+            else reportHttpError('重命名分类失败', resp);
+        } catch (err) {
+            print_error({ reason: '重命名分类失败', err });
+        }
+    };
+
+    const handleSyncTrigger = async (platformInfoId: string) => {
+        try {
+            const { resp, data } = await apiFetch('/api/v1/MaterialCategorySyncTriggerRoute', {
+                method: 'POST',
+                body: JSON.stringify({ platform_info_id: platformInfoId }),
+            });
+            if (!resp.ok) {
+                reportHttpError('触发同步失败', resp);
+                return;
+            }
+            const body = data as Record<string, unknown> | null;
+            if (body?.error) {
+                print_error({ reason: `同步失败：${body.error}` });
+            } else {
+                toast.success('同步任务已提交');
+                await fetchData();
+            }
+        } catch (err) {
+            print_error({ reason: '触发同步失败', err });
+        }
     };
 
     const handleOpenAction = (video: MaterialVideo) => {
@@ -160,7 +204,11 @@ export default function LibraryPage() {
     // ── Filtering & pagination ────────────────────────────────────────────────
 
     const filtered = (videos ?? []).filter(v => {
-        if (selectedCategoryId && !v.category_ids.includes(selectedCategoryId)) return false;
+        if (selectedCategoryId === '__uncategorized__') {
+            if (v.category_ids.length > 0) return false;
+        } else if (selectedCategoryId && !v.category_ids.includes(selectedCategoryId)) {
+            return false;
+        }
         if (taskIdParam && taskFilterMaterialId !== null && taskFilterMaterialId !== undefined) {
             if (v.id !== taskFilterMaterialId) return false;
         }
@@ -171,7 +219,7 @@ export default function LibraryPage() {
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const pagedVideos = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-    const categoryExists = categories?.some(c => c.id === selectedCategoryId) ?? true;
+    const categoryExists = selectedCategoryId === '__uncategorized__' || (categories?.some(c => c.id === selectedCategoryId) ?? true);
     const effectiveCategoryId = categoryExists ? selectedCategoryId : null;
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -230,6 +278,8 @@ export default function LibraryPage() {
                         onDeleteCategory={handleDeleteCategory}
                         onNewCategoryNameChange={setNewCategoryName}
                         onCreateCategory={handleCreateCategory}
+                        onSyncTrigger={handleSyncTrigger}
+                        onRenameCategory={handleRenameCategory}
                     />
 
                     {videosLoading && (

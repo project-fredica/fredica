@@ -1,11 +1,11 @@
-import { type MaterialVideo, type BilibiliExtra } from "./materialTypes";
+import { type MaterialVideo, type BilibiliExtra, isBilibiliVideo } from "./materialTypes";
 import { json_parse } from "~/util/json";
 
 export function InfoTab({ actionTarget, onOpenModal }: {
     actionTarget: MaterialVideo;
     onOpenModal: (bvid: string) => void;
 }) {
-    const bvid = actionTarget.source_type === 'bilibili'
+    const bvid = isBilibiliVideo(actionTarget)
         ? (json_parse<BilibiliExtra>(actionTarget.extra)?.bvid ?? actionTarget.source_id)
         : null;
 

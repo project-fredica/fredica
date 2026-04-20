@@ -25,6 +25,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import com.github.project_fredica.apputil.loadJsonModel
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ServerSocket
@@ -215,7 +219,10 @@ class NetworkTestExecutorTest {
     fun `E8 - execute with no proxy sets proxied=null for all results`() = runBlocking {
         // 用一个立即拒绝的端口（快速失败），payload 只测一个 URL
         val port = findFreePort()
-        val payload = """{"urls":["http://127.0.0.1:$port"],"timeout_ms":500}"""
+        val payload = buildJsonObject {
+            put("urls", buildJsonArray { add(JsonPrimitive("http://127.0.0.1:$port")) })
+            put("timeout_ms", 500)
+        }.toString()
         val task = makeTask(payload)
 
         // 确保系统无代理（测试环境可能有代理，此处通过检查结果字段间接验证）
@@ -234,7 +241,10 @@ class NetworkTestExecutorTest {
     @Test
     fun `E9 - execute result JSON has required fields`() = runBlocking {
         val port = findFreePort()
-        val payload = """{"urls":["http://127.0.0.1:$port"],"timeout_ms":300}"""
+        val payload = buildJsonObject {
+            put("urls", buildJsonArray { add(JsonPrimitive("http://127.0.0.1:$port")) })
+            put("timeout_ms", 300)
+        }.toString()
         val result = NetworkTestExecutor.execute(makeTask(payload))
         assertTrue(result.isSuccess)
 

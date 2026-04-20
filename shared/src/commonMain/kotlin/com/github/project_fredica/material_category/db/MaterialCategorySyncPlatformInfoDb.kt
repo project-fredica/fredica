@@ -54,8 +54,8 @@ class MaterialCategorySyncPlatformInfoDb(private val db: Database) : MaterialCat
                 INSERT INTO material_category_sync_platform_info
                 (id, sync_type, platform_id, platform_config, display_name, category_id,
                  last_synced_at, sync_cursor, item_count, sync_state, last_error, fail_count,
-                 created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 last_workflow_run_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { ps ->
                 ps.setString(1, info.id)
@@ -70,8 +70,9 @@ class MaterialCategorySyncPlatformInfoDb(private val db: Database) : MaterialCat
                 ps.setString(10, info.syncState)
                 if (info.lastError != null) ps.setString(11, info.lastError) else ps.setNull(11, java.sql.Types.VARCHAR)
                 ps.setInt(12, info.failCount)
-                ps.setLong(13, info.createdAt)
-                ps.setLong(14, info.updatedAt)
+                if (info.lastWorkflowRunId != null) ps.setString(13, info.lastWorkflowRunId) else ps.setNull(13, java.sql.Types.VARCHAR)
+                ps.setLong(14, info.createdAt)
+                ps.setLong(15, info.updatedAt)
                 ps.executeUpdate()
             }
         }
@@ -152,6 +153,24 @@ class MaterialCategorySyncPlatformInfoDb(private val db: Database) : MaterialCat
         }
     }
 
+    override suspend fun findStale(syncState: String, olderThanSec: Long): List<MaterialCategorySyncPlatformInfo> =
+        withContext(Dispatchers.IO) {
+            val cutoff = System.currentTimeMillis() / 1000L - olderThanSec
+            db.useConnection { conn ->
+                conn.prepareStatement(
+                    "SELECT * FROM material_category_sync_platform_info WHERE sync_state = ? AND updated_at < ?"
+                ).use { ps ->
+                    ps.setString(1, syncState)
+                    ps.setLong(2, cutoff)
+                    ps.executeQuery().use { rs ->
+                        val results = mutableListOf<MaterialCategorySyncPlatformInfo>()
+                        while (rs.next()) results.add(rowToInfo(rs))
+                        results
+                    }
+                }
+            }
+        }
+
     override suspend fun updateDisplayName(id: String, displayName: String): Unit = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis() / 1000L
         db.useConnection { conn ->
@@ -166,10 +185,25 @@ class MaterialCategorySyncPlatformInfoDb(private val db: Database) : MaterialCat
         }
     }
 
+    override suspend fun setLastWorkflowRunId(id: String, workflowRunId: String): Unit = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis() / 1000L
+        db.useConnection { conn ->
+            conn.prepareStatement(
+                "UPDATE material_category_sync_platform_info SET last_workflow_run_id = ?, updated_at = ? WHERE id = ?"
+            ).use { ps ->
+                ps.setString(1, workflowRunId)
+                ps.setLong(2, now)
+                ps.setString(3, id)
+                ps.executeUpdate()
+            }
+        }
+    }
+
     private fun rowToInfo(rs: java.sql.ResultSet): MaterialCategorySyncPlatformInfo {
         val lastSynced = rs.getLong("last_synced_at")
         val lastSyncedNull = rs.wasNull()
         val lastError = rs.getString("last_error")
+        val lastWorkflowRunId = rs.getString("last_workflow_run_id")
         return MaterialCategorySyncPlatformInfo(
             id = rs.getString("id"),
             syncType = rs.getString("sync_type"),
@@ -183,6 +217,7 @@ class MaterialCategorySyncPlatformInfoDb(private val db: Database) : MaterialCat
             syncState = rs.getString("sync_state"),
             lastError = lastError,
             failCount = rs.getInt("fail_count"),
+            lastWorkflowRunId = lastWorkflowRunId,
             createdAt = rs.getLong("created_at"),
             updatedAt = rs.getLong("updated_at"),
         )

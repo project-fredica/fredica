@@ -6,7 +6,9 @@ import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -104,11 +106,12 @@ class TenantInviteRegisterRouteTest {
     }
 
     private fun postParam(pathId: String, username: String, password: String, displayName: String = ""): String =
-        buildString {
-            append("""{"path_id":"$pathId","username":"$username","password":"$password"""")
-            if (displayName.isNotEmpty()) append(""","display_name":"$displayName"""")
-            append("}")
-        }
+        buildJsonObject {
+            put("path_id", pathId)
+            put("username", username)
+            put("password", password)
+            if (displayName.isNotEmpty()) put("display_name", displayName)
+        }.toString()
 
     private suspend fun callHandler(
         pathId: String,

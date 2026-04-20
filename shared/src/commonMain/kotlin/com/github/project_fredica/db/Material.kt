@@ -22,6 +22,10 @@ data class Material(
     /** Discriminator — see [MaterialType] constants. */
     val type: String,
     val title: String,
+    /**
+     * 素材来源类型。合法值参见 [MaterialVideo.sourceType] 注释。
+     * 判断是否 bilibili 视频请用 [MaterialMediaSpec.isBilibiliVideo]（需同时传入 type 和 sourceType）。
+     */
     @SerialName("source_type")     val sourceType: String,
     @SerialName("source_id")       val sourceId: String,
     @SerialName("cover_url")       val coverUrl: String,

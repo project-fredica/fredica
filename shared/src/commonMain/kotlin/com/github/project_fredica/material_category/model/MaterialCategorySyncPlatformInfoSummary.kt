@@ -17,6 +17,7 @@ data class MaterialCategorySyncPlatformInfoSummary(
     @SerialName("subscriber_count") val subscriberCount: Int = 0,
     @SerialName("my_subscription") val mySubscription: MaterialCategorySyncUserConfigSummary? = null,
     @SerialName("owner_id") val ownerId: String,
+    @SerialName("last_workflow_run_id") val lastWorkflowRunId: String? = null,
 )
 
 @Serializable

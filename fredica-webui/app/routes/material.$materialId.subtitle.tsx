@@ -10,6 +10,7 @@ import { useAppFetch } from "~/util/app_fetch";
 import { WorkflowInfoPanel } from "~/components/ui/WorkflowInfoPanel";
 import { startAsrTranscribe } from "~/util/materialWorkflowApi";
 import { reportHttpError, print_error } from "~/util/error_handler";
+import { isBilibiliVideo } from "~/components/material-library/materialTypes";
 import {
     ALL_WHISPER_MODELS, WHISPER_MODEL_VRAM_HINT, WHISPER_LANGUAGES,
     pickDefaultModel, filterDisallowedModels,
@@ -611,7 +612,7 @@ function PlatformSchemeDetail({ isBilibili }: { isBilibili: boolean }) {
 
 export default function SubtitlePage() {
     const { material } = useWorkspaceContext();
-    const isBilibili = material.source_type === 'bilibili';
+    const isBilibili = isBilibiliVideo(material);
     const [selectedScheme, setSelectedScheme] = useState<Scheme>('platform');
     const [schemeExpanded, setSchemeExpanded] = useState(true);
     const [subtitles, setSubtitles] = useState<SubtitleApiItem[]>([]);

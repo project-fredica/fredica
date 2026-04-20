@@ -8,7 +8,7 @@ import { SidebarLayout } from "~/components/sidebar/SidebarLayout";
 import { useAppFetch, useImageProxyUrl } from "~/util/app_fetch";
 import {
     type MaterialVideo, type BilibiliExtra,
-    SOURCE_BADGE, formatDuration,
+    getSourceBadge, formatDuration,
 } from "~/components/material-library/materialTypes";
 import { json_parse } from "~/util/json";
 
@@ -123,7 +123,7 @@ function MaterialHeader({ material, onToggleSwitcher }: {
     let upperName: string | undefined;
     upperName = json_parse<BilibiliExtra>(material?.extra ?? '{}')?.upper_name;
 
-    const sourceBadge = SOURCE_BADGE[material?.source_type ?? '']
+    const sourceBadge = getSourceBadge(material?.source_type ?? '')
         ?? { label: material?.source_type ?? '', className: 'bg-gray-100 text-gray-600' };
 
     return (

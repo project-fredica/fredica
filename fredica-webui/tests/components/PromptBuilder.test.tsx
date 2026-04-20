@@ -98,7 +98,7 @@ describe("PromptBuilder", () => {
         });
 
         await user.click(screen.getByRole("tab", { name: "预览" }));
-        expect(screen.getByRole("button", { name: "预览" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "刷新" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "生成" })).toBeTruthy();
 
         await user.click(screen.getByRole("button", { name: "生成" }));

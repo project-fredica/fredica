@@ -125,6 +125,10 @@ class MaterialCategoryDb(private val db: Database) : MaterialCategoryRepo {
                         ON material_category_audit_log (category_id, created_at)
                         """.trimIndent()
                     )
+                    @Suppress("SwallowedException")
+                    try {
+                        stmt.execute("ALTER TABLE material_category_sync_platform_info ADD COLUMN last_workflow_run_id TEXT")
+                    } catch (_: Exception) { }
                 }
             }
         }
@@ -549,6 +553,50 @@ class MaterialCategoryDb(private val db: Database) : MaterialCategoryRepo {
                 updatedAt = nowSec,
             )
         )
+    }
+
+    override suspend fun reconcileOrphanMaterials(categoryId: String, ownerId: String) {
+        val orphanIds = findOrphanMaterialIds(categoryId)
+        if (orphanIds.isNotEmpty()) {
+            ensureUncategorized(ownerId)
+            val uncatId = MaterialCategoryDefaults.uncategorizedId(ownerId)
+            linkMaterials(orphanIds, listOf(uncatId))
+        }
+    }
+
+    override suspend fun reconcileAllOrphanMaterials(): Unit = withContext(Dispatchers.IO) {
+        val orphanIds = mutableListOf<String>()
+        db.useConnection { conn ->
+            conn.prepareStatement("""
+                SELECT m.id
+                FROM material m
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM material_category_rel r WHERE r.material_id = m.id
+                )
+            """.trimIndent()).use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        orphanIds.add(rs.getString("id"))
+                    }
+                }
+            }
+        }
+        if (orphanIds.isEmpty()) return@withContext
+        val owners = mutableListOf<String>()
+        db.useConnection { conn ->
+            conn.prepareStatement("SELECT DISTINCT owner_id FROM material_category_simple").use { ps ->
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        owners.add(rs.getString("owner_id"))
+                    }
+                }
+            }
+        }
+        for (ownerId in owners) {
+            ensureUncategorized(ownerId)
+            val uncatId = MaterialCategoryDefaults.uncategorizedId(ownerId)
+            linkMaterials(orphanIds, listOf(uncatId))
+        }
     }
 
     private fun rowToCategory(rs: java.sql.ResultSet): MaterialCategory = MaterialCategory(

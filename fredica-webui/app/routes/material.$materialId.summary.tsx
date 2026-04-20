@@ -1,6 +1,7 @@
 import { BrainCircuit, FileText, Tv2 } from "lucide-react";
 import { NavLink, Outlet } from "react-router";
 import { useWorkspaceContext } from "~/routes/material.$materialId";
+import { isBilibiliVideo } from "~/components/material-library/materialTypes";
 
 const BASE_TABS = [
     { id: "overview",  to: ".",        label: "概览",       icon: FileText,    end: true  },
@@ -11,7 +12,7 @@ const BILIBILI_TAB = { id: "bilibili", to: "bilibili", label: "B站AI总结", ic
 
 export default function SummaryLayoutPage() {
     const { material } = useWorkspaceContext();
-    const isBilibili = material.source_type === "bilibili";
+    const isBilibili = isBilibiliVideo(material);
     const tabs = isBilibili
         ? [BASE_TABS[0], BILIBILI_TAB, BASE_TABS[1]]
         : [...BASE_TABS];

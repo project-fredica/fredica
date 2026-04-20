@@ -4,6 +4,7 @@ import com.github.project_fredica.api.routes.MaterialCategoryListRoute
 import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.apputil.ValidJsonString
+import com.github.project_fredica.apputil.dumpJsonStr
 import com.github.project_fredica.apputil.json
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.material_category.model.MaterialCategoryFilter
@@ -68,6 +69,7 @@ suspend fun MaterialCategoryListRoute.handler2(param: String, context: RouteCont
                         )
                     },
                     ownerId = cat.ownerId,
+                    lastWorkflowRunId = platformInfo.lastWorkflowRunId,
                 )
             )
         } else {

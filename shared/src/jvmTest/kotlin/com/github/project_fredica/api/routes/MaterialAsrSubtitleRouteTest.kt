@@ -34,6 +34,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 
 class MaterialAsrSubtitleRouteTest {
 
@@ -54,7 +57,8 @@ class MaterialAsrSubtitleRouteTest {
 
     private val noContext = RouteContext(identity = null, clientIp = null, userAgent = null)
 
-    private fun queryParam(id: String = matId) = """{"material_id":["$id"]}"""
+    private fun queryParam(id: String = matId) =
+        buildJsonObject { put("material_id", buildJsonArray { add(JsonPrimitive(id)) }) }.toString()
 
     private suspend fun callHandler(id: String = matId): AsrSubtitleResponse {
         val result = MaterialAsrSubtitleRoute.handler(queryParam(id), noContext)
@@ -242,7 +246,10 @@ test
     // ── A10 ──────────────────────────────────────────────────────────────────
 
     private fun queryParamWithModel(id: String = matId, modelSize: String) =
-        """{"material_id":["$id"],"model_size":["$modelSize"]}"""
+        buildJsonObject {
+            put("material_id", buildJsonArray { add(JsonPrimitive(id)) })
+            put("model_size", buildJsonArray { add(JsonPrimitive(modelSize)) })
+        }.toString()
 
     private suspend fun callHandlerWithModel(id: String = matId, modelSize: String): AsrSubtitleResponse {
         val result = MaterialAsrSubtitleRoute.handler(queryParamWithModel(id, modelSize), noContext)

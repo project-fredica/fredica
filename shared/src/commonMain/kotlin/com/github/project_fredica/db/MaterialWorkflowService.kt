@@ -1,11 +1,8 @@
 package com.github.project_fredica.db
 
-import com.github.project_fredica.apputil.AppUtil
 import com.github.project_fredica.asr.material_workflow_ext.startWhisperTranscribe2
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 /**
  * 素材工作流业务服务，封装各模板的类型化参数构建、幂等检查和工作流查询。
@@ -77,6 +74,9 @@ object MaterialWorkflowService {
      * 返回 [StartResult.AlreadyActive]。
      */
     suspend fun startBilibiliDownloadTranscode(material: MaterialVideo): StartResult {
+        val spec = material.toMediaSpec()
+        require(spec is MaterialMediaSpec.BilibiliVideo) { "Not a bilibili video: sourceType=${material.sourceType}" }
+
         val hasActive = TaskStatusService.listAll(materialId = material.id, pageSize = 200)
             .items.any {
                 it.type in setOf("DOWNLOAD_BILIBILI_VIDEO", "TRANSCODE_MP4") &&
@@ -84,24 +84,8 @@ object MaterialWorkflowService {
             }
         if (hasActive) return StartResult.AlreadyActive
 
-        val mediaDir        = AppUtil.Paths.materialMediaDir(material.id)
         val downloadTaskId  = TaskId.random()
         val transcodeTaskId = TaskId.random()
-
-        val downloadPayload = buildJsonObject {
-            put("bvid",        material.sourceId)
-            put("page",        1)
-            put("output_path", mediaDir.resolve("video.mp4").absolutePath)
-            put("check_skip",  true)
-        }.toString()
-
-        val transcodePayload = buildJsonObject {
-            put("mode",        "from_bilibili_download")
-            put("output_dir",  mediaDir.absolutePath)
-            put("output_path", mediaDir.resolve("video.mp4").absolutePath)
-            put("hw_accel",    "auto")
-            put("check_skip",  true)
-        }.toString()
 
         val workflowRunId = CommonWorkflowService.createWorkflow(
             template   = "bilibili_download_transcode",
@@ -111,7 +95,7 @@ object MaterialWorkflowService {
                     id         = downloadTaskId,
                     type       = "DOWNLOAD_BILIBILI_VIDEO",
                     materialId = material.id,
-                    payload    = downloadPayload,
+                    payload    = spec.buildDownloadPayload(),
                     priority   = TaskPriority.DOWNLOAD_BILIBILI_VIDEO,
                     maxRetries = 3,
                 ),
@@ -119,7 +103,7 @@ object MaterialWorkflowService {
                     id           = transcodeTaskId,
                     type         = "TRANSCODE_MP4",
                     materialId   = material.id,
-                    payload      = transcodePayload,
+                    payload      = spec.buildDownloadTranscodePayload(),
                     priority     = TaskPriority.TRANSCODE_MP4,
                     dependsOnIds = listOf(downloadTaskId),
                     maxRetries   = 3,

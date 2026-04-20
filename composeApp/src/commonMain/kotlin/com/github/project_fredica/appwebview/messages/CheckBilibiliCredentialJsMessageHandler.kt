@@ -2,55 +2,28 @@ package com.github.project_fredica.appwebview.messages
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
-import com.github.project_fredica.apputil.toValidJson
 import com.github.project_fredica.apputil.createLogger
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import com.github.project_fredica.apputil.loadJsonModel
 import com.github.project_fredica.apputil.warn
-import com.github.project_fredica.db.AppConfigService
+import com.github.project_fredica.bilibili_account_pool.service.BilibiliAccountPoolService
 import com.multiplatform.webview.jsbridge.JsMessage
 import com.multiplatform.webview.web.WebViewNavigator
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * JsBridge：检测 B 站账号登录态是否仍然有效。
  *
- * 凭据检测涉及用户敏感信息（sessdata 等），不通过 HTTP API 暴露，
- * 仅允许由原生宿主应用（桌面端 WebView）发起。
- *
- * JS 调用方式：
- * ```js
- * // 可传入当前表单的凭据字段；若为空则自动回退到服务端 AppConfig 已保存的值
- * kmpJsBridge.callNative('check_bilibili_credential', JSON.stringify({
- *     sessdata: "...",      // 可选，为空时用 AppConfig
- *     bili_jct: "...",
- *     buvid3: "...",
- *     buvid4: "...",
- *     dedeuserid: "...",
- *     ac_time_value: "...",
- *     proxy: "...",
- * }), (result) => {
- *     const r = JSON.parse(result);
- *     // r.configured: bool   — sessdata 是否已配置
- *     // r.valid:      bool   — 账号登录态是否有效
- *     // r.message:    string — 结果描述
- * });
- * ```
+ * 前端传入 account_id，本 handler 从 DB 读取账号信息并解析代理后转发给 Python 检测。
  */
 class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
     override val logger = createLogger()
 
     @Serializable
     private data class CheckParams(
-        @SerialName("sessdata") val sessdata: String? = null,
-        @SerialName("bili_jct") val biliJct: String? = null,
-        @SerialName("buvid3") val buvid3: String? = null,
-        @SerialName("buvid4") val buvid4: String? = null,
-        @SerialName("dedeuserid") val dedeuserid: String? = null,
-        @SerialName("ac_time_value") val acTimeValue: String? = null,
-        @SerialName("proxy") val proxy: String? = null,
+        @SerialName("account_id") val accountId: String,
     )
 
     override suspend fun handle2(
@@ -58,21 +31,16 @@ class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
         navigator: WebViewNavigator?,
         callback: (String) -> Unit,
     ) {
-        val params = message.params.loadJsonModel<CheckParams>().getOrElse { CheckParams() }
-        val cfg = AppConfigService.repo.getConfig()
+        val params = message.params.loadJsonModel<CheckParams>().getOrElse {
+            return callback(buildJsonObject { put("error", "参数解析失败") }.toString())
+        }
 
-        // 优先使用调用方传入的凭据（表单当前值）；字段为空则回退到 AppConfig 已保存的值
-        val sessdata = params.sessdata?.takeIf { it.isNotBlank() } ?: cfg.bilibiliSessdata
-        val biliJct = params.biliJct?.takeIf { it.isNotBlank() } ?: cfg.bilibiliBiliJct
-        val buvid3 = params.buvid3?.takeIf { it.isNotBlank() } ?: cfg.bilibiliBuvid3
-        val buvid4 = params.buvid4?.takeIf { it.isNotBlank() } ?: cfg.bilibiliBuvid4
-        val dedeuserid = params.dedeuserid?.takeIf { it.isNotBlank() } ?: cfg.bilibiliDedeuserid
-        val acTimeValue = params.acTimeValue?.takeIf { it.isNotBlank() } ?: cfg.bilibiliAcTimeValue
-        val proxy = params.proxy?.takeIf { it.isNotBlank() } ?: cfg.bilibiliProxy
+        val account = BilibiliAccountPoolService.repo.getById(params.accountId)
+        if (account == null) {
+            return callback(buildJsonObject { put("error", "请先保存账号配置") }.toString())
+        }
 
-        // sessdata 为空视为未配置，无需调用 Python
-        if (sessdata.isBlank()) {
-            logger.debug("CheckBilibiliCredential: 未配置 bilibiliSessdata，跳过检测")
+        if (account.isAnonymous || account.bilibiliSessdata.isBlank()) {
             callback(buildJsonObject {
                 put("configured", false)
                 put("valid", false)
@@ -81,16 +49,8 @@ class CheckBilibiliCredentialJsMessageHandler : MyJsMessageHandler() {
             return
         }
 
-        logger.debug("CheckBilibiliCredential: 开始调用 Python credential/check")
-        val pyBody = buildJsonObject {
-            put("sessdata", sessdata)
-            put("bili_jct", biliJct)
-            put("buvid3", buvid3)
-            put("buvid4", buvid4)
-            put("dedeuserid", dedeuserid)
-            put("ac_time_value", acTimeValue)
-            put("proxy", proxy)
-        }
+        logger.debug("CheckBilibiliCredential: accountId=${params.accountId}")
+        val pyBody = BilibiliAccountPoolService.buildPyCredentialBody(account)
 
         try {
             val raw = FredicaApi.PyUtil.post("/bilibili/credential/check", pyBody.toString())

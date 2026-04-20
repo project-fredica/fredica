@@ -2,12 +2,13 @@ package com.github.project_fredica.asr.service
 
 import com.github.project_fredica.api.FredicaApi
 import com.github.project_fredica.api.post
-import com.github.project_fredica.apputil.BilibiliApiPythonCredentialConfig
 import com.github.project_fredica.apputil.PyCallGuard
 import com.github.project_fredica.apputil.createLogger
 import com.github.project_fredica.apputil.loadJson
 import com.github.project_fredica.asr.model.BilibiliSubtitleMetaCache
 import com.github.project_fredica.asr.db.BilibiliSubtitleMetaCacheRepo
+import com.github.project_fredica.bilibili_account_pool.model.BilibiliAccount
+import com.github.project_fredica.bilibili_account_pool.service.BilibiliAccountPoolService
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -88,28 +89,29 @@ object BilibiliSubtitleMetaCacheService {
      * @param bvid      Bilibili BV 号
      * @param pageIndex 分P下标（0-based）
      * @param isUpdate  是否强制刷新缓存
-     * @param cfg       AppConfig（含 Bilibili 凭据）
+     * @param cfg       BilibiliAccount（含凭据 + 代理配置）
      */
     suspend fun fetchBilibiliSubtitleMeta(
         bvid: String,
         pageIndex: Int,
         isUpdate: Boolean,
-        cfg: BilibiliApiPythonCredentialConfig,
+        cfg: BilibiliAccount,
     ): String = fetchOrLoad(bvid, pageIndex, isUpdate) {
         val hasCreds = cfg.bilibiliSessdata.isNotBlank()
-        val credBody = buildJsonObject {
-            put("sessdata", cfg.bilibiliSessdata)
-            put("bili_jct", cfg.bilibiliBiliJct)
-            put("buvid3", cfg.bilibiliBuvid3)
-            put("buvid4", cfg.bilibiliBuvid4)
-            put("dedeuserid", cfg.bilibiliDedeuserid)
-            put("ac_time_value", cfg.bilibiliAcTimeValue)
-            put("proxy", cfg.bilibiliProxy)
-        }
-        logger.debug("调用 Python bvid=${bvid} pageIndex=${pageIndex}")
+        val credBody = BilibiliAccountPoolService.buildPyCredentialBody(cfg)
+        logger.debug("调用 Python bvid=${bvid} pageIndex=${pageIndex} hasCreds=$hasCreds proxy=${credBody["proxy"]}")
         val raw = FredicaApi.PyUtil.post(
             "/bilibili/video/subtitle-meta/$bvid/$pageIndex", credBody.toString(), timeoutMs = 5 * 60_000L
         )
+        logger.debug("Python 返回 bvid=${bvid} pageIndex=${pageIndex} raw_len=${raw.length} raw_preview=${raw.take(200)}")
+        // 检查 Python 层是否返回了 error 字段（子进程超时、异常退出等）
+        val errorCheck = runCatching {
+            val obj = raw.loadJson().getOrThrow() as? JsonObject
+            obj?.get("error")?.let { (it as? JsonPrimitive)?.content }
+        }.getOrNull()
+        if (errorCheck != null) {
+            logger.warn("Python 返回 error 字段 bvid=$bvid pageIndex=$pageIndex error=$errorCheck")
+        }
         val isSuccess = computeIsSuccess(raw, bvid, hasCreds)
         raw to isSuccess
     }
@@ -128,7 +130,10 @@ object BilibiliSubtitleMetaCacheService {
     private fun computeIsSuccess(raw: String, bvid: String, hasCreds: Boolean): Boolean = runCatching {
         val obj = raw.loadJson().getOrThrow() as? JsonObject
         val code = (obj?.get("code") as? JsonPrimitive)?.content?.toIntOrNull()
-        if (code != 0) return@runCatching false
+        if (code != 0) {
+            logger.debug("isSuccess=false bvid=$bvid: code=$code (非 0)")
+            return@runCatching false
+        }
 
         val subtitlesElem = obj["subtitles"]
         if (subtitlesElem == null || subtitlesElem is JsonNull) {
@@ -146,5 +151,8 @@ object BilibiliSubtitleMetaCacheService {
         }
 
         true
-    }.getOrDefault(false)
+    }.getOrElse { e ->
+        logger.warn("isSuccess 解析异常 bvid=$bvid raw_preview=${raw.take(200)}: ${e.message}")
+        false
+    }
 }

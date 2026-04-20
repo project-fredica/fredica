@@ -1,25 +1,15 @@
 import { useEffect, useState } from "react";
 import { X, Plus, Loader } from "lucide-react";
-import { useAppConfig } from "~/context/appConfig";
-import { print_error, reportHttpError } from "~/util/error_handler";
-
-export interface Category {
-    id: string;
-    name: string;
-    /** Count of all materials (any type) in this category. */
-    material_count: number;
-}
+import { useAppFetch } from "~/util/app_fetch";
+import { reportHttpError } from "~/util/error_handler";
+import type { MaterialCategory } from "~/components/material-library/materialTypes";
 
 interface CategoryPickerModalProps {
-    /** How many videos are about to be imported (ignored in edit mode) */
     videoCount: number;
     onConfirm: (categoryIds: string[]) => void;
     onCancel: () => void;
-    /** Category IDs already assigned to this video — pre-checked when modal opens */
     existingCategoryIds?: string[];
-    /** When true, changes copy from "加入" to "修改分类" */
     isEditMode?: boolean;
-    /** Called when the user wants to remove this material from the library (edit mode only) */
     onDelete?: () => void;
 }
 
@@ -31,42 +21,34 @@ export function CategoryPickerModal({
     isEditMode = false,
     onDelete,
 }: CategoryPickerModalProps) {
-    const [categories, setCategories] = useState<Category[]>([]);
+    const [categories, setCategories] = useState<MaterialCategory[]>([]);
     const [loadingList, setLoadingList] = useState(true);
     const [selected, setSelected] = useState<Set<string>>(new Set(existingCategoryIds ?? []));
     const [newName, setNewName] = useState("");
     const [creating, setCreating] = useState(false);
 
-    const { appConfig } = useAppConfig();
-    const apiHost = `${appConfig.webserver_schema ?? "http"}://${appConfig.webserver_domain ?? "localhost"}:${appConfig.webserver_port ?? "7631"}`;
-    const authHeaders: Record<string, string> = appConfig.webserver_auth_token
-        ? { Authorization: `Bearer ${appConfig.webserver_auth_token}` }
-        : {};
+    const { apiFetch } = useAppFetch();
 
-    // Fetch categories on open
     useEffect(() => {
         let cancelled = false;
         (async () => {
             setLoadingList(true);
             try {
-                const resp = await fetch(`${apiHost}/api/v1/MaterialCategoryListRoute`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", ...authHeaders },
-                    body: "{}",
-                });
-                if (!resp.ok || cancelled) {
-                    if (!cancelled) reportHttpError('获取分类列表失败', resp);
-                    return;
-                }
-                const data = await resp.json() as Category[];
-                if (!cancelled) setCategories(data);
+                const { resp, data } = await apiFetch<{ items: MaterialCategory[] }>(
+                    '/api/v1/MaterialCategoryListRoute',
+                    { method: 'POST', body: JSON.stringify({ filter: "mine" }) },
+                    { silent: true },
+                );
+                if (cancelled) return;
+                if (!resp.ok) { reportHttpError('获取分类列表失败', resp); return; }
+                const items = (data?.items ?? []).filter(c => c.is_mine && !c.sync);
+                setCategories(items);
             } finally {
                 if (!cancelled) setLoadingList(false);
             }
         })();
         return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [apiHost]);
+    }, [apiFetch]);
 
     const toggleCategory = (id: string) => {
         setSelected(prev => {
@@ -81,20 +63,17 @@ export function CategoryPickerModal({
         if (!name || creating) return;
         setCreating(true);
         try {
-            const resp = await fetch(`${apiHost}/api/v1/MaterialCategoryCreateRoute`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", ...authHeaders },
-                body: JSON.stringify({ name }),
-            });
-            if (!resp.ok) {
-                reportHttpError('创建分类失败', resp);
-                return;
-            }
-            const cat = await resp.json() as Category;
-            setCategories(prev =>
-                prev.some(c => c.id === cat.id) ? prev : [...prev, { ...cat, material_count: 0 }]
+            const { resp, data } = await apiFetch<MaterialCategory>(
+                '/api/v1/MaterialCategorySimpleCreateRoute',
+                { method: 'POST', body: JSON.stringify({ name }) },
             );
-            setSelected(prev => new Set([...prev, cat.id]));
+            if (!resp.ok) { reportHttpError('创建分类失败', resp); return; }
+            if (data) {
+                setCategories(prev =>
+                    prev.some(c => c.id === data.id) ? prev : [...prev, { ...data, material_count: 0 }]
+                );
+                setSelected(prev => new Set([...prev, data.id]));
+            }
             setNewName("");
         } finally {
             setCreating(false);

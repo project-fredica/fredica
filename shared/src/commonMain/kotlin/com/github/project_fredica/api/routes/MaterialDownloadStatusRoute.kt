@@ -43,6 +43,15 @@ object MaterialDownloadStatusRoute : FredicaApi.Route {
         }.toValidJson()
     }
 
+    /**
+     * 检查单个素材是否已下载完成。
+     *
+     * 路径约定与 [MaterialMediaSpec.BilibiliVideo] 一致：
+     *  - FLV 格式：`download_flv.done` + `video.flv`
+     *  - DASH 格式：`download_m4s.done` + `video.m4s` + `audio.m4s`
+     *
+     * 此方法只接收 materialId（无 MaterialVideo 对象），直接检查文件系统。
+     */
     private suspend fun isDownloaded(materialId: String): Boolean {
         val dir = AppUtil.Paths.materialMediaDir(materialId)
         if (dir.resolve("download_flv.done").exists() && dir.resolve("video.flv").exists()) {

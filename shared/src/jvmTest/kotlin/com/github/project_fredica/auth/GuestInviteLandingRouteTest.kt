@@ -5,8 +5,12 @@ import com.github.project_fredica.api.routes.RouteContext
 import com.github.project_fredica.apputil.loadJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import kotlin.test.AfterTest
@@ -42,7 +46,9 @@ class GuestInviteLandingRouteTest {
     }
 
     private fun queryParam(pathId: String): String =
-        """{"path_id":["$pathId"]}"""
+        buildJsonObject {
+            put("path_id", buildJsonArray { add(JsonPrimitive(pathId)) })
+        }.toString()
 
     private suspend fun callHandler(pathId: String, ip: String = "1.1.1.1", ua: String = "TestAgent"): JsonObject {
         val ctx = RouteContext(identity = null, clientIp = ip, userAgent = ua)

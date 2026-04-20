@@ -21,7 +21,7 @@ data class MaterialCategory(
 
 object MaterialCategoryDefaults {
     fun uncategorizedId(userId: String) = "uncategorized:$userId"
-    const val UNCATEGORIZED_NAME = "未分类"
+    const val UNCATEGORIZED_NAME = "待分类"
 
     fun isUncategorized(categoryId: String) = categoryId.startsWith("uncategorized:")
 }

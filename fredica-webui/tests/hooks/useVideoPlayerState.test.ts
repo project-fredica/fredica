@@ -246,7 +246,7 @@ describe("V6b – bilibili sourceType calls MaterialBilibiliDownloadTranscodeRou
             });
         vi.stubGlobal("fetch", mockF);
 
-        const { result } = renderHook(() => useVideoPlayerState("mat-v6b", "bilibili"));
+        const { result } = renderHook(() => useVideoPlayerState("mat-v6b", "video", "bilibili"));
         await act(async () => {}); // → needs_encode
 
         await act(async () => { await result.current.startEncode(); });
@@ -399,7 +399,7 @@ describe("V15 – check not ready but active download/transcode workflow exists 
             });
         vi.stubGlobal("fetch", mockF);
 
-        const { result } = renderHook(() => useVideoPlayerState("mat-v15", "bilibili"));
+        const { result } = renderHook(() => useVideoPlayerState("mat-v15", "video", "bilibili"));
         await act(async () => {});
 
         // Should restore encoding state, not needs_encode

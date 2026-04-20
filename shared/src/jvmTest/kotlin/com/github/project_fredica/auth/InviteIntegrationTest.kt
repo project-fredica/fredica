@@ -10,8 +10,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.ktorm.database.Database
 import java.io.File
 import java.time.Instant
@@ -128,17 +132,22 @@ class InviteIntegrationTest {
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private fun guestQueryParam(pathId: String): String =
-        """{"path_id":["$pathId"]}"""
+        buildJsonObject {
+            put("path_id", buildJsonArray { add(JsonPrimitive(pathId)) })
+        }.toString()
 
     private fun tenantQueryParam(pathId: String): String =
-        """{"path_id":["$pathId"]}"""
+        buildJsonObject {
+            put("path_id", buildJsonArray { add(JsonPrimitive(pathId)) })
+        }.toString()
 
     private fun registerParam(pathId: String, username: String, password: String, displayName: String = ""): String =
-        buildString {
-            append("""{"path_id":"$pathId","username":"$username","password":"$password"""")
-            if (displayName.isNotEmpty()) append(""","display_name":"$displayName"""")
-            append("}")
-        }
+        buildJsonObject {
+            put("path_id", pathId)
+            put("username", username)
+            put("password", password)
+            if (displayName.isNotEmpty()) put("display_name", displayName)
+        }.toString()
 
     private suspend fun callGuestLanding(pathId: String, ip: String = "1.1.1.1", ua: String = "TestAgent"): JsonObject {
         val ctx = RouteContext(identity = null, clientIp = ip, userAgent = ua)
@@ -434,7 +443,12 @@ class InviteIntegrationTest {
         val longName = "A".repeat(10_000)
         val ctx = RouteContext(identity = null, clientIp = "1.1.1.1", userAgent = "TestAgent")
         val result = TenantInviteRegisterRoute.handler(
-            """{"path_id":"large-json","username":"largeuser","password":"pass123","display_name":"$longName"}""",
+            buildJsonObject {
+                put("path_id", "large-json")
+                put("username", "largeuser")
+                put("password", "pass123")
+                put("display_name", longName)
+            }.toString(),
             ctx,
         )
         val resp = result.str.loadJson().getOrThrow() as JsonObject
